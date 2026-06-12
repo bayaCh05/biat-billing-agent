@@ -45,7 +45,7 @@ class MonthlyInvoiceBuilder:
     ) -> ClientInvoice:
         """Build the monthly invoice from a submitted or draft FicheMensuelle."""
         invoice_date = date.today()
-        due_date = invoice_date + timedelta(days=self._PAYMENT_TERMS)
+        due_date = invoice_date + timedelta(days=self._payment_terms)
         lines: list[ClientLineItem] = []
 
         # ── Type A: phases clôturées ──────────────────────────────────────────

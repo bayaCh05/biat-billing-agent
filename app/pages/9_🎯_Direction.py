@@ -503,8 +503,23 @@ else:
 # ── Footer ────────────────────────────────────────────────────────────────────
 
 st.divider()
-st.caption(
+
+footer_col, dl_col = st.columns([6, 1])
+footer_col.caption(
     f"Dernière mise à jour : **{today.strftime('%d/%m/%Y')}** · "
     f"Exercice **{current_year}** · {through_month} mois analysés · "
     "BIAT IT — Système de gestion de la facturation v3"
 )
+try:
+    import pathlib
+    arch_path = pathlib.Path("ARCHITECTURE.md")
+    if arch_path.exists():
+        dl_col.download_button(
+            "📄 Architecture",
+            data=arch_path.read_text(encoding="utf-8"),
+            file_name="ARCHITECTURE.md",
+            mime="text/markdown",
+            help="Télécharger la documentation technique",
+        )
+except Exception:
+    pass
