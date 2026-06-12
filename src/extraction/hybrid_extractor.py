@@ -4,17 +4,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.extraction.base import ExtractorBase
+from src.extraction.header_extractor import HeaderExtractor
 from src.extraction.llm_extractor import LLMExtractor
 from src.extraction.ocr_engine import OCREngineBase
 from src.extraction.ocr_preprocessor import OCRPreprocessor
 from src.extraction.pdf_reader import PDFReader
 from src.models.enums import ExtractionMethod
-from src.models.invoice import InvoiceRecord
+from src.models.invoice import ConfidenceField, InvoiceRecord
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
+_header_extractor = HeaderExtractor()
 
 
 class HybridExtractor(ExtractorBase):
@@ -61,6 +63,31 @@ class HybridExtractor(ExtractorBase):
 
         invoice.extraction_method = method
         invoice.raw_extracted_text = text
+
+        # ── Rules-based header extraction (runs before LLM) ───────────────────
+        # Fills issuer_name, invoice_number, invoice_date from text patterns.
+        # The LLM only overwrites these if it returns a higher-confidence value.
+        header = _header_extractor.extract(text)
+        if header['issuer_name']:
+            invoice.issuer_name = ConfidenceField(
+                value=header['issuer_name'], confidence=0.70, source='header_rules'
+            )
+            logger.debug("header_extracted_issuer", value=header['issuer_name'],
+                         invoice_id=str(invoice.id))
+        if header['invoice_number']:
+            invoice.invoice_number = ConfidenceField(
+                value=header['invoice_number'], confidence=0.85, source='header_rules'
+            )
+            logger.debug("header_extracted_number", value=header['invoice_number'],
+                         invoice_id=str(invoice.id))
+        if header['invoice_date']:
+            invoice.invoice_date = ConfidenceField(
+                value=header['invoice_date'], confidence=0.90, source='header_rules'
+            )
+            logger.debug("header_extracted_date", value=str(header['invoice_date']),
+                         invoice_id=str(invoice.id))
+
+        # ── LLM extraction (amounts + any remaining fields) ───────────────────
         invoice = self.llm_extractor.extract(text, invoice)
         invoice.extracted_at = datetime.now(tz=timezone.utc)
         return invoice

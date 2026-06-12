@@ -259,6 +259,20 @@ class LLMExtractor:
                 if field_name == "tva_rate" and value is not None and 0 < value < 1:
                     value = round(value * 100, 4)  # 0.19 → 19.0
 
+            # Confidence merge: only overwrite a rules-based value if the LLM
+            # is more confident AND actually extracted something.
+            existing: ConfidenceField | None = getattr(invoice, field_name, None)
+            if (
+                value is None
+                or (
+                    existing is not None
+                    and isinstance(existing, ConfidenceField)
+                    and existing.value is not None
+                    and confidence <= existing.confidence
+                )
+            ):
+                continue  # keep the higher-confidence (rules) value
+
             setattr(invoice, field_name, ConfidenceField(
                 value=value, confidence=confidence, source=source,
             ))
