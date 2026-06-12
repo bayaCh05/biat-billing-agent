@@ -1,0 +1,110 @@
+# Facturation client BIAT IT — configuration des modèles de services et registre clients.
+#
+# Toutes les données ci-dessous sont fictives / anonymisées.
+# MF, RIB et montants sont des exemples — à remplacer par les données réelles.
+
+issuer:
+  name:                 "BIAT IT"
+  tax_id:               "0000999B/A/M/000"   # MF fictif — remplacer par MF réel
+  address:              "Zone Urbaine Nord, Les Berges du Lac I, 1053 Tunis, Tunisie"
+  phone:                "+216 71 000 000"
+  email:                "facturation@biat-it.com.tn"
+  rib:                  "08 001 0000000000000 00"   # RIB fictif
+
+clients:
+  - id:                  biat_bank
+    name:                "BIAT - Banque Internationale Arabe de Tunisie"
+    tax_id:              "0000217V/A/M/000"
+    address:             "70-72 Avenue Habib Bourguiba, 1080 Tunis, Tunisie"
+    payment_terms_days:  30
+
+  - id:                  biat_assurances
+    name:                "BIAT Assurances"
+    tax_id:              "0000500B/A/M/000"   # fictif
+    address:             "Les Berges du Lac II, 1053 Tunis, Tunisie"
+    payment_terms_days:  30
+
+  - id:                  biat_leasing
+    name:                "BIAT Leasing"
+    tax_id:              "0000501B/A/M/000"   # fictif
+    address:             "Les Berges du Lac I, 1053 Tunis, Tunisie"
+    payment_terms_days:  45
+
+service_templates:
+  # ── Prestations SI mensuelles ──────────────────────────────────────────────
+
+  - id:                  maintenance_si_mensuel
+    label:               "Maintenance et support des systèmes d'information"
+    description: >
+      Maintenance corrective et évolutive des systèmes d'information, support
+      utilisateurs N2/N3, administration des bases de données et des middlewares.
+    compte_produit:      "7061"
+    tva_rate:            19.0
+    recurrence:          mensuelle
+    default_unit_price:  45000.0
+    default_quantity:    1.0
+    default_client_id:   biat_bank
+
+  - id:                  infogérance_infrastructure
+    label:               "Infogérance infrastructure et hébergement"
+    description: >
+      Gestion opérationnelle des serveurs physiques et virtuels, supervision
+      24/7, sauvegardes automatisées, gestion des capacités et de la disponibilité.
+    compte_produit:      "7063"
+    tva_rate:            19.0
+    recurrence:          mensuelle
+    default_unit_price:  28000.0
+    default_quantity:    1.0
+    default_client_id:   biat_bank
+
+  - id:                  support_helpdesk_mensuel
+    label:               "Support helpdesk et assistance utilisateurs"
+    description: >
+      Centre de services (ITSM), gestion des incidents et des demandes,
+      support N1 aux utilisateurs BIAT, reporting mensuel SLA.
+    compte_produit:      "7061"
+    tva_rate:            19.0
+    recurrence:          mensuelle
+    default_unit_price:  18000.0
+    default_quantity:    1.0
+    default_client_id:   biat_bank
+
+  # ── Développement et projets ───────────────────────────────────────────────
+
+  - id:                  developpement_applicatif
+    label:               "Développement applicatif sur mesure"
+    description: >
+      Conception, développement, tests et recette d'applications métier
+      selon cahier des charges validé. Facturation au forfait ou en régie.
+    compte_produit:      "7062"
+    tva_rate:            19.0
+    recurrence:          ponctuelle
+    default_unit_price:  0.0   # prix défini au devis
+    default_quantity:    1.0
+    default_client_id:   biat_bank
+
+  - id:                  consulting_transformation_digitale
+    label:               "Consulting en transformation digitale"
+    description: >
+      Accompagnement stratégique en transformation numérique, urbanisme SI,
+      audit de sécurité, conseil en architecture et gouvernance IT.
+    compte_produit:      "7064"
+    tva_rate:            19.0
+    recurrence:          ponctuelle
+    default_unit_price:  0.0
+    default_quantity:    1.0
+    default_client_id:   biat_bank
+
+  # ── Formation ─────────────────────────────────────────────────────────────
+
+  - id:                  formation_informatique
+    label:               "Formation informatique et systèmes"
+    description: >
+      Formations techniques intra-groupe : administration systèmes, cybersécurité,
+      développement, outils bureautiques. Facturation à la journée.
+    compte_produit:      "7065"
+    tva_rate:            19.0
+    recurrence:          ponctuelle
+    default_unit_price:  2500.0   # prix par jour de formation
+    default_quantity:    1.0
+    default_client_id:   biat_bank

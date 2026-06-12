@@ -1,0 +1,36 @@
+# Rules to determine invoice direction (CLIENT or SUPPLIER).
+# Rules are evaluated top-to-bottom; first match wins.
+# ASSUMPTION: BIAT IT's own matricule fiscal must be confirmed and filled in below.
+
+direction_rules:
+  - name: biat_it_as_recipient
+    description: Invoice addressed TO BIAT IT → we are the buyer → SUPPLIER invoice
+    condition:
+      field: recipient_tax_id
+      matches: "^0000217"
+    result: SUPPLIER
+
+  - name: biat_it_as_issuer
+    description: Invoice issued BY BIAT IT → we are the seller → CLIENT invoice
+    condition:
+      field: issuer_tax_id
+      matches: "^0000217"
+    result: CLIENT
+
+  - name: biat_it_name_recipient
+    description: Fallback — match by company name in recipient field
+    condition:
+      field: recipient_name
+      contains_any: ["BIAT", "Banque Internationale Arabe", "BIAT IT", "BIAT INFORMATIQUE"]
+    result: SUPPLIER
+
+  - name: biat_it_name_issuer
+    description: Fallback — match by company name in issuer field
+    condition:
+      field: issuer_name
+      contains_any: ["BIAT", "Banque Internationale Arabe", "BIAT IT", "BIAT INFORMATIQUE"]
+    result: CLIENT
+
+  - name: default
+    description: Cannot determine direction → flag for human review
+    result: UNKNOWN

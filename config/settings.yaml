@@ -1,0 +1,80 @@
+ingestion:
+  source: folder                    # folder | imap | api
+  watch_path: ./inbox
+  processed_path: ./processed
+  supported_formats: [pdf, png, jpg, jpeg, tiff, tif]
+  poll_interval_seconds: 10
+
+extraction:
+  strategy: hybrid                  # hybrid | rules_only | llm_only
+  llm_backend: ollama               # ollama only — data residency policy (banking subsidiary)
+  llm_model: qwen2.5:3b             # model name for the chosen backend
+  llm_extraction_mode: amounts_only  # amounts_only (default) | full_schema
+  ocr_engine: tesseract             # easyocr | tesseract
+  languages: [fr, ar]              # OCR and LLM prompt languages
+  min_native_pdf_chars: 50         # fewer chars → treat as scanned
+  min_text_quality_ratio: 0.85     # ratio of printable chars in extracted text
+  render_dpi: 300                  # DPI for PDF→image rendering
+
+  confidence_thresholds:
+    # ERROR severity (blocks auto-approval) if below threshold
+    invoice_number:   0.85
+    amount_ttc:       0.90
+    issuer_tax_id:    0.85
+    invoice_date:     0.80
+    # WARNING severity (advisory) if below threshold
+    due_date:         0.65
+    recipient_tax_id: 0.70
+    amount_ht:        0.80
+    tva_amount:       0.80
+    line_items:       0.65
+
+classification:
+  rules_file: config/rules/classification_rules.yaml
+  cost_catalog_file: config/cost_catalog.yaml
+  catalog_min_score: 70   # score minimum (0-100) pour accepter une correspondance
+  ml_model_path: data/ml_model.joblib
+
+validation:
+  tva_rates_allowed: [0, 7, 13, 19]          # Tunisian TVA rates — confirm with accountant
+  math_tolerance_absolute: 0.02              # TND rounding tolerance
+  math_tolerance_relative: 0.001            # 0.1% of total
+  duplicate_window_days: 90
+  high_value_threshold: 50000               # TND — flag for human review above this
+  near_duplicate_tolerance_relative: 0.01  # 1% relative amount window for near-dupe detection
+  warning_escalation_threshold: 2          # escalate to ERROR when this many WARNINGs accumulate
+
+correction:
+  math_confidence_ratio_threshold: 0.75    # only auto-fix when weakest < 75% of second-weakest
+  math_corrected_confidence: 0.95          # confidence assigned to math-corrected fields
+  ai_corrected_confidence: 0.90            # confidence assigned to auto-corrected fields
+
+storage:
+  db_url: sqlite:///./data/invoices.db      # override with DATABASE_URL env var
+  export_format: json                       # json | csv
+  export_path: ./exports
+
+currency:
+  default: TND
+
+agent:
+  max_retry_attempts: 3
+  stuck_invoice_timeout_minutes: 30
+  log_level: INFO
+
+billing:
+  templates_file:    config/client_templates.yaml
+  pdf_output_dir:    exports/invoices
+  number_prefix:     FAC-IT
+  taux_jh:           800.0          # TND/jour — taux jour-homme unique toutes filières
+  payment_terms_days: 30            # délai de paiement BIAT IT → BIAT (jours)
+
+ml:
+  auto_retrain_on_approval: true    # retrain classifier after each human approval
+
+budget:
+  plan_file:         config/budget_plan.yaml
+  exercise:          2026
+  anomaly_warning_ratio:  1.5
+  anomaly_critical_ratio: 2.0
+  min_history_months:     3

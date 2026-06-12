@@ -1,0 +1,415 @@
+# Catalogue des coûts et produits — BIAT IT
+# ============================================================
+# Ce fichier est la source de vérité de la structure financière de BIAT IT.
+# Il est conçu pour être éditable par un non-développeur.
+#
+# Champs obligatoires par entrée :
+#   id          : identifiant unique snake_case
+#   label       : libellé comptable complet
+#   compte      : numéro de compte (Plan Comptable des Entreprises tunisien)
+#   nature      : fixe | variable | semi_variable
+#   type_charge : OPEX (consommé) | CAPEX (immobilisé, amorti)
+#   tva_rate    : taux TVA en % — indicatif, à confirmer avec le comptable
+#   recurrence  : mensuelle | annuelle | ponctuelle | irreguliere
+#   flux        : fournisseur (sortie argent) | client (entrée argent) | interne
+#   keywords    : mots-clés pour la classification automatique (insensible à la casse et aux accents)
+#
+# ATTENTION : les taux TVA et codes comptables sont indicatifs.
+# Ils doivent être validés avec l'équipe finance avant mise en production.
+# ============================================================
+
+entries:
+
+  # ──────────────────────────────────────────────────────────
+  # PERSONNEL (flux interne — non facturé, présent pour le budget)
+  # ──────────────────────────────────────────────────────────
+
+  - id: salaires
+    label: Salaires et traitements
+    compte: "6411"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 0
+    recurrence: mensuelle
+    flux: interne
+    keywords: [salaire, traitement, rémunération, appointements]
+    notes: "Plus grosse ligne de charge BIAT IT (60-80% des charges totales)"
+
+  - id: primes_indemnites
+    label: Primes et indemnités du personnel
+    compte: "6421"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 0
+    recurrence: ponctuelle
+    flux: interne
+    keywords: [prime, indemnité, bonus, gratification, treizième mois]
+
+  - id: charges_sociales
+    label: Charges sociales patronales (CNSS)
+    compte: "6451"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 0
+    recurrence: mensuelle
+    flux: interne
+    keywords: [CNSS, charges sociales, cotisation patronale, sécurité sociale]
+
+  - id: avantages_nature
+    label: Avantages en nature (véhicules, téléphones de fonction)
+    compte: "6461"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 0
+    recurrence: mensuelle
+    flux: interne
+    keywords: [avantage en nature, véhicule de fonction, téléphone de fonction, carte carburant]
+
+  # ──────────────────────────────────────────────────────────
+  # FORMATION
+  # ──────────────────────────────────────────────────────────
+
+  - id: formation_personnel
+    label: Formation du personnel
+    compte: "6311"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: ponctuelle
+    flux: fournisseur
+    keywords: [formation, training, certification, séminaire, atelier, e-learning, cursus, stage de formation]
+    notes: "TVA 19% si le prestataire est assujetti ; parfois exonéré — vérifier"
+
+  # ──────────────────────────────────────────────────────────
+  # INFRASTRUCTURE & HÉBERGEMENT
+  # ──────────────────────────────────────────────────────────
+
+  - id: loyers_immobiliers
+    label: Loyers immobiliers (bureaux, locaux)
+    compte: "6131"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 0
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [loyer, location bureau, location locaux, bail, loyer mensuel, loyer annuel]
+    notes: "Généralement exonéré de TVA si bailleur personne physique ; 19% si société"
+
+  - id: locations_mobilieres
+    label: Locations mobilières (véhicules de service, photocopieurs, équipements)
+    compte: "6141"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [location véhicule, leasing, photocopieur, location équipement, location matériel]
+
+  - id: gardiennage_securite
+    label: Gardiennage et sécurité
+    compte: "6281"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [gardiennage, sécurité, surveillance, agent de sécurité, vigile]
+
+  # ──────────────────────────────────────────────────────────
+  # TÉLÉCOMMUNICATIONS
+  # ──────────────────────────────────────────────────────────
+
+  - id: telecommunications
+    label: Frais de télécommunications (internet, téléphonie fixe/mobile)
+    compte: "6261"
+    nature: semi_variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [téléphone, internet, fibre optique, télécom, réseau, ADSL, 4G, 5G, bande passante, abonnement téléphonique, Tunisie Telecom, Ooredoo, Orange]
+
+  # ──────────────────────────────────────────────────────────
+  # ÉNERGIE & FLUIDES
+  # ──────────────────────────────────────────────────────────
+
+  - id: electricite_steg
+    label: Électricité (STEG)
+    compte: "6241"
+    nature: semi_variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [électricité, STEG, énergie électrique, consommation électrique, facture STEG]
+    max_plausible_amount: 20000    # ~20k TND/month max for an IT office
+
+  - id: eau_sonede
+    label: Eau (SONEDE)
+    compte: "6242"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [eau, SONEDE, consommation eau, facture eau, eau potable]
+    max_plausible_amount: 2000
+
+  # ──────────────────────────────────────────────────────────
+  # INFORMATIQUE — OPEX
+  # ──────────────────────────────────────────────────────────
+
+  - id: maintenance_informatique
+    label: Maintenance et support informatique
+    compte: "6112"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [maintenance informatique, support informatique, infogérance, TMA, tierce maintenance applicative, maintenance serveur, maintenance réseau, support technique, assistance technique, contrat de maintenance]
+
+  - id: licences_saas
+    label: Licences logiciels et abonnements SaaS
+    compte: "6133"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [logiciel, licence, license, SaaS, abonnement logiciel, Microsoft 365, Office 365, antivirus, suite bureautique, abonnement annuel logiciel, renouvellement licence]
+    notes: "Distinguer des logiciels CAPEX (2284) : SaaS/abonnement = OPEX, licence perpétuelle = CAPEX"
+
+  - id: consommables_informatiques
+    label: Consommables informatiques
+    compte: "6062"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: irreguliere
+    flux: fournisseur
+    keywords: [consommable informatique, cartouche, toner, câble USB, câble réseau, clé USB, disque dur externe, souris, clavier, accessoire informatique]
+
+  # ──────────────────────────────────────────────────────────
+  # INFORMATIQUE — CAPEX (immobilisations)
+  # ──────────────────────────────────────────────────────────
+
+  - id: materiel_informatique
+    label: Matériel informatique (serveurs, PC, écrans, équipements réseau)
+    compte: "2183"
+    nature: fixe
+    type_charge: CAPEX
+    tva_rate: 19
+    recurrence: ponctuelle
+    flux: fournisseur
+    keywords: [serveur, ordinateur, PC, laptop, écran, switch, routeur, firewall, baie serveur, UPS, onduleur, matériel réseau, infrastructure informatique, équipement informatique]
+    notes: "Durée d'amortissement standard : 3-5 ans"
+
+  - id: logiciels_acquis
+    label: Logiciels acquis (licences perpétuelles)
+    compte: "2284"
+    nature: fixe
+    type_charge: CAPEX
+    tva_rate: 19
+    recurrence: ponctuelle
+    flux: fournisseur
+    keywords: [logiciel perpétuel, licence perpétuelle, acquisition logiciel, ERP, progiciel, licence définitive]
+    notes: "Durée d'amortissement standard : 3 ans"
+
+  - id: materiel_bureau_capex
+    label: Matériel de bureau et mobilier (immobilisation)
+    compte: "2184"
+    nature: fixe
+    type_charge: CAPEX
+    tva_rate: 19
+    recurrence: ponctuelle
+    flux: fournisseur
+    keywords: [mobilier bureau, bureau, chaise, armoire, rayonnage, climatiseur, imprimante, photocopieur acquis, acquisition mobilier]
+    notes: "Durée d'amortissement standard : 5-10 ans"
+
+  # ──────────────────────────────────────────────────────────
+  # FOURNITURES & CONSOMMABLES COURANTS
+  # ──────────────────────────────────────────────────────────
+
+  - id: fournitures_bureau
+    label: Fournitures de bureau
+    compte: "6061"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [fournitures bureau, papier, ramette, stylo, classeur, chemise, enveloppe, fournitures scolaires, matériel bureau]
+    max_plausible_amount: 5000    # office supplies cannot cost >5k TND per order
+
+  - id: nettoyage_entretien
+    label: Produits de nettoyage et entretien des locaux
+    compte: "6063"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [nettoyage, entretien locaux, produit nettoyage, ménage, femme de ménage, société nettoyage, propreté, désinfectant]
+    max_plausible_amount: 5000
+
+  - id: hygiene_cuisine
+    label: Produits d'hygiène et fournitures de cuisine (café, eau, etc.)
+    compte: "6064"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [café, eau minérale, sucre, essuie-tout, savon, gel désinfectant, fournitures cuisine, gobelets, capsule café, machine à café, boissons]
+    max_plausible_amount: 2000
+
+  # ──────────────────────────────────────────────────────────
+  # PRESTATIONS EXTERNES
+  # ──────────────────────────────────────────────────────────
+
+  - id: honoraires_conseil
+    label: Honoraires de conseil, audit et expertise
+    compte: "6222"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: ponctuelle
+    flux: fournisseur
+    keywords: [honoraires, conseil, consulting, audit, expertise, commissaire aux comptes, avocat, notaire, prestation intellectuelle, étude, diagnostic]
+
+  - id: personnel_externe
+    label: Personnel extérieur / intérim / sous-traitance RH
+    compte: "6211"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: fournisseur
+    keywords: [intérim, personnel extérieur, mise à disposition, sous-traitance RH, prestataire externe, consultant mis à disposition]
+
+  - id: publicite_communication
+    label: Publicité et communication
+    compte: "6271"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: ponctuelle
+    flux: fournisseur
+    keywords: [publicité, communication, impression, brochure, roll-up, goodies, événementiel, conception graphique, site web, réseaux sociaux]
+
+  - id: cotisations
+    label: Cotisations et affiliations professionnelles
+    compte: "6321"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 0
+    recurrence: annuelle
+    flux: fournisseur
+    keywords: [cotisation, affiliation, adhésion, contribution association, syndicat professionnel]
+
+  # ──────────────────────────────────────────────────────────
+  # DÉPLACEMENTS & TRANSPORT
+  # ──────────────────────────────────────────────────────────
+
+  - id: frais_deplacement
+    label: Frais de déplacement (carburant, parking, taxi)
+    max_plausible_amount: 5000
+    compte: "6225"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: irreguliere
+    flux: fournisseur
+    keywords: [carburant, essence, gasoil, parking, taxi, Uber, péage, frais kilométriques, note de frais déplacement]
+
+  - id: voyages_sejours
+    label: Voyages et séjours professionnels (missions)
+    compte: "6251"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: irreguliere
+    flux: fournisseur
+    keywords: [voyage, billet avion, hôtel, hébergement, mission, per diem, note de frais mission, déplacement professionnel]
+
+  # ──────────────────────────────────────────────────────────
+  # ASSURANCES
+  # ──────────────────────────────────────────────────────────
+
+  - id: assurance_multirisques
+    label: Assurance multirisques bureaux et matériels
+    compte: "6161"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 0
+    recurrence: annuelle
+    flux: fournisseur
+    keywords: [assurance multirisques, assurance bureaux, assurance matériels, assurance incendie, assurance vol]
+    notes: "Les primes d'assurance sont exonérées de TVA en Tunisie"
+
+  - id: assurance_rc_pro
+    label: Assurance responsabilité civile professionnelle
+    compte: "6162"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 0
+    recurrence: annuelle
+    flux: fournisseur
+    keywords: [responsabilité civile, RC pro, assurance professionnelle, assurance RC]
+    notes: "Les primes d'assurance sont exonérées de TVA en Tunisie"
+
+  - id: assurance_flotte
+    label: Assurance flotte véhicules
+    compte: "6163"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 0
+    recurrence: annuelle
+    flux: fournisseur
+    keywords: [assurance véhicule, assurance flotte, assurance auto, vignette, visite technique]
+    notes: "Les primes d'assurance sont exonérées de TVA en Tunisie"
+
+  # ──────────────────────────────────────────────────────────
+  # PRODUITS / RECETTES (flux client — intra-groupe BIAT IT → groupe BIAT)
+  # ──────────────────────────────────────────────────────────
+
+  - id: prestations_si
+    label: Prestations de services informatiques (intra-groupe)
+    compte: "7061"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: client
+    keywords: [prestation informatique, service informatique, prestations SI, forfait mensuel, contrat de service]
+
+  - id: developpement_integration
+    label: Développement et intégration de systèmes
+    compte: "7062"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: ponctuelle
+    flux: client
+    keywords: [développement logiciel, développement application, intégration système, projet informatique, MOE, maîtrise d'œuvre, projet de développement]
+
+  - id: infogerance_sla
+    label: Infogérance et support (SLA intra-groupe)
+    compte: "7063"
+    nature: fixe
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: client
+    keywords: [infogérance, SLA, service level agreement, support applicatif, exploitation informatique, MCO, maintien en condition opérationnelle]
+
+  - id: refacturation_charges
+    label: Refacturation de charges (énergie, loyers partagés, frais communs)
+    compte: "7081"
+    nature: variable
+    type_charge: OPEX
+    tva_rate: 19
+    recurrence: mensuelle
+    flux: client
+    keywords: [refacturation, quote-part, charges partagées, frais communs refacturés, repartition charges]

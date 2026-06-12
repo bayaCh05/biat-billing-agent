@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "invoice-agent"
+version = "0.1.0"
+description = "Intelligent invoice processing and accounting follow-up agent for BIAT IT"
+requires-python = ">=3.11"
+dependencies = [
+    # Data models & validation
+    "pydantic>=2.7",
+
+    # Database & ORM
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+
+    # PDF processing (native)
+    "pdfplumber>=0.11",
+    "pymupdf>=1.24",          # fitz — PDF to image, fast text extraction
+
+    # OCR
+    "pytesseract>=0.3",       # OCR engine
+
+    # Image preprocessing
+    "opencv-python-headless>=4.9",
+    "Pillow>=10.3",
+
+    # Arabic/bidi text handling
+    "python-bidi>=0.6",
+    "arabic-reshaper>=3.0",
+
+    # File watching (ingestion)
+    "watchdog>=4.0",
+
+    # LLM backend — Ollama only (data residency: local inference)
+    "ollama>=0.2",
+
+    # Fuzzy matching (duplicate detection + catalog matching)
+    "rapidfuzz>=3.9",
+
+    # ML fallback classifier
+    "scikit-learn>=1.5",
+    "joblib>=1.4",
+
+    # PDF generation (client invoices)
+    "fpdf2>=2.8",
+
+    # Web interface
+    "streamlit>=1.35",
+    "plotly>=5.0",
+
+    # Configuration & environment
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+
+    # Structured logging
+    "structlog>=24.2",
+
+    # MIME type detection
+    "python-magic>=0.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "pytest-mock>=3.14",
+    "pytest-cov>=5.0",
+    "pytest-anyio>=0.0.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+run-agent = "scripts.run_agent:main"
+review-queue = "scripts.review_queue:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
