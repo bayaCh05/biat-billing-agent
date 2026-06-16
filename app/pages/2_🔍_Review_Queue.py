@@ -10,7 +10,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app._backend import get_config, get_ml_classifier, get_repo, get_tracker, render_flags, render_invoice_fields, require_auth
-from src.models.enums import FlagSeverity, InvoiceStatus
+from src.models.enums import FlagSeverity, FlagType, InvoiceStatus
 from src.models.invoice import InvoiceRecord
 
 st.set_page_config(page_title="Review Queue — Invoice Agent", page_icon="🔍", layout="wide")
@@ -30,9 +30,30 @@ try:
     tracker   = get_tracker()
     flagged   = repo.get_flagged()
     escalated = repo.get_by_status(InvoiceStatus.ESCALATED)
+    error_invoices = repo.get_by_status(InvoiceStatus.ERROR)
 except Exception as exc:
     st.error(f"Cannot connect to database: {exc}")
     st.stop()
+
+# ── Rejected non-invoice files ────────────────────────────────────────────────
+
+rejected = [
+    inv for inv in error_invoices
+    if any(f.flag_type == FlagType.NOT_AN_INVOICE for f in inv.flags)
+]
+
+if rejected:
+    st.error(
+        f"🚫 **{len(rejected)} fichier(s) rejeté(s)** — "
+        "non reconnu(s) comme facture"
+    )
+    for inv in rejected:
+        flag = next(
+            f for f in inv.flags if f.flag_type == FlagType.NOT_AN_INVOICE
+        )
+        file_label = Path(inv.raw_file_path).name if inv.raw_file_path else str(inv.id)[:8]
+        st.markdown(f"- `{file_label}` — {flag.message}")
+    st.divider()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 

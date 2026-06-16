@@ -18,7 +18,7 @@ from app._backend import (
     status_badge,
 )
 from src.agent.pipeline import extract, classify, validate, export_file, post_journal
-from src.models.enums import InvoiceStatus
+from src.models.enums import FlagType, InvoiceStatus
 from src.models.invoice import InvoiceRecord
 from src.utils.file_utils import sha256
 
@@ -50,6 +50,11 @@ col_upload, col_result = st.columns([1, 1], gap="large")
 
 with col_upload:
     st.subheader("📤 Upload Invoice")
+    st.info(
+        "📎 Importez uniquement des factures fournisseurs (PDF). "
+        "Les relevés bancaires, contrats, et autres documents "
+        "seront automatiquement rejetés."
+    )
     uploaded = st.file_uploader(
         "Drop a PDF or image invoice here",
         type=["pdf", "png", "jpg", "jpeg", "tiff"],
@@ -100,17 +105,35 @@ if uploaded and process_btn:
             with st.status("Running pipeline…", expanded=True) as pipeline_status:
                 st.write("🔍 Extracting fields…")
                 invoice = extract(invoice, components)
-                if invoice.last_error or invoice.status == InvoiceStatus.EXTRACTION_FAILED:
-                    pipeline_status.update(label="Extraction failed", state="error")
-                    err = invoice.last_error or ""
-                    if "tesseract" in err.lower():
-                        st.error("**Tesseract OCR not installed.** "
-                                 "Install it with `brew install tesseract` or upload a native PDF instead.")
-                    elif "connection refused" in err.lower() or "ollama" in err.lower():
-                        st.error("**Ollama is not running.** Toggle off 'Use live Ollama LLM' in the "
-                                 "sidebar to use mock extraction, or start Ollama with `ollama serve`.")
+                _is_extraction_error = (
+                    invoice.last_error
+                    or invoice.status in {InvoiceStatus.EXTRACTION_FAILED,
+                                          InvoiceStatus.ERROR}
+                )
+                if _is_extraction_error:
+                    # Check for categorical rejection first
+                    _not_invoice_flag = next(
+                        (f for f in invoice.flags
+                         if f.flag_type == FlagType.NOT_AN_INVOICE),
+                        None,
+                    )
+                    if _not_invoice_flag:
+                        pipeline_status.update(label="Fichier rejeté", state="error")
+                        st.error(
+                            "🚫 **Ce fichier n'est pas une facture.**\n\n"
+                            f"{_not_invoice_flag.message}"
+                        )
                     else:
-                        st.error(err or "Extraction failed — check the terminal for details.")
+                        pipeline_status.update(label="Extraction failed", state="error")
+                        err = invoice.last_error or ""
+                        if "tesseract" in err.lower():
+                            st.error("**Tesseract OCR not installed.** "
+                                     "Install it with `brew install tesseract` or upload a native PDF instead.")
+                        elif "connection refused" in err.lower() or "ollama" in err.lower():
+                            st.error("**Ollama is not running.** Toggle off 'Use live Ollama LLM' in the "
+                                     "sidebar to use mock extraction, or start Ollama with `ollama serve`.")
+                        else:
+                            st.error(err or "Extraction failed — check the terminal for details.")
                     st.stop()
 
                 st.write("🏷️ Classifying & coding…")

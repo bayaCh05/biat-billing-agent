@@ -57,6 +57,9 @@ class FlagType(str, Enum):
     JOURNAL_FAILED = "JOURNAL_FAILED"
     AMOUNT_IMPLAUSIBLE = "AMOUNT_IMPLAUSIBLE"
 
+    # Document rejection
+    NOT_AN_INVOICE = "NOT_AN_INVOICE"
+
     # Review workflow
     ESCALATED = "ESCALATED"
 

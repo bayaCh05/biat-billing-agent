@@ -21,22 +21,22 @@ class TestInvoiceNumber:
         assert hx.extract(text)['invoice_number'] == "FAC-2026-0089"
 
     def test_n_degree_label(self, hx):
-        text = "Facture N° 2026-042\nDate: 01/06/2026\n"
+        text = "FOURNISSEUR TEST SA\nFACTURE\nFacture N° 2026-042\nDate: 01/06/2026\n"
         result = hx.extract(text)['invoice_number']
         assert result is not None
         assert "2026" in result
 
     def test_steg_format(self, hx):
-        text = "STEG\nFACTURE\nN° STEG-2026-05-00847\nFOURNISSEUR\n"
+        text = "STEG\nFACTURE\nN° STEG-2026-05-00847\nFOURNISSEUR CLIENT\nDate: 01/06/2026\n"
         assert hx.extract(text)['invoice_number'] == "STEG-2026-05-00847"
 
     def test_alphanumeric_with_prefix(self, hx):
-        text = "KPMG TUNISIE\nFACTURE\nN° KPMG-2026-IT-0047\n"
+        text = "KPMG TUNISIE\nFACTURE\nN° KPMG-2026-IT-0047\nDate: 01/06/2026\n"
         result = hx.extract(text)['invoice_number']
         assert result == "KPMG-2026-IT-0047"
 
     def test_numéro_de_facture_label(self, hx):
-        text = "OOREDOO\nNuméro de facture: OOR-B2B-2026-05-10293\n"
+        text = "OOREDOO TUNISIE\nNuméro de facture: OOR-B2B-2026-05-10293\nDate: 01/06/2026\n"
         result = hx.extract(text)['invoice_number']
         assert result is not None
         assert "2026" in result
@@ -57,27 +57,27 @@ class TestInvoiceNumber:
 
 class TestDate:
     def test_slash_format(self, hx):
-        text = "Date de facture: 15/06/2026\n"
+        text = "FOURNISSEUR SA\nFACTURE N° 2026-001\nDate de facture: 15/06/2026\n"
         assert hx.extract(text)['invoice_date'] == date(2026, 6, 15)
 
     def test_dash_format(self, hx):
-        text = "Date de facture: 31-05-2026\n"
+        text = "FOURNISSEUR SA\nFACTURE N° 2026-001\nDate de facture: 31-05-2026\n"
         assert hx.extract(text)['invoice_date'] == date(2026, 5, 31)
 
     def test_dot_format(self, hx):
-        text = "Date: 20.04.2026\n"
+        text = "FOURNISSEUR SA\nFACTURE N° 2026-001\nDate: 20.04.2026\nMontant: 100 TND\n"
         assert hx.extract(text)['invoice_date'] == date(2026, 4, 20)
 
     def test_iso_format(self, hx):
-        text = "Issued: 2026-06-01\n"
+        text = "FOURNISSEUR SA\nFACTURE N° 2026-001\nIssued: 2026-06-01\nMontant: 100 TND\n"
         assert hx.extract(text)['invoice_date'] == date(2026, 6, 1)
 
     def test_french_text_date(self, hx):
-        text = "Tunis, le 15 juin 2026\n"
+        text = "FOURNISSEUR SA\nFACTURE N° 2026-001\nTunis, le 15 juin 2026\nMontant: 100 TND\n"
         assert hx.extract(text)['invoice_date'] == date(2026, 6, 15)
 
     def test_french_text_date_janvier(self, hx):
-        text = "Émise le 1 janvier 2026\n"
+        text = "FOURNISSEUR SA\nFACTURE N° 2026-001\nÉmise le 1 janvier 2026\nMontant: 100 TND\n"
         assert hx.extract(text)['invoice_date'] == date(2026, 1, 1)
 
     def test_bad_year_ignored(self, hx):
@@ -106,19 +106,19 @@ class TestDate:
 
 class TestIssuerName:
     def test_first_line_company(self, hx):
-        text = "OOREDOO TUNISIE SA\nMF: 0038472K\nTél: 71 000 000\n"
+        text = "OOREDOO TUNISIE SA\nMF: 0038472K\nTél: 71 000 000\nDate: 01/06/2026\n"
         assert hx.extract(text)['issuer_name'] == "OOREDOO TUNISIE SA"
 
     def test_skips_mf_prefix_line(self, hx):
-        text = "MF: 0038472K\nOOREDOO TUNISIE SA\n"
+        text = "MF: 0038472K\nOOREDOO TUNISIE SA\nTél: 71 000 000\nDate: 01/06/2026\n"
         assert hx.extract(text)['issuer_name'] == "OOREDOO TUNISIE SA"
 
     def test_skips_tel_prefix_line(self, hx):
-        text = "Tél: +216 71 000 000\nSTEG - Société Tunisienne\n"
+        text = "Tél: +216 71 000 000\nSTEG - Société Tunisienne\nDate de facture: 01/06/2026\n"
         assert hx.extract(text)['issuer_name'] == "STEG - Société Tunisienne"
 
     def test_skips_facture_keyword(self, hx):
-        text = "FACTURE\nKPMG TUNISIE\nMF: 888\n"
+        text = "FACTURE\nKPMG TUNISIE\nMF: 888\nDate: 01/06/2026\nMontant: 100 TND\n"
         assert hx.extract(text)['issuer_name'] == "KPMG TUNISIE"
 
     def test_skips_address_line(self, hx):
@@ -140,16 +140,16 @@ class TestIssuerName:
         assert hx.extract(text)['issuer_name'] is None or isinstance(hx.extract(text)['issuer_name'], str)
 
     def test_short_lines_skipped(self, hx):
-        text = "AB\nCD\nNEXIA INFORMATIQUE SARL\n"
+        text = "AB\nCD\nNEXIA INFORMATIQUE SARL\nDate de facture: 01/06/2026\n"
         assert hx.extract(text)['issuer_name'] == "NEXIA INFORMATIQUE SARL"
 
 
 # ── Full extract() integration ────────────────────────────────────────────────
 
 class TestFullExtract:
-    def test_returns_dict_with_three_keys(self, hx):
+    def test_returns_dict_with_expected_keys(self, hx):
         result = hx.extract("some text")
-        assert set(result.keys()) == {'issuer_name', 'invoice_number', 'invoice_date'}
+        assert {'issuer_name', 'issuer_confidence', 'invoice_number', 'invoice_date'}.issubset(result.keys())
 
     def test_no_crash_on_empty_string(self, hx):
         result = hx.extract("")

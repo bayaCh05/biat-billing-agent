@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.extraction.base import ExtractorBase
 from src.extraction.header_extractor import HeaderExtractor
+from src.extraction.invoice_validator import InvoiceValidator, NotAnInvoiceError
 from src.extraction.llm_extractor import LLMExtractor
 from src.extraction.ocr_engine import OCREngineBase
 from src.extraction.ocr_preprocessor import OCRPreprocessor
@@ -17,6 +18,7 @@ logger = get_logger(__name__)
 
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
 _header_extractor = HeaderExtractor()
+_validator = InvoiceValidator()
 
 
 class HybridExtractor(ExtractorBase):
@@ -64,13 +66,29 @@ class HybridExtractor(ExtractorBase):
         invoice.extraction_method = method
         invoice.raw_extracted_text = text
 
+        # ── Pre-extraction invoice validation ─────────────────────────────────
+        # Rejects non-invoice documents (screenshots, presentations, etc.)
+        # before spending time on LLM calls.
+        try:
+            _validator.validate(text, filename=Path(file_path).name)
+        except NotAnInvoiceError as e:
+            logger.warning(
+                "invoice_validation_failed",
+                invoice_id=str(invoice.id),
+                reason=e.reason,
+                text_sample=e.text_sample[:100],
+            )
+            raise
+
         # ── Rules-based header extraction (runs before LLM) ───────────────────
         # Fills issuer_name, invoice_number, invoice_date from text patterns.
         # The LLM only overwrites these if it returns a higher-confidence value.
         header = _header_extractor.extract(text)
         if header['issuer_name']:
             invoice.issuer_name = ConfidenceField(
-                value=header['issuer_name'], confidence=0.70, source='header_rules'
+                value=header['issuer_name'],
+                confidence=header.get('issuer_confidence', 0.65),
+                source='header_rules',
             )
             logger.debug("header_extracted_issuer", value=header['issuer_name'],
                          invoice_id=str(invoice.id))

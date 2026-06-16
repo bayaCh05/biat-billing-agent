@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from src.extraction.invoice_validator import NotAnInvoiceError
 from src.models.enums import FlagSeverity, FlagType, InvoiceStatus
 from src.models.invoice import InvoiceRecord, ValidationFlag
 from src.utils.logging import get_logger
@@ -121,6 +122,12 @@ def process_invoice(invoice: InvoiceRecord, c: PipelineComponents) -> InvoiceRec
     for stage_fn in (extract, classify, validate, export_file, post_journal):
         invoice = stage_fn(invoice, c)
         if invoice.status in _TERMINAL_STATUSES or invoice.last_error:
+            logger.info(
+                "pipeline_halted_early",
+                invoice_id=str(invoice.id),
+                status=invoice.status.value,
+                reason="terminal_status_reached",
+            )
             break
     return invoice
 
@@ -128,14 +135,61 @@ def process_invoice(invoice: InvoiceRecord, c: PipelineComponents) -> InvoiceRec
 # ── Stage functions ───────────────────────────────────────────────────────────
 
 def extract(invoice: InvoiceRecord, c: PipelineComponents) -> InvoiceRecord:
-    """Stage 1 — PDF/OCR/LLM field extraction."""
-    return _run_stage(
-        invoice, c,
-        entering=InvoiceStatus.EXTRACTING,
-        success=InvoiceStatus.EXTRACTED,
-        failure=InvoiceStatus.EXTRACTION_FAILED,
-        fn=lambda inv: c.extractor.extract(inv),
-    )
+    """Stage 1 — PDF/OCR/LLM field extraction.
+
+    NotAnInvoiceError is handled here directly (not via _run_stage) so that:
+      - invoice.last_error is always set, letting the Streamlit app stop early
+      - No retry loop is entered for a categorical rejection
+    """
+    invoice.status = InvoiceStatus.EXTRACTING
+    c.repository.save(invoice)
+    logger.info("stage_started", invoice_id=str(invoice.id), status=InvoiceStatus.EXTRACTING)
+
+    try:
+        invoice = c.extractor.extract(invoice)
+
+    except NotAnInvoiceError as e:
+        logger.error("not_an_invoice_rejected",
+                     invoice_id=str(invoice.id),
+                     reason=e.reason)
+        invoice.add_flag(ValidationFlag(
+            flag_type=FlagType.NOT_AN_INVOICE,
+            severity=FlagSeverity.ERROR,
+            message=(
+                f"Document rejeté: {e.reason}. "
+                "Ce fichier n'est pas une facture."
+            ),
+        ))
+        invoice.status    = InvoiceStatus.ERROR
+        invoice.last_error = f"Not an invoice: {e.reason}"
+        c.repository.save(invoice)
+        return invoice
+
+    except Exception as exc:
+        invoice.retry_count += 1
+        invoice.last_error = str(exc)
+        if invoice.retry_count < c.max_retries:
+            invoice.status = _RECOVERY_MAP.get(
+                InvoiceStatus.EXTRACTING, InvoiceStatus.EXTRACTION_FAILED
+            )
+            logger.warning("stage_failed_retrying",
+                           invoice_id=str(invoice.id),
+                           attempt=invoice.retry_count,
+                           error=str(exc))
+        else:
+            invoice.status = InvoiceStatus.EXTRACTION_FAILED
+            logger.error("stage_failed_max_retries",
+                         invoice_id=str(invoice.id),
+                         error=str(exc))
+        c.repository.save(invoice)
+        return invoice
+
+    # ── Success ───────────────────────────────────────────────────────────────
+    invoice.status = InvoiceStatus.EXTRACTED
+    invoice.updated_at = datetime.now(timezone.utc)
+    c.repository.save(invoice)
+    logger.info("stage_completed", invoice_id=str(invoice.id), status=InvoiceStatus.EXTRACTED)
+    return invoice
 
 
 def classify(invoice: InvoiceRecord, c: PipelineComponents) -> InvoiceRecord:

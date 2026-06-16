@@ -255,13 +255,16 @@ class TestTesseractEngine:
         mock_tess.assert_called_once()
 
     def test_language_mapping(self, white_image):
+        # With fr+ar, the engine runs two separate passes (Latin then Arabic)
+        # to avoid bidi corruption.  Collect all lang args across all calls.
         engine = TesseractEngine(languages=["fr", "ar"])
         with patch("pytesseract.image_to_string", return_value="") as mock_tess:
             engine.extract([white_image])
-        call_kwargs = mock_tess.call_args
-        lang_arg = call_kwargs[1].get("lang") or call_kwargs[0][1]
-        assert "fra" in lang_arg
-        assert "ara" in lang_arg
+        all_lang_args = [
+            (c[1].get("lang") or c[0][1]) for c in mock_tess.call_args_list
+        ]
+        assert any("fra" in l for l in all_lang_args)
+        assert any("ara" in l for l in all_lang_args)
 
 
 # ── LLMExtractor — JSON parsing ────────────────────────────────────────────────
@@ -429,6 +432,16 @@ class TestExtractJson:
 
 # ── HybridExtractor routing ────────────────────────────────────────────────────
 
+# Minimal invoice text that passes InvoiceValidator (score ≥ 5, ≥ 80 chars, ≥ 2 numbers)
+_VALID_INVOICE_TEXT = (
+    "FACTURE N° FAC-2026-001\n"
+    "MF: 0038472K/A/M/000\n"
+    "TVA 19%\n"
+    "Total TTC: 1,190.000 TND\n"
+    "Montant HT: 1,000.000 TND"
+)
+
+
 class TestHybridExtractorRouting:
 
     @pytest.fixture()
@@ -456,7 +469,7 @@ class TestHybridExtractorRouting:
         reader, _, ocr_engine, _ = components
         sample_invoice.raw_file_path = str(native_pdf)
         reader.is_native_pdf.return_value = True
-        reader.extract_text.return_value = "invoice text"
+        reader.extract_text.return_value = _VALID_INVOICE_TEXT
 
         result = extractor.extract(sample_invoice)
 
@@ -469,7 +482,7 @@ class TestHybridExtractorRouting:
         sample_invoice.raw_file_path = str(native_pdf)
         reader.is_native_pdf.return_value = False
         reader.to_images.return_value = [MagicMock()]
-        ocr_engine.extract.return_value = "ocr text"
+        ocr_engine.extract.return_value = _VALID_INVOICE_TEXT
 
         result = extractor.extract(sample_invoice)
 
@@ -483,7 +496,7 @@ class TestHybridExtractorRouting:
         Image.fromarray(np.full((200, 150), 200, dtype=np.uint8)).save(str(img_path))
         sample_invoice.raw_file_path = str(img_path)
         reader.image_to_pil.return_value = MagicMock()
-        ocr_engine.extract.return_value = "ocr from image"
+        ocr_engine.extract.return_value = _VALID_INVOICE_TEXT
 
         result = extractor.extract(sample_invoice)
 
@@ -500,7 +513,7 @@ class TestHybridExtractorRouting:
         reader, _, _, _ = components
         sample_invoice.raw_file_path = str(native_pdf)
         reader.is_native_pdf.return_value = True
-        reader.extract_text.return_value = "text"
+        reader.extract_text.return_value = _VALID_INVOICE_TEXT
 
         result = extractor.extract(sample_invoice)
         assert result.extracted_at is not None
@@ -511,7 +524,7 @@ class TestHybridExtractorRouting:
         reader.is_native_pdf.return_value = False
         fake_pages = [MagicMock(), MagicMock()]
         reader.to_images.return_value = fake_pages
-        ocr_engine.extract.return_value = ""
+        ocr_engine.extract.return_value = _VALID_INVOICE_TEXT
 
         extractor.extract(sample_invoice)
         assert preprocessor.process.call_count == 2

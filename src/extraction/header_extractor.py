@@ -8,9 +8,19 @@ from __future__ import annotations
 import re
 from datetime import date
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 
 class HeaderExtractor:
     """Heuristic extraction of three header fields from Tunisian invoice text."""
+
+    # ── Non-invoice content markers ───────────────────────────────────────────
+    _NON_INVOICE_MARKERS = [
+        "bridgerton", "netflix", "episode", "season",
+        "chapter", "disney", "hulu", "amazon prime",
+    ]
 
     # ── Invoice number patterns ───────────────────────────────────────────────
     # Ordered: most-specific first to avoid false positives.
@@ -27,6 +37,13 @@ class HeaderExtractor:
         r'\b([A-Z]{2,6}-\d{4}-[A-Z0-9]{1,6}-[0-9]{3,6})\b',
         # Ref / Reference label
         r'[Rr][eé]f(?:\.|\s|érence)?\s*:?\s*([A-Z0-9][A-Z0-9\-/]{3,20})',
+        # Tunisian formats seen in practice
+        r'(?:Facture|Fact\.?)\s*[Nn][°o]\s*:?\s*(\w[\w\-/]{2,20})',
+        r'[Nn][°o°]\s*[Ff]acture\s*:?\s*(\w[\w\-/]{2,20})',
+        r'R[eé]f(?:\.?\s*[Ff]acture)?\s*:?\s*([A-Z0-9][\w\-/]{2,20})',
+        # Plain year-number: only match a current-era year (202x) to avoid fiscal IDs like 0147/2018
+        r'\b(202[0-9][-/]\d{3,6})\b',
+        r'(?:Invoice|INV)\s*#?\s*:?\s*(\w[\w\-/]{2,20})',
     ]
 
     # ── French month names ────────────────────────────────────────────────────
@@ -47,50 +64,116 @@ class HeaderExtractor:
         "fournisseur", "client", "devise", "montant", "total",
         "description", "désignation", "qté", "quantité",
         "ht", "tva", "ttc",
+        "page", "objet", "à ", "de ", "monsieur", "madame",
+        "tunis", "rue", "av ", "av.", "avenue", "zone",
+        "rc ", "rne ", "po box",
     )
     _SKIP_EXACT = frozenset({
         "facture", "fournisseur", "client", "devise",
         "ht", "tva", "ttc", "invoice",
     })
 
-    def extract(self, text: str) -> dict:
-        return {
-            'issuer_name':    self._extract_issuer(text),
-            'invoice_number': self._extract_invoice_number(text),
-            'invoice_date':   self._extract_date(text),
+    def _is_likely_not_invoice(self, text: str) -> bool:
+        if len(text.strip()) < 50:
+            return True
+        text_lower = text.lower()
+        return any(m in text_lower for m in self._NON_INVOICE_MARKERS)
+
+    def extract(self, text: str, invoice_id: str = "unknown") -> dict:
+        if self._is_likely_not_invoice(text):
+            logger.warning("header_non_invoice_detected", text_sample=text[:100])
+            return {
+                'issuer_name': None, 'issuer_confidence': 0.0,
+                'invoice_number': None, 'invoice_date': None,
+            }
+
+        issuer_name, issuer_conf = self._extract_issuer(text)
+        result = {
+            'issuer_name':       issuer_name,
+            'issuer_confidence': issuer_conf,
+            'invoice_number':    self._extract_invoice_number(text),
+            'invoice_date':      self._extract_date(text),
         }
+        logger.debug("header_extraction_result",
+                     invoice_id=invoice_id,
+                     issuer=result['issuer_name'],
+                     issuer_conf=issuer_conf,
+                     number=result['invoice_number'],
+                     date=str(result['invoice_date']))
+        return result
 
     # ── Issuer name ───────────────────────────────────────────────────────────
 
-    def _extract_issuer(self, text: str) -> str | None:
-        """Return the first line that looks like a company name.
+    def _extract_issuer(self, text: str) -> tuple[str | None, float]:
+        """Return (issuer_name, confidence) from the first plausible header line.
 
-        Heuristic: scan the first 8 non-empty lines; return the first that:
-          - Is at least 4 characters long
-          - Does not start with any of the skip prefixes
-          - Is not an exact match for a common keyword
-          - Does not look like a street address (digits + Rue / Avenue / Zone)
-        Confidence when used: 0.70.
+        Scans the first 10 non-empty lines.  A line is accepted only when ALL
+        of the following pass:
+          1. len >= 8
+          2. at least 4 alphabetic characters
+          3. (alnum + space) ratio >= 0.55
+          4. does not start with a known skip prefix
+          5. does not contain © ® ™
+          6. does not contain Unicode bidi direction markers
+          7. does not start with a digit
+          8. does not look like a pure date (DD/MM/YYYY)
+          9. does not look like a pure phone number
+
+        Confidence:
+          0.75  — ALL CAPS and len >= 10  (company letterheads)
+          0.65  — mixed case and len >= 10
+          0.55  — anything shorter that still passes
         """
         lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
 
-        for line in lines[:8]:
-            if len(line) < 4:
+        for line in lines[:10]:
+            # Rule 1: minimum length
+            if len(line) < 8:
+                continue
+            # Rule 2: at least 4 actual letters
+            if sum(c.isalpha() for c in line) < 4:
+                continue
+            # Rule 3: (alnum + space) ratio
+            ratio = sum(c.isalnum() or c.isspace() for c in line) / len(line)
+            if ratio < 0.55:
+                continue
+            # Rule 5: copyright / trademark symbols
+            if '©' in line or '®' in line or '™' in line:
+                continue
+            # Rule 6: bidi direction markers from mixed Arabic/French OCR
+            if any(c in line for c in ('‎', '‏', '‪', '‫', '‬', '‭', '‮')):
+                continue
+            # Rule 7: company names never start with a digit
+            if line[0].isdigit():
+                continue
+            # Rule 8: pure date pattern
+            if re.match(r'^\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}$', line):
+                continue
+            # Rule 9: pure phone number
+            if re.match(r'^\+?[\d\s\-\.()]{7,}$', line):
                 continue
             lower = line.lower()
+            # Rule 4a: exact keyword match
             if lower in self._SKIP_EXACT:
                 continue
+            # Rule 4b: starts with a known skip prefix
             if any(lower.startswith(p) for p in self._SKIP_PREFIXES):
                 continue
-            # Street address pattern: starts with digits followed by Rue/Avenue/Zone/BP
+            # Street address: digits then road-type word
             if re.match(r'^\d+\s+(?:rue|avenue|zone|bp|all[eé]e|boulevard|impasse)',
                         lower):
                 continue
-            # Pure digits or very short codes
-            if re.match(r'^[\d\s\-/.,]+$', line):
-                continue
-            return line
-        return None
+
+            # Passed all rules — compute confidence
+            if line.isupper() and len(line) >= 10:
+                conf = 0.75
+            elif len(line) >= 10:
+                conf = 0.65
+            else:
+                conf = 0.55
+            return line, conf
+
+        return None, 0.0
 
     # ── Invoice number ────────────────────────────────────────────────────────
 
@@ -99,10 +182,12 @@ class HeaderExtractor:
 
         Confidence when used: 0.85.
         """
+        logger.debug("header_raw_text_sample",
+                     text_sample=text[:500].replace("\n", " | "))
+
         for pattern in self._INV_PATTERNS:
             m = re.search(pattern, text)
             if m:
-                # Named group or first capture group
                 result = m.group(1) if m.lastindex else m.group(0)
                 result = result.strip().rstrip('.,;:')
                 if len(result) >= 4:
@@ -141,7 +226,6 @@ class HeaderExtractor:
         dmy_re = re.compile(r'\b(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4})\b')
         for line in lines[:20]:
             lower = line.lower()
-            # Skip lines that are clearly about the due date
             if any(kw in lower for kw in ("échéance", "echeance", "due date", "paiement")):
                 continue
             m = dmy_re.search(line)
@@ -197,7 +281,6 @@ class HeaderExtractor:
         if len(parts) != 3:
             return None
         try:
-            # Determine if first chunk is day or year (YYYY-MM-DD vs DD/MM/YYYY)
             if len(parts[0]) == 4:
                 year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
             else:
