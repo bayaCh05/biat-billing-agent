@@ -64,6 +64,13 @@ def _engine_and_config():
 
 
 @st.cache_resource
+def get_db_engine():
+    """Return the shared SQLAlchemy engine (cached per Streamlit session)."""
+    engine, _, _ = _engine_and_config()
+    return engine
+
+
+@st.cache_resource
 def _cost_catalog():
     _, _, cfg = _engine_and_config()
     return CostCatalog.from_yaml(cfg["classification"]["cost_catalog_file"])

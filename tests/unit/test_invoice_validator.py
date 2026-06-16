@@ -166,6 +166,167 @@ class TestSignalScoring:
         _v.validate(text)  # must not raise
 
 
+# ── Additional real invoice formats that must PASS ───────────────────────────
+
+class TestRealInvoiceFormats:
+    def test_ttn_invoice_passes(self):
+        text = """\
+Tunisie TradeNet
+Facture N 8116  Date 05/10/2016
+Matricule Fiscal : 41101180
+T.V.A.%  12   P.U.H.T.V.A.  2,000
+Total H.T.V.A.  2,000
+Montant T.T.C  2,740
+Droit de Timbre  0,500"""
+        assert _v.validate(text) is None
+
+    def test_steg_invoice_passes(self):
+        text = (
+            "STEG - Societe Tunisienne de l'Electricite et du Gaz\n"
+            "Facture N° 2026-0847\nDate de facture: 05/03/2026\n"
+            "Montant TTC: 2,285.000 TND\nTVA 19%: 364.500 TND"
+        )
+        assert _v.validate(text) is None
+
+    def test_kpmg_invoice_passes(self):
+        text = (
+            "KPMG TUNISIE\nMF: 0098765J/A/M/000\n"
+            "Honoraires d'audit et conseil\n"
+            "Montant HT: 12,000.000 TND\nTVA 19%: 2,280.000 TND\n"
+            "Total TTC: 14,280.000 TND"
+        )
+        assert _v.validate(text) is None
+
+    def test_arabic_french_bilingual_passes(self):
+        text = (
+            "STAR ASSURANCES SA   MF: 0123456A/P/M/000\n"
+            "فاتورة رقم: FAC-2026-STAR-0089\n"
+            "Date de facture: 01/06/2026\n"
+            "Montant HT: 1,200.000 TND\n"
+            "TVA 19%:    228.000 TND\n"
+            "Total TTC: 1,428.000 TND"
+        )
+        assert _v.validate(text) is None
+
+    def test_very_short_real_invoice_passes(self):
+        # Exactly at/above _MIN_CHARS with strong signals
+        text = "Facture NEXIA INFORMATIQUE\nTVA 19%\nTotal TTC: 500.000 TND"
+        assert _v.validate(text) is None
+
+    def test_formation_exempt_tva_passes(self):
+        text = (
+            "CIEL FORMATION SARL\nMF: 1398741G/A/M/000\n"
+            "Facture N° FAC-2026-07-CIEL\n"
+            "Formation Cybersécurité ISO 27001 — 3 jours\n"
+            "Montant HT: 4,200.000 TND\nTVA: 0% (exonéré)\n"
+            "Total TTC: 4,200.000 TND"
+        )
+        assert _v.validate(text) is None
+
+
+# ── Non-invoice files that must FAIL ─────────────────────────────────────────
+
+class TestNonInvoiceRejected:
+    def test_login_page_rejected(self):
+        text = (
+            "Forgot your password? Click here to reset.\n"
+            "Sign In to your account\nUsername:\nPassword:\n"
+            "Remember me on this device. New user? Register here."
+        )
+        with pytest.raises(NotAnInvoiceError):
+            _v.validate(text)
+
+    def test_bank_statement_rejected(self):
+        text = (
+            "Relevé de Compte Mensuel\n"
+            "BIAT - Banque Internationale Arabe de Tunisie\n"
+            "Compte N° 001-123456-78\n"
+            "SOLDE INITIAL    12,450.00\n"
+            "REGLEMENT CHEQUE  1,200.00\n"
+            "ENCAISSEMENT VIR  3,500.00\n"
+            "SOLDE FINAL      14,750.00"
+        )
+        with pytest.raises(NotAnInvoiceError):
+            _v.validate(text)
+
+    def test_cv_rejected(self):
+        text = (
+            "Curriculum Vitae — Jean Dupont\n"
+            "Experience: 5 years software development\n"
+            "Skills: Python, SQL, REST APIs\n"
+            "Education: Master Computer Science 2019\n"
+            "References available on request."
+        )
+        with pytest.raises(NotAnInvoiceError):
+            _v.validate(text)
+
+    def test_empty_string_rejected(self):
+        with pytest.raises(NotAnInvoiceError) as exc:
+            _v.validate("")
+        assert exc.value.reason == "text_too_short"
+
+    def test_only_numbers_rejected(self):
+        with pytest.raises(NotAnInvoiceError):
+            _v.validate("123 456 789 000 111 222 333 444 555")
+
+    def test_presentation_rejected(self):
+        text = (
+            "Présentation du projet infrastructure cloud\n"
+            "Objectifs stratégiques 2026\n"
+            "Slide 1: Introduction\nSlide 2: Architecture cible\n"
+            "Slide 3: Planning et jalons\nSlide 4: Budget prévisionnel"
+        )
+        with pytest.raises(NotAnInvoiceError):
+            _v.validate(text)
+
+
+# ── Edge cases ────────────────────────────────────────────────────────────────
+
+class TestEdgeCases:
+    def test_score_exactly_at_threshold_passes(self):
+        # facture (3 pts) — exactly at _MIN_SCORE=3, with 1 number
+        text = "Facture\nMontant: 1,000.000 TND\nDépenses administratives 2026"
+        assert _v.validate(text) is None
+
+    def test_reject_immediately_takes_priority_over_invoice_keywords(self):
+        # Has invoice keywords but also Bridgerton — must be rejected
+        text = (
+            "Facture TVA TND Montant HT Total TTC Fournisseur\n"
+            "Bridgerton Season 4 Episode 2 Netflix\n"
+            "1,000.000 TND"
+        )
+        with pytest.raises(NotAnInvoiceError) as exc:
+            _v.validate(text)
+        assert "non_invoice_content" in exc.value.reason
+
+    def test_whitespace_only_rejected(self):
+        with pytest.raises(NotAnInvoiceError) as exc:
+            _v.validate("   \n\n   \t   ")
+        assert exc.value.reason == "text_too_short"
+
+    def test_reason_encodes_threshold(self):
+        """Rejection reason always encodes the required threshold."""
+        text = "This document is about project planning for Q3 2026 deliverables."
+        with pytest.raises(NotAnInvoiceError) as exc:
+            _v.validate(text)
+        assert "_of_3" in exc.value.reason
+
+    def test_not_an_invoice_error_is_value_error(self):
+        with pytest.raises(ValueError):
+            _v.validate("")
+
+    def test_ollama_url_not_needed_for_validation(self):
+        # InvoiceValidator has no LLM dependency — must work offline
+        v2 = InvoiceValidator()
+        with pytest.raises(NotAnInvoiceError):
+            v2.validate("not an invoice")
+
+    def test_filename_kwarg_does_not_affect_result(self):
+        _v.validate(REAL_INVOICE, filename="test.pdf")  # must not raise
+        with pytest.raises(NotAnInvoiceError):
+            _v.validate("hello", filename="short.pdf")
+
+
 # ── NotAnInvoiceError attributes ─────────────────────────────────────────────
 
 class TestErrorAttributes:

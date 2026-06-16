@@ -63,7 +63,7 @@ class CostAnalyzer:
         min_history_months:  minimum months of history needed before flagging anomalies
     """
 
-    ACTUAL_STATUSES = ("VALIDATED", "EXPORTED", "PAID")
+    ACTUAL_STATUSES = ("VALIDATED", "EXPORTED", "PAID", "JOURNALED")
 
     def __init__(
         self,
@@ -104,7 +104,7 @@ class CostAnalyzer:
             .where(
                 and_(
                     InvoiceORM.status.in_(self.ACTUAL_STATUSES),
-                    InvoiceORM.direction == "fournisseur",
+                    InvoiceORM.direction == "SUPPLIER",
                     InvoiceORM.invoice_date >= from_date,
                     InvoiceORM.invoice_date <= to_date,
                     InvoiceORM.cost_catalog_id.isnot(None),
@@ -206,7 +206,7 @@ class CostAnalyzer:
             .where(
                 and_(
                     InvoiceORM.status.in_(self.ACTUAL_STATUSES),
-                    InvoiceORM.direction == "fournisseur",
+                    InvoiceORM.direction == "SUPPLIER",
                     InvoiceORM.invoice_date >= start,
                     InvoiceORM.invoice_date <= end,
                     InvoiceORM.cost_catalog_id.isnot(None),
@@ -248,7 +248,7 @@ class CostAnalyzer:
             .where(
                 and_(
                     InvoiceORM.status.in_(self.ACTUAL_STATUSES),
-                    InvoiceORM.direction == "fournisseur",
+                    InvoiceORM.direction == "SUPPLIER",
                     InvoiceORM.invoice_date >= start,
                     InvoiceORM.invoice_date <= end,
                     InvoiceORM.cost_catalog_id.isnot(None),
@@ -281,7 +281,7 @@ class CostAnalyzer:
             .where(
                 and_(
                     InvoiceORM.status.in_(self.ACTUAL_STATUSES),
-                    InvoiceORM.direction == "fournisseur",
+                    InvoiceORM.direction == "SUPPLIER",
                     InvoiceORM.cost_catalog_id == catalog_id,
                     InvoiceORM.invoice_date >= start,
                     InvoiceORM.invoice_date < date(ref_year, ref_month, 1),

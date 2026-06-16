@@ -164,7 +164,7 @@ class BudgetTracker:
     PAID statuses) grouped by cost_catalog_id and invoice month.
     """
 
-    ACTUAL_STATUSES = ("VALIDATED", "EXPORTED", "PAID")
+    ACTUAL_STATUSES = ("VALIDATED", "EXPORTED", "PAID", "JOURNALED")
 
     def __init__(self, plan: BudgetPlan, session: Session) -> None:
         self.plan = plan
@@ -256,7 +256,7 @@ class BudgetTracker:
             .where(
                 and_(
                     InvoiceORM.status.in_(self.ACTUAL_STATUSES),
-                    InvoiceORM.direction == "fournisseur",
+                    InvoiceORM.direction == "SUPPLIER",
                     InvoiceORM.invoice_date >= start,
                     InvoiceORM.invoice_date <= end,
                     InvoiceORM.cost_catalog_id.isnot(None),
