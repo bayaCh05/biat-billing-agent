@@ -22,6 +22,24 @@ python scripts/make_mock_invoices.py   # 10 factures fournisseurs
 
 Mot de passe par défaut : `biat2024` (configurable dans `.streamlit/secrets.toml`)
 
+## Sharing the demo remotely
+
+To give your supervisor access from any location:
+
+```bash
+# One command
+bash scripts/share_demo.sh
+```
+
+This starts the app and creates a public URL valid for the duration of your session.
+
+Requirements: ngrok installed and authenticated
+
+```bash
+brew install ngrok
+ngrok authtoken YOUR_TOKEN  # from ngrok.com (free)
+```
+
 ## Docker
 
 ### Prérequis
