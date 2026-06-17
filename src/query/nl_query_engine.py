@@ -7,8 +7,7 @@ from __future__ import annotations
 import json
 import re
 
-from sqlalchemy import text
-
+from sqlalchemy import text  # noqa: I001
 
 _SYSTEM_PROMPT = """\
 Tu es un assistant financier pour BIAT IT (filiale informatique de la banque BIAT, Tunisie).
@@ -74,6 +73,19 @@ Règles SQL importantes:
 - N'utilise JAMAIS INSERT, UPDATE, DELETE, DROP, ALTER, CREATE
 - Si la question ne peut pas être répondue avec ces tables, retourne:
   {"sql": null, "explanation": "raison pour laquelle la question ne peut pas être répondue"}
+
+Pièges à éviter:
+- cost_catalog_id est une colonne texte directe dans la table invoices (ex: 'telecommunications', 'formation_personnel'). Il n'existe PAS de table cost_catalog séparée.
+- "En attente de validation" ou "à valider" signifie status = 'FLAGGED' (factures bloquées pour revue humaine).
+- date_ecriture est une colonne de journal_entries, PAS de journal_lines. Pour filtrer les écritures par date, toujours faire: SELECT SUM(jl.debit) FROM journal_lines jl JOIN journal_entries je ON jl.entry_id = je.id WHERE strftime('%Y-%m', je.date_ecriture) = '2026-06'
+- "Montant total des écritures" d'un mois = SUM(jl.debit) des lignes de ce mois. Exemple correct: SELECT SUM(jl.debit) AS total FROM journal_lines jl JOIN journal_entries je ON jl.entry_id = je.id WHERE strftime('%Y-%m', je.date_ecriture) = '2026-06'
+- IMPORTANT: La table journal_entries n'a PAS de colonne direction, direction_supplier, status, ou issuer_name. Ses seules colonnes sont: id, reference, date_ecriture, description, source_invoice_id, source_asset_id. N'utilise JAMAIS je.direction ni je.status.
+- La table assets ne contient PAS de colonne charge_type. Tous les enregistrements de assets sont des immobilisations CAPEX.
+- "Factures en retard de paiement" = status = 'EXPORTED' AND due_date < date('now')  (expédiées mais pas encore payées)
+- TVA déductible (compte 4366) apparaît en DEBIT dans journal_lines. Utilise SUM(debit) pour le solde TVA déductible. Exemple correct: SELECT SUM(debit) FROM journal_lines WHERE compte = '4366'
+- TVA collectée (compte 4367) apparaît en CREDIT dans journal_lines. Utilise SUM(credit) pour le solde TVA collectée.
+- IMPORTANT: Les factures émises aux clients (BIAT groupe, etc.) sont EXCLUSIVEMENT dans la table client_invoices, PAS dans invoices. La table invoices contient UNIQUEMENT les factures reçues de fournisseurs. Pour "ce qu'on a facturé à BIAT / un client", utilise TOUJOURS client_invoices. Exemple: SELECT SUM(amount_ttc) FROM client_invoices WHERE client_name LIKE '%BIAT%' AND strftime('%Y-%m', invoice_date) = '2026-05' AND status != 'cancelled'
+- Pour la VNC, utilise EXACTEMENT cette formule avec les parenthèses: acquisition_cost_ht - (acquisition_cost_ht/useful_life_years) * (strftime('%Y','now') - strftime('%Y',acquisition_date)). Exemple: SELECT SUM(acquisition_cost_ht - (acquisition_cost_ht/useful_life_years) * (strftime('%Y','now') - strftime('%Y',acquisition_date))) AS vnc FROM assets WHERE fully_depreciated = 0
 """
 
 
@@ -123,9 +135,24 @@ class NLQueryEngine:
             return self._err(question, "Seules les requêtes SELECT sont autorisées.",
                              explanation)
 
+        sql = self._sanitize_sql(sql)
         rows, exec_error = self._run_sql(sql)
         if exec_error:
-            return self._err(question, f"Erreur SQL: {exec_error}", explanation)
+            # One automatic retry: feed the SQL error back to the LLM
+            retry_question = (
+                f"{question}\n\n"
+                f"[ERREUR SQL précédente: {exec_error}]\n"
+                f"[SQL incorrect: {sql}]\n"
+                "Génère une nouvelle requête SQL corrigée qui évite cette erreur."
+            )
+            raw2 = self._ask_llm(retry_question)
+            parsed2 = self._parse_llm_response(raw2)
+            if parsed2 and parsed2.get("sql") and self._is_safe(parsed2["sql"]):
+                sql = self._sanitize_sql(parsed2["sql"])
+                explanation = parsed2.get("explanation", explanation)
+                rows, exec_error = self._run_sql(sql)
+            if exec_error:
+                return self._err(question, f"Erreur SQL: {exec_error}", explanation)
 
         answer = self._format_answer(explanation, rows)
         return {
@@ -178,6 +205,17 @@ class NLQueryEngine:
             return json.loads(raw)
         except json.JSONDecodeError:
             return None
+
+    @staticmethod
+    def _sanitize_sql(sql: str) -> str:
+        """Strip column references that don't exist on journal_entries."""
+        # Remove AND/WHERE conditions referencing non-existent columns on journal_entries
+        # e.g. "AND je.direction = 'SUPPLIER'" or "WHERE je.direction = 'SUPPLIER'"
+        invalid_je_cols = re.compile(
+            r'\s+AND\s+\w+\.(direction|status|issuer_name|charge_type)\s*=\s*\'[^\']*\'',
+            re.IGNORECASE,
+        )
+        return invalid_je_cols.sub("", sql)
 
     @staticmethod
     def _is_safe(sql: str) -> bool:

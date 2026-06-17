@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.orm import Session
 
 from src.models.enums import ChargeNature, ChargeType, InvoiceStatus
@@ -58,6 +58,21 @@ class InvoiceRepository:
 
         self.session.commit()
         return invoice
+
+    def delete(self, invoice_id: str | UUID) -> None:
+        """Hard-delete an invoice and its related rows (flags, line items, history)."""
+        from sqlalchemy import delete as sa_delete
+        uid = UUID(str(invoice_id)) if isinstance(invoice_id, str) else invoice_id
+        uid_str = uid.hex  # SQLite stores UUIDs as hex strings without dashes
+        # Delete child rows in FK order before the parent to satisfy constraints.
+        for tbl in ("validation_flags", "line_items", "status_history"):
+            self.session.execute(
+                text(f"DELETE FROM {tbl} WHERE invoice_id = :id"), {"id": uid_str}
+            )
+        self.session.execute(
+            text("DELETE FROM invoices WHERE id = :id"), {"id": uid_str}
+        )
+        self.session.commit()
 
     # ── Read ──────────────────────────────────────────────────────────────────
 

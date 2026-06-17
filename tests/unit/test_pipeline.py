@@ -139,23 +139,9 @@ class TestRecoverInterrupted:
         recover_interrupted(repo)
         assert inv.status == InvoiceStatus.VALIDATED
 
-    def test_migrates_clean_exported_to_journaled(self):
+    def test_does_not_touch_exported_invoices(self):
+        # EXPORTED is a stable status — recover_interrupted must leave it alone
         inv = _make_invoice(InvoiceStatus.EXPORTED)
-        # no flags — clean exported invoice from before the split
         repo = self._repo_with_invoices({InvoiceStatus.EXPORTED: [inv]})
         recover_interrupted(repo)
-        assert inv.status == InvoiceStatus.JOURNALED
-
-    def test_does_not_migrate_exported_with_journal_failed_flag(self):
-        from src.models.enums import FlagSeverity
-        from src.models.invoice import ValidationFlag
-        inv = _make_invoice(InvoiceStatus.EXPORTED)
-        inv.add_flag(ValidationFlag(
-            flag_type=FlagType.JOURNAL_FAILED,
-            severity=FlagSeverity.ERROR,
-            field_name="journal",
-            message="test error",
-        ))
-        repo = self._repo_with_invoices({InvoiceStatus.EXPORTED: [inv]})
-        recover_interrupted(repo)
-        assert inv.status == InvoiceStatus.EXPORTED  # should NOT be promoted
+        assert inv.status == InvoiceStatus.EXPORTED

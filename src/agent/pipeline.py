@@ -295,17 +295,6 @@ def recover_interrupted(repository: "InvoiceRepository") -> None:
             repository.save(inv)
             logger.info("recovered_invoice", invoice_id=str(inv.id), reset_to=reset)
 
-    # One-time migration: promote EXPORTED invoices that have no JOURNAL_FAILED flag
-    # to JOURNALED — these were successfully exported before the journal stage split
-    # was introduced and are safe to treat as already journaled.
-    for inv in repository.get_by_status(InvoiceStatus.EXPORTED):
-        has_journal_failed = any(
-            f.flag_type == FlagType.JOURNAL_FAILED for f in inv.flags
-        )
-        if not has_journal_failed:
-            inv.status = InvoiceStatus.JOURNALED
-            repository.save(inv)
-            logger.info("migrated_exported_to_journaled", invoice_id=str(inv.id))
 
 
 def re_enqueue_received(repository: "InvoiceRepository", ingestor) -> None:
