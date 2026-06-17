@@ -22,6 +22,45 @@ python scripts/make_mock_invoices.py   # 10 factures fournisseurs
 
 Mot de passe par défaut : `biat2024` (configurable dans `.streamlit/secrets.toml`)
 
+## Docker
+
+### Prérequis
+- Docker Desktop installé
+- 8 Go de RAM disponible (Ollama + app)
+
+### Lancer avec Docker Compose
+
+```bash
+# 1. Construire et démarrer tous les services
+docker-compose up -d
+
+# 2. Premier démarrage : télécharger le modèle LLM + charger les données de démo
+bash scripts/docker_setup.sh
+
+# 3. Ouvrir l'application
+open http://localhost:8501
+```
+
+### Commandes utiles
+
+```bash
+# Voir les logs en temps réel
+docker-compose logs -f app
+
+# Arrêter tous les services
+docker-compose down
+
+# Arrêter et supprimer toutes les données (remise à zéro complète)
+docker-compose down -v
+
+# Reconstruire après modification du code
+docker-compose up -d --build
+```
+
+### CI/CD
+Chaque push sur `main` exécute la suite complète de tests (629 tests)
+et construit l'image Docker via GitHub Actions (`.github/workflows/ci.yml`).
+
 ## Fonctionnalités
 
 ### Traitement des factures fournisseurs
