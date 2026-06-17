@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import NullPool, StaticPool
 
 
 class Base(DeclarativeBase):
@@ -8,7 +9,17 @@ class Base(DeclarativeBase):
 
 def build_engine(db_url: str):
     connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
-    engine = create_engine(db_url, connect_args=connect_args, echo=False)
+    if ":memory:" in db_url:
+        # StaticPool reuses a single connection for all sessions — required for
+        # in-memory SQLite so every session sees the same database (used in tests).
+        pool_kwargs: dict = {"poolclass": StaticPool}
+    elif db_url.startswith("sqlite"):
+        # NullPool for file-based SQLite: each Session opens/closes its own
+        # connection, preventing QueuePool exhaustion on Streamlit page re-renders.
+        pool_kwargs = {"poolclass": NullPool}
+    else:
+        pool_kwargs = {}
+    engine = create_engine(db_url, connect_args=connect_args, echo=False, **pool_kwargs)
     if db_url.startswith("sqlite"):
         # Enable WAL mode and foreign key enforcement for SQLite
         @event.listens_for(engine, "connect")
