@@ -38,7 +38,7 @@ python3 -m pytest --tb=short -q
 ```
 
 ## Known architecture conventions
-- Use `PipelineComponents` + stage functions from `src/agent/pipeline.py` (currently `extract`, `classify`, `validate`, `export_file`, `post_journal`), not an orchestration class.
+- Use `PipelineComponents` + stage functions from `src/agent/pipeline.py`, not an orchestration class.
 - `build_pipeline_components()` returns `(components, engine)`; close sessions with `components.close()` when appropriate.
 - Use `CostCatalog.from_yaml(...)` (not deprecated loaders).
 - `AccountingCoder` should be initialized with `catalog=...`.
