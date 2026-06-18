@@ -51,11 +51,11 @@ python3 -m pytest --tb=short -q
 
 ## Errors encountered during onboarding (2026-06-18)
 1. **Error:** `.venv/bin/ruff: No such file or directory`  
-   **Work-around used:** installed dependencies with `python3 -m pip install -e ".[dev]"` and used module-invocation commands (`python3 -m ruff`, `python3 -m pytest`).
+   **Workaround used:** installed dependencies with `python3 -m pip install -e ".[dev]"` and used module-invocation commands (`python3 -m ruff`, `python3 -m pytest`).
 2. **Error (baseline tests):** `ModuleNotFoundError: No module named 'skimage'` in `tests/unit/test_extraction.py` (raised from `src/extraction/ocr_preprocessor.py`)  
-   **Work-around used for onboarding task:** documented as a pre-existing test-environment/dependency issue; did not change production code.
+   **Workaround used for onboarding task:** documented as a pre-existing test-environment/dependency issue; did not change production code.
 3. **Error (baseline tests):** `TestTesseractEngine.test_language_mapping` assertion failure  
-   **Work-around used for onboarding task:** documented as pre-existing baseline failure; no functional code changes made for this onboarding-only task.
+   **Workaround used for onboarding task:** documented as pre-existing baseline failure; no functional code changes made for this onboarding-only task.
 
 ## Scope reminder for future agents
 - For this repository onboarding task, only `.github/copilot-instructions.md` should be added.
