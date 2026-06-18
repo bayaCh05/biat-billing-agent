@@ -10,10 +10,10 @@
 - Production LLM backend must remain **Ollama** (`qwen2.5:3b`, local endpoint).
 
 ## Fast orientation
-- Core pipeline logic: `/home/runner/work/biat-billing-agent/biat-billing-agent/src/agent/pipeline.py` (pure stage functions).
-- Dependency wiring: `/home/runner/work/biat-billing-agent/biat-billing-agent/src/agent/config_loader.py`.
-- Streamlit entrypoint: `/home/runner/work/biat-billing-agent/biat-billing-agent/app/Home.py`.
-- Main config: `/home/runner/work/biat-billing-agent/biat-billing-agent/config/settings.yaml`.
+- Core pipeline logic: `src/agent/pipeline.py` (pure stage functions).
+- Dependency wiring: `src/agent/config_loader.py`.
+- Streamlit entrypoint: `app/Home.py`.
+- Main config: `config/settings.yaml`.
 
 ## Expected workflow for agents
 1. Read `README.md`, `CLAUDE.md`, and `config/settings.yaml`.
@@ -38,7 +38,7 @@ python3 -m pytest --tb=short -q
 ```
 
 ## Known architecture conventions
-- Use `PipelineComponents` + stage functions (`extract`, `classify`, `validate`, `export_file`, `post_journal`), not an orchestration class.
+- Use `PipelineComponents` + stage functions from `src/agent/pipeline.py` (currently `extract`, `classify`, `validate`, `export_file`, `post_journal`), not an orchestration class.
 - `build_pipeline_components()` returns `(components, engine)`; close sessions with `components.close()` when appropriate.
 - Use `CostCatalog.from_yaml(...)` (not deprecated loaders).
 - `AccountingCoder` should be initialized with `catalog=...`.
