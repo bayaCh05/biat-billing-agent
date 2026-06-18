@@ -36,6 +36,7 @@ jobs:
 
       - name: Initialize test database
         run: |
+          mkdir -p data
           python -c "
           from src.storage.db import build_engine, init_db
           engine = build_engine('sqlite:///./data/invoices.db')
