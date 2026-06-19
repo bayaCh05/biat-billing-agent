@@ -36,11 +36,13 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Initialize test database
+        env:
+          DATABASE_URL: sqlite:///${{ runner.temp }}/invoices.db
         run: |
-          mkdir -p data
           python -c "
+          import os
           from src.storage.db import build_engine, init_db
-          engine = build_engine('sqlite:///./data/invoices.db')
+          engine = build_engine(os.environ['DATABASE_URL'])
           init_db(engine)
           "
 
