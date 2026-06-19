@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440">
+<title>Screen 10 — KPI Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Inter',sans-serif;background:#F0F4F9;color:#1A1A2E;min-height:100vh;display:flex;}
+:root{
+  --navy:#1A3A5C;--navyD:#14293F;--navyH:#244E82;
+  --amber:#F0A600;--lb:#5BA3C9;--bg:#F0F4F9;
+  --white:#FFFFFF;--text:#1A1A2E;--muted:#5D6D7E;
+  --border:#D5E8F5;--ok:#1D9E76;--err:#C0391B;--warn:#F0A600;--purp:#804CD7;
+}
+.sidebar{width:240px;min-height:100vh;background:var(--navy);display:flex;flex-direction:column;flex-shrink:0;}
+.sidebar-logo{background:var(--navyD);padding:16px 20px;display:flex;align-items:center;gap:12px;}
+.logo-icon{width:36px;height:36px;background:var(--navy);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;}
+.logo-icon .l1{display:block;width:20px;height:3px;background:var(--lb);border-radius:2px;}
+.logo-icon .l2{display:block;width:14px;height:3px;background:var(--amber);border-radius:2px;}
+.logo-text h2{color:#fff;font-size:16px;font-weight:700;}
+.logo-text p{color:var(--lb);font-size:11px;}
+nav{flex:1;padding:8px 0;}
+.nav-item{display:flex;align-items:center;gap:12px;padding:0 20px;height:40px;color:rgba(255,255,255,0.8);font-size:13px;cursor:pointer;position:relative;text-decoration:none;}
+.nav-item:hover{background:rgba(255,255,255,0.06);}
+.nav-item.active{background:var(--navyH);color:#fff;font-weight:600;}
+.nav-item.active::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--amber);border-radius:0 2px 2px 0;}
+.nav-icon{font-size:14px;width:18px;text-align:center;}
+.sidebar-user{background:var(--navyD);padding:16px;display:flex;align-items:center;gap:10px;}
+.avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff;flex-shrink:0;}
+.user-info p{font-size:12px;font-weight:600;color:#fff;}
+.user-info span{font-size:11px;color:var(--lb);}
+.main{flex:1;display:flex;flex-direction:column;min-height:100vh;}
+header{height:64px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 32px;gap:16px;flex-shrink:0;}
+.header-title{font-size:18px;font-weight:700;flex:1;}
+.badge{padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;}
+.badge-blue{background:#E3F0F9;color:var(--lb);}
+.header-avatar{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff;flex-shrink:0;}
+.content{flex:1;padding:20px 24px;}
+
+/* ── Filter bar ── */
+.filter-bar{display:flex;align-items:center;gap:12px;margin-bottom:20px;}
+.filter-bar select,.filter-bar input{border:1px solid var(--border);background:#fff;border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text);outline:none;font-family:'Inter',sans-serif;}
+.filter-bar label{font-size:13px;color:var(--muted);}
+.btn-export{margin-left:auto;background:var(--navy);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;}
+
+/* ── KPI grid ── */
+.kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;}
+.kpi-card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:0;overflow:hidden;}
+.kpi-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px;}
+.kpi-name{font-size:14px;font-weight:600;color:var(--navy);}
+.kpi-trend{font-size:11px;font-weight:600;padding:3px 8px;border-radius:12px;}
+.trend-up{background:#E8F5F0;color:var(--ok);}
+.trend-down{background:#FEF0EE;color:var(--err);}
+.trend-warn{background:#FFF8E8;color:var(--warn);}
+.kpi-body{padding:0 20px 16px;display:flex;align-items:flex-end;gap:20px;}
+.kpi-value{font-size:32px;font-weight:700;color:var(--navy);line-height:1;}
+.kpi-unit{font-size:14px;color:var(--muted);margin-bottom:4px;font-weight:500;}
+.kpi-sub{font-size:12px;color:var(--muted);flex:1;padding-bottom:4px;}
+.sparkline{display:flex;align-items:flex-end;gap:3px;height:36px;}
+.spark-bar{width:8px;border-radius:2px 2px 0 0;}
+.kpi-divider{border:none;border-top:1px solid var(--border);margin:0;}
+.kpi-footer{padding:10px 20px;display:flex;gap:24px;}
+.kpi-meta{font-size:11px;color:var(--muted);}
+.kpi-meta strong{color:var(--text);}
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon"><span class="l1"></span><span class="l2"></span></div>
+    <div class="logo-text"><h2>BIAT IT</h2><p>Facturation</p></div>
+  </div>
+  <nav>
+    <a class="nav-item" href="#"><span class="nav-icon">🏠</span>Accueil</a>
+    <a class="nav-item" href="#"><span class="nav-icon">📊</span>Tableau de bord</a>
+    <a class="nav-item" href="#"><span class="nav-icon">🔍</span>File de révision</a>
+    <a class="nav-item" href="#"><span class="nav-icon">📋</span>Factures</a>
+    <a class="nav-item" href="#"><span class="nav-icon">💳</span>Suivi</a>
+    <a class="nav-item" href="#"><span class="nav-icon">📒</span>Journal</a>
+    <a class="nav-item" href="#"><span class="nav-icon">📤</span>Facturation</a>
+    <a class="nav-item" href="#"><span class="nav-icon">📈</span>Budget</a>
+    <a class="nav-item" href="#"><span class="nav-icon">🏗️</span>Immobilisations</a>
+    <a class="nav-item" href="#"><span class="nav-icon">🎯</span>Direction</a>
+    <a class="nav-item active" href="#"><span class="nav-icon">📉</span>KPI Dashboard</a>
+    <a class="nav-item" href="#"><span class="nav-icon">💬</span>Requêtes</a>
+  </nav>
+  <div class="sidebar-user">
+    <div class="avatar" style="background:var(--navy);">BC</div>
+    <div class="user-info"><p>Baya C.</p><span>Comptable</span></div>
+  </div>
+</aside>
+
+<div class="main">
+  <header>
+    <span class="header-title">📉 KPI Dashboard — Indicateurs Clés de Performance</span>
+    <span class="badge badge-blue">Juin 2026</span>
+    <span style="font-size:13px;color:var(--muted);margin-left:auto;">Dernière mise à jour : 19/06/2026 08:47</span>
+    <div class="header-avatar" style="background:var(--navy);">BC</div>
+  </header>
+
+  <div class="content">
+    <!-- Filter bar -->
+    <div class="filter-bar">
+      <label>Période :</label>
+      <select><option>Juin 2026</option><option>YTD 2026</option><option>Q2 2026</option></select>
+      <label>Portée :</label>
+      <select><option>Toutes catégories</option><option>OPEX seulement</option><option>CAPEX seulement</option></select>
+      <button class="btn-export">⬇ Exporter CSV</button>
+    </div>
+
+    <!-- KPI Grid -->
+    <div class="kpi-grid">
+
+      <!-- 1 -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-name">⏱ Délai moyen de traitement</span>
+          <span class="kpi-trend trend-up">↓ −18% vs M-1</span>
+        </div>
+        <div class="kpi-body">
+          <div>
+            <div class="kpi-value">2.3</div>
+            <div class="kpi-unit">heures</div>
+          </div>
+          <div class="kpi-sub">De la réception à l'export comptable.<br>Objectif ≤ 3h.</div>
+          <div class="sparkline">
+            <div class="spark-bar" style="height:20px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:28px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:24px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:32px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:22px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:16px;background:var(--ok)"></div>
+          </div>
+        </div>
+        <hr class="kpi-divider">
+        <div class="kpi-footer">
+          <span class="kpi-meta">Médiane : <strong>1.8h</strong></span>
+          <span class="kpi-meta">Max : <strong>8.4h</strong></span>
+          <span class="kpi-meta">Volume : <strong>247 factures</strong></span>
+        </div>
+      </div>
+
+      <!-- 2 -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-name">🤖 Taux d'auto-traitement</span>
+          <span class="kpi-trend trend-up">↑ +3pp vs M-1</span>
+        </div>
+        <div class="kpi-body">
+          <div>
+            <div class="kpi-value">86</div>
+            <div class="kpi-unit">%</div>
+          </div>
+          <div class="kpi-sub">Factures traitées sans intervention humaine.<br>Objectif ≥ 85%.</div>
+          <div class="sparkline">
+            <div class="spark-bar" style="height:22px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:24px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:26px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:28px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:30px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:32px;background:var(--ok)"></div>
+          </div>
+        </div>
+        <hr class="kpi-divider">
+        <div class="kpi-footer">
+          <span class="kpi-meta">Auto-traitées : <strong>213 / 247</strong></span>
+          <span class="kpi-meta">Revue manuelle : <strong>34</strong></span>
+        </div>
+      </div>
+
+      <!-- 3 -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-name">🏷 Taux de correspondance catalogue</span>
+          <span class="kpi-trend trend-up">↑ +2.3pp vs M-1</span>
+        </div>
+        <div class="kpi-body">
+          <div>
+            <div class="kpi-value">91.4</div>
+            <div class="kpi-unit">%</div>
+          </div>
+          <div class="kpi-sub">Factures classifiées avec un code PCE.<br>Objectif ≥ 90%.</div>
+          <div class="sparkline">
+            <div class="spark-bar" style="height:20px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:22px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:26px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:28px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:30px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:34px;background:var(--ok)"></div>
+          </div>
+        </div>
+        <hr class="kpi-divider">
+        <div class="kpi-footer">
+          <span class="kpi-meta">Sans match : <strong>21 factures</strong></span>
+          <span class="kpi-meta">Conf. ML moy. : <strong>0.87</strong></span>
+        </div>
+      </div>
+
+      <!-- 4 -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-name">🔴 Taux d'erreur extraction</span>
+          <span class="kpi-trend trend-up">↓ −1.1pp vs M-1</span>
+        </div>
+        <div class="kpi-body">
+          <div>
+            <div class="kpi-value">3.2</div>
+            <div class="kpi-unit">%</div>
+          </div>
+          <div class="kpi-sub">Factures avec flag ERROR ou EXTRACTION_FAILED.<br>Objectif ≤ 5%.</div>
+          <div class="sparkline">
+            <div class="spark-bar" style="height:28px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:26px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:24px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:20px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:18px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:12px;background:var(--ok)"></div>
+          </div>
+        </div>
+        <hr class="kpi-divider">
+        <div class="kpi-footer">
+          <span class="kpi-meta">Erreurs ce mois : <strong>8</strong></span>
+          <span class="kpi-meta">Dont EXTRACTION_FAILED : <strong>3</strong></span>
+        </div>
+      </div>
+
+      <!-- 5 -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-name">💰 Montant total facturé YTD</span>
+          <span class="kpi-trend trend-up">↑ +12% vs N-1</span>
+        </div>
+        <div class="kpi-body">
+          <div>
+            <div class="kpi-value">874 200</div>
+            <div class="kpi-unit">TND TTC</div>
+          </div>
+          <div class="kpi-sub">Cumul des factures fournisseurs validées.</div>
+          <div class="sparkline">
+            <div class="spark-bar" style="height:18px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:22px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:28px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:24px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:30px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:36px;background:var(--navy)"></div>
+          </div>
+        </div>
+        <hr class="kpi-divider">
+        <div class="kpi-footer">
+          <span class="kpi-meta">Budget : <strong>936 000 TND</strong></span>
+          <span class="kpi-meta">Restant : <strong>61 800 TND</strong></span>
+          <span class="kpi-meta">TVA récupérée : <strong>161k TND</strong></span>
+        </div>
+      </div>
+
+      <!-- 6 -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-name">⚠️ Retard moyen de paiement</span>
+          <span class="kpi-trend trend-warn">↑ +1.2j vs M-1</span>
+        </div>
+        <div class="kpi-body">
+          <div>
+            <div class="kpi-value">8.4</div>
+            <div class="kpi-unit">jours</div>
+          </div>
+          <div class="kpi-sub">Délai moyen post-échéance pour les fournisseurs.<br>Objectif ≤ 7j.</div>
+          <div class="sparkline">
+            <div class="spark-bar" style="height:14px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:18px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:16px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:20px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:22px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:30px;background:var(--warn)"></div>
+          </div>
+        </div>
+        <hr class="kpi-divider">
+        <div class="kpi-footer">
+          <span class="kpi-meta">Factures en retard : <strong>4</strong></span>
+          <span class="kpi-meta">Montant exposé : <strong>27 040 TND</strong></span>
+        </div>
+      </div>
+
+      <!-- 7 -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-name">🔁 Doublons détectés</span>
+          <span class="kpi-trend trend-up">↓ −3 vs M-1</span>
+        </div>
+        <div class="kpi-body">
+          <div>
+            <div class="kpi-value">2</div>
+            <div class="kpi-unit">ce mois</div>
+          </div>
+          <div class="kpi-sub">DUPLICATE + SUSPECTED_DUPLICATE.<br>Évite les doubles paiements.</div>
+          <div class="sparkline">
+            <div class="spark-bar" style="height:20px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:16px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:24px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:18px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:14px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:8px;background:var(--ok)"></div>
+          </div>
+        </div>
+        <hr class="kpi-divider">
+        <div class="kpi-footer">
+          <span class="kpi-meta">DUPLICATE : <strong>1</strong></span>
+          <span class="kpi-meta">SUSPECTED : <strong>1</strong></span>
+          <span class="kpi-meta">Montant bloqué : <strong>4 800 TND</strong></span>
+        </div>
+      </div>
+
+      <!-- 8 -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-name">🏗️ Valeur nette comptable CAPEX</span>
+          <span class="kpi-trend" style="background:#EEF2FF;color:var(--purp);">18 actifs</span>
+        </div>
+        <div class="kpi-body">
+          <div>
+            <div class="kpi-value">2 680k</div>
+            <div class="kpi-unit">TND VNC</div>
+          </div>
+          <div class="kpi-sub">Valeur nette après amortissements YTD.<br>Plan linéaire & dégressif.</div>
+          <div class="sparkline">
+            <div class="spark-bar" style="height:36px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:34px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:32px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:30px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:28px;background:#D5E8F5"></div>
+            <div class="spark-bar" style="height:26px;background:var(--purp)"></div>
+          </div>
+        </div>
+        <hr class="kpi-divider">
+        <div class="kpi-footer">
+          <span class="kpi-meta">Valeur brute : <strong>3 140k TND</strong></span>
+          <span class="kpi-meta">Amort. YTD : <strong>460k TND</strong></span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

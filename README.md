@@ -40,7 +40,26 @@ brew install ngrok
 ngrok authtoken YOUR_TOKEN  # from ngrok.com (free)
 ```
 
-## Docker
+## Lancer le projet (superviseur / équipe BIAT IT)
+
+Prérequis : **Docker Desktop** installé — aucune installation Python requise.
+
+```bash
+# 1. Télécharger et lancer
+docker compose -f docker-compose.prod.yml up -d
+
+# 2. Premier lancement — charger le modèle IA (à faire une seule fois)
+bash scripts/docker_setup.sh
+
+# 3. Ouvrir l'application
+open http://localhost:8501
+```
+
+Le modèle IA (`qwen2.5:3b`) tourne entièrement en local — aucune donnée ne quitte la machine.
+
+---
+
+## Docker (développement)
 
 ### Prérequis
 - Docker Desktop installé
@@ -76,8 +95,9 @@ docker-compose up -d --build
 ```
 
 ### CI/CD
-Chaque push sur `main` exécute la suite complète de tests (629 tests)
-et construit l'image Docker via GitHub Actions (`.github/workflows/ci.yml`).
+Chaque push sur `main` exécute la suite complète de tests, construit l'image Docker,
+puis la publie automatiquement sur Docker Hub (`bayachaaben/biat-billing:latest`)
+via GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Fonctionnalités
 
