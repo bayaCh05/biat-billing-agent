@@ -10,7 +10,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from app._backend import get_db_engine, require_auth
+from app._backend import get_config, get_db_engine, require_auth
 from src.query.nl_query_engine import NLQueryEngine
 
 require_auth()
@@ -49,7 +49,7 @@ for i, ex in enumerate(EXAMPLES):
     cols[i % 2].button(
         ex, key=f"ex_{i}",
         on_click=_pick_example, args=(ex,),
-        use_container_width=True,
+        use_container_width="stretch",
     )
 
 st.divider()
@@ -73,7 +73,9 @@ if submitted and question.strip():
     with st.spinner("Génération SQL et exécution en cours…"):
         try:
             engine  = get_db_engine()
-            nl      = NLQueryEngine(engine, ollama_url=OLLAMA_URL)
+            cfg     = get_config()
+            nl      = NLQueryEngine(engine, ollama_url=OLLAMA_URL,
+                                    model=cfg["extraction"]["llm_model"])
             result  = nl.query(question.strip())
         except Exception as exc:
             st.error(f"Erreur inattendue : {exc}")

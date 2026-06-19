@@ -213,18 +213,15 @@ class TestBudgetTracker:
         assert salaires_mv.variance == pytest.approx(5000.0)
 
     def test_ytd_variance_aggregates_monthly(self):
-        # Mock returns different totals per call (one per month)
+        # Single query now returns one row per (catalog_id, month)
         session = MagicMock()
-        call_count = [0]
-
-        def side_effect(stmt):
-            call_count[0] += 1
-            # Return salaires actual = 80000 for every month
-            mock = MagicMock()
-            mock.all.return_value = [MagicMock(cost_catalog_id="salaires", total=80000.0)]
-            return mock
-
-        session.execute.side_effect = side_effect
+        mock_result = MagicMock()
+        mock_result.all.return_value = [
+            MagicMock(cost_catalog_id="salaires", month="01", total=80000.0),
+            MagicMock(cost_catalog_id="salaires", month="02", total=80000.0),
+            MagicMock(cost_catalog_id="salaires", month="03", total=80000.0),
+        ]
+        session.execute.return_value = mock_result
         plan = self._plan()
         tracker = BudgetTracker(plan=plan, session=session)
         ytd = tracker.ytd_variance(2026, 3)

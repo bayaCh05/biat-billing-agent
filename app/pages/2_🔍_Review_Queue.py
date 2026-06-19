@@ -13,7 +13,6 @@ from app._backend import get_config, get_ml_classifier, get_repo, get_tracker, r
 from src.models.enums import FlagSeverity, FlagType, InvoiceStatus
 from src.models.invoice import InvoiceRecord
 
-st.set_page_config(page_title="Review Queue — Invoice Agent", page_icon="🔍", layout="wide")
 require_auth()
 st.title("🔍 Review Queue")
 st.caption("Flagged and escalated invoices awaiting human review.")

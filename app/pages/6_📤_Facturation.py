@@ -131,6 +131,53 @@ with tab1:
                 else:
                     st.info("Aucune phase enregistrée pour ce projet.")
 
+                # Close open phases
+                open_phases = [p for p in phases if p.status == PhaseStatus.OPEN]
+                if open_phases:
+                    st.markdown("**Clôturer une phase**")
+                    for phase in open_phases:
+                        with st.container(border=True):
+                            st.caption(f"Phase : {phase.name} — {phase.planned_jh} JH planifiés")
+                            with st.form(f"close_phase_{phase.id}"):
+                                cp1, cp2 = st.columns(2)
+                                consumed_jh = cp1.number_input(
+                                    "JH consommés",
+                                    min_value=0.0,
+                                    value=float(phase.planned_jh),
+                                    step=0.5,
+                                    key=f"jh_{phase.id}",
+                                )
+                                closed_date = cp2.date_input(
+                                    "Date de clôture",
+                                    value=date.today(),
+                                    key=f"date_{phase.id}",
+                                )
+                                livrables_text = st.text_area(
+                                    "Livrables (un par ligne)",
+                                    key=f"liv_{phase.id}",
+                                    height=80,
+                                )
+                                if st.form_submit_button(f"✅ Clôturer {phase.name}", type="primary"):
+                                    livrables = [
+                                        l.strip()
+                                        for l in livrables_text.split("\n")
+                                        if l.strip()
+                                    ]
+                                    try:
+                                        project_repo.close_phase(
+                                            phase.id,
+                                            closed_date,
+                                            consumed_jh,
+                                            livrables,
+                                        )
+                                        st.success(
+                                            f"Phase **{phase.name}** clôturée — "
+                                            f"{consumed_jh} JH enregistrés."
+                                        )
+                                        st.rerun()
+                                    except Exception as exc:
+                                        st.error(f"Erreur : {exc}")
+
                 # Add phase form
                 with st.form(f"new_phase_{c.project_id}"):
                     st.caption("Ajouter une phase")

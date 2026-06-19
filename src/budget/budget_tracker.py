@@ -189,10 +189,41 @@ class BudgetTracker:
         return result
 
     def ytd_variance(self, year: int, through_month: int) -> list[YearVariance]:
-        """YTD variance for every catalog line from January through through_month."""
-        actuals_by_month: dict[int, dict[str, float]] = {}
-        for m in range(1, through_month + 1):
-            actuals_by_month[m] = self._actuals_by_catalog(year, m, m)
+        """YTD variance for every catalog line from January through through_month.
+
+        Uses a single GROUP BY query instead of one query per month.
+        """
+        start = date(year, 1, 1)
+        end = _last_day(year, through_month)
+
+        rows = self.session.execute(
+            select(
+                InvoiceORM.cost_catalog_id,
+                func.strftime('%m', InvoiceORM.invoice_date).label('month'),
+                func.sum(InvoiceORM.amount_ht).label('total'),
+            )
+            .where(
+                and_(
+                    InvoiceORM.status.in_(self.ACTUAL_STATUSES),
+                    InvoiceORM.direction == "SUPPLIER",
+                    InvoiceORM.invoice_date >= start,
+                    InvoiceORM.invoice_date <= end,
+                    InvoiceORM.cost_catalog_id.isnot(None),
+                    InvoiceORM.amount_ht.isnot(None),
+                )
+            )
+            .group_by(
+                InvoiceORM.cost_catalog_id,
+                func.strftime('%m', InvoiceORM.invoice_date),
+            )
+        ).all()
+
+        actuals_by_month: dict[int, dict[str, float]] = {
+            m: {} for m in range(1, through_month + 1)
+        }
+        for row in rows:
+            m = int(row.month)
+            actuals_by_month.setdefault(m, {})[row.cost_catalog_id] = float(row.total or 0)
 
         result: list[YearVariance] = []
         for line in self.plan.lines:

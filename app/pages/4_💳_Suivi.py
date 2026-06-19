@@ -10,11 +10,11 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from app._backend import get_reconciler, get_repo, get_tracker, require_auth, status_badge
+from app._backend import get_client_invoice_repo, get_reconciler, get_repo, get_tracker, require_auth, status_badge
+from src.models.client_invoice import ClientInvoice, ClientInvoiceStatus
 from src.models.enums import InvoiceDirection, InvoiceStatus
 from src.models.invoice import InvoiceRecord
 
-st.set_page_config(page_title="Suivi de Paiement — Invoice Agent", page_icon="💳", layout="wide")
 require_auth()
 st.title("💳 Suivi de Paiement")
 st.caption("Track outstanding payables, receivables, and overdue invoices.")
@@ -33,6 +33,8 @@ try:
     pending_pay  = repo.get_pending_payment()
     pending_col  = repo.get_pending_collection()
     overdue      = repo.get_overdue()
+    client_inv_repo = get_client_invoice_repo()
+    client_invoices_sent = client_inv_repo.list_by_status(ClientInvoiceStatus.SENT)
 except Exception as exc:
     st.error(f"Cannot connect to database: {exc}")
     st.stop()
@@ -156,13 +158,61 @@ with tab_pay:
 
 with tab_col:
     if not pending_col:
-        st.success("No outstanding receivables — all client invoices are collected.")
+        st.success("No outstanding receivables — all intra-group receivables are settled.")
     else:
-        st.subheader(f"{len(pending_col)} client invoice(s) awaiting collection")
+        st.subheader(f"{len(pending_col)} intra-group receivable(s) awaiting collection")
         st.dataframe(_invoice_table_rows(pending_col), width="stretch", hide_index=True)
         st.divider()
         for inv in sorted(pending_col, key=lambda x: x.due_date.value or datetime.now(tz=timezone.utc).date()):
             _record_payment_form(inv, "Collection", "col")
+
+    # ── Client invoices emitted by the billing module ─────────────────────────
+    if client_invoices_sent:
+        st.divider()
+        st.subheader(f"Factures clients émises — en attente d'encaissement ({len(client_invoices_sent)})")
+        today_date = datetime.now(tz=timezone.utc).date()
+        ci_rows = []
+        for inv in sorted(client_invoices_sent, key=lambda x: x.due_date):
+            overdue_flag = "🔴 " if inv.due_date < today_date else ""
+            ci_rows.append({
+                "N° Facture":  inv.invoice_number,
+                "Client":      inv.client_name,
+                "Date":        str(inv.invoice_date),
+                "Échéance":    f"{overdue_flag}{inv.due_date}",
+                "HT (TND)":    f"{inv.amount_ht:,.3f}",
+                "TTC (TND)":   f"{inv.amount_ttc:,.3f}",
+            })
+        st.dataframe(pd.DataFrame(ci_rows), width="stretch", hide_index=True)
+        st.divider()
+        for inv in sorted(client_invoices_sent, key=lambda x: x.due_date):
+            with st.expander(
+                f"💳 Encaisser — {inv.client_name} · {inv.invoice_number} · {inv.amount_ttc:,.3f} TND"
+            ):
+                with st.form(key=f"collect_ci_{inv.id}"):
+                    col_a, col_b = st.columns(2)
+                    ref_ci    = col_a.text_input("Référence virement", placeholder="VIR-2026-0001",
+                                                  key=f"ref_ci_{inv.id}")
+                    amount_ci = col_b.number_input("Montant encaissé (TND)", value=inv.amount_ttc,
+                                                    min_value=0.001, step=0.001, format="%.3f",
+                                                    key=f"amt_ci_{inv.id}")
+                    submitted_ci = st.form_submit_button("✅ Marquer comme encaissée", type="primary")
+                if submitted_ci:
+                    if not ref_ci.strip():
+                        st.error("La référence virement est obligatoire.")
+                    else:
+                        try:
+                            client_inv_repo.update_status(
+                                inv.id,
+                                ClientInvoiceStatus.PAID,
+                                paid_at=datetime.now(tz=timezone.utc),
+                            )
+                            st.success(
+                                f"Facture **{inv.invoice_number}** marquée comme encaissée "
+                                f"(réf. {ref_ci.strip()})."
+                            )
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Erreur : {exc}")
 
 
 # ── Tab 3: Overdue ────────────────────────────────────────────────────────────

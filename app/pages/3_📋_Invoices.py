@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from app._backend import conf_icon, get_repo, render_flags, render_invoice_fields, require_auth
 from src.models.enums import InvoiceDirection, InvoiceStatus
 
-st.set_page_config(page_title="Invoices — Invoice Agent", page_icon="📋", layout="wide")
 require_auth()
 st.title("📋 All Invoices")
 st.caption("Browse, filter and inspect every processed invoice.")
@@ -44,17 +43,15 @@ with st.sidebar:
 
 try:
     repo = get_repo()
-    all_invoices = []
-    statuses_to_load = (
-        [InvoiceStatus(s) for s in status_filter]
-        if status_filter
-        else list(InvoiceStatus)
-    )
-    for status in statuses_to_load:
-        all_invoices.extend(repo.get_by_status(status))
+    all_invoices = repo.list_all()
 except Exception as exc:
     st.error(f"Cannot connect to database: {exc}")
     st.stop()
+
+# Apply status filter
+if status_filter:
+    selected = {InvoiceStatus(s) for s in status_filter}
+    all_invoices = [i for i in all_invoices if i.status in selected]
 
 # Apply direction filter
 if direction_filter:

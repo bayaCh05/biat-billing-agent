@@ -97,9 +97,15 @@ class NLQueryEngine:
     No data leaves the server.
     """
 
-    def __init__(self, engine, ollama_url: str = "http://localhost:11434") -> None:
+    def __init__(
+        self,
+        engine,
+        ollama_url: str = "http://localhost:11434",
+        model: str = "qwen2.5:3b",
+    ) -> None:
         self.engine = engine
         self.ollama_url = ollama_url.rstrip("/")
+        self.model = model
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -168,7 +174,7 @@ class NLQueryEngine:
             resp = requests.post(
                 f"{self.ollama_url}/api/chat",
                 json={
-                    "model": "qwen2.5:3b",
+                    "model": self.model,
                     "messages": [
                         {"role": "system", "content": _SYSTEM_PROMPT},
                         {"role": "user",   "content": question},
