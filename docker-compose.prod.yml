@@ -1,7 +1,7 @@
 services:
 
   app:
-    image: bayachaaben/biat-billing:latest
+    image: baya05/biat-billing:latest
     container_name: biat_billing_app
     ports:
       - "8501:8501"
