@@ -47,14 +47,14 @@ jobs:
           "
 
       - name: Run tests
-        run: pytest --tb=short -q
+        run: pytest --tb=short -q --junitxml=test-results.xml
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: test-results
-          path: .pytest_cache/
+          path: test-results.xml
 
   docker-build:
     name: Build Docker image
