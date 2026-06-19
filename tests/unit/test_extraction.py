@@ -257,8 +257,10 @@ class TestTesseractEngine:
     def test_language_mapping(self, white_image):
         # With fr+ar, the engine runs two separate passes (Latin then Arabic)
         # to avoid bidi corruption.  Collect all lang args across all calls.
+        # Mock get_languages so the test is independent of installed Tesseract packs.
         engine = TesseractEngine(languages=["fr", "ar"])
-        with patch("pytesseract.image_to_string", return_value="") as mock_tess:
+        with patch("pytesseract.get_languages", return_value=["fra", "ara", "eng"]), \
+             patch("pytesseract.image_to_string", return_value="") as mock_tess:
             engine.extract([white_image])
         all_lang_args = [
             (c[1].get("lang") or c[0][1]) for c in mock_tess.call_args_list

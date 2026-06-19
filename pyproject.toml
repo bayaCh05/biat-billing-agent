@@ -41,6 +41,7 @@ dependencies = [
 
     # ML fallback classifier
     "scikit-learn>=1.5",
+    "scikit-image>=0.22",
     "joblib>=1.4",
 
     # PDF generation (client invoices)
