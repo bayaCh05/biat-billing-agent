@@ -51,6 +51,11 @@ dependencies = [
     "streamlit>=1.35",
     "plotly>=5.0",
 
+    # REST API
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "python-multipart>=0.0.9",
+
     # Configuration & environment
     "pyyaml>=6.0",
     "python-dotenv>=1.0",

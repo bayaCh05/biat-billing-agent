@@ -39,17 +39,23 @@ from src.capex.depreciation_entry_generator import DepreciationEntryGenerator
 # ── Authentication ────────────────────────────────────────────────────────────
 
 def require_auth() -> None:
+    from app._styles import inject_css, sidebar_brand
+    inject_css()
     if st.session_state.get("authenticated"):
+        sidebar_brand()
         return
-    st.title("Invoice Agent — BIAT IT")
-    pwd = st.text_input("Enter access password", type="password", key="_auth_pwd")
-    if st.button("Login", type="primary"):
+    sidebar_brand()
+    st.markdown("## 🏦 BIAT IT — Système de Facturation")
+    st.markdown("Veuillez vous connecter pour accéder à l'application.")
+    pwd = st.text_input("Mot de passe", type="password", key="_auth_pwd",
+                        placeholder="Entrez votre mot de passe")
+    if st.button("Se connecter", type="primary"):
         expected = st.secrets.get("app_password", "biat2024")
         if pwd == expected:
             st.session_state.authenticated = True
             st.rerun()
         else:
-            st.error("Incorrect password.")
+            st.error("Mot de passe incorrect.")
     st.stop()
 
 

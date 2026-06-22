@@ -143,8 +143,11 @@ class InvoiceRepository:
         ).scalar_one() or 0
         return total, auto
 
-    def list_all(self) -> list[InvoiceRecord]:
-        orms = self.session.execute(select(InvoiceORM)).scalars().all()
+    def list_all(self, limit: int | None = None) -> list[InvoiceRecord]:
+        q = select(InvoiceORM).order_by(InvoiceORM.received_at.desc())
+        if limit is not None:
+            q = q.limit(limit)
+        orms = self.session.execute(q).scalars().all()
         return [self._to_pydantic(o) for o in orms]
 
     def get_flagged(self) -> list[InvoiceRecord]:

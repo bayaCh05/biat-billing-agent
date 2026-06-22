@@ -23,16 +23,16 @@ from src.models.invoice import InvoiceRecord
 from src.utils.file_utils import sha256
 
 st.set_page_config(
-    page_title="Invoice Agent — BIAT IT",
-    page_icon="🧾",
+    page_title="BIAT IT — Facturation",
+    page_icon="🏦",
     layout="wide",
 )
 
 require_auth()
 
-st.title("🧾 Invoice Processing Agent")
-st.caption("Intelligent invoice extraction, classification, validation and auto-correction.")
-st.divider()
+from app._styles import page_header
+page_header("🧾 Traitement de Factures", badge="Upload & Traitement", badge_cls="biat-badge-blue")
+
 
 # ── Sidebar controls ──────────────────────────────────────────────────────────
 
