@@ -43,7 +43,7 @@ Violating this is a compliance failure for a banking subsidiary.
 source .venv/bin/activate
 
 # Run tests
-.venv/bin/pytest                          # all 431 tests
+.venv/bin/pytest                          # all 629 tests
 .venv/bin/pytest tests/unit/             # unit only
 .venv/bin/pytest tests/integration/     # integration only (needs Tesseract)
 .venv/bin/pytest --tb=short -q           # compact output

@@ -262,6 +262,31 @@ class ActionResultOut(BaseModel):
     new_status: str
 
 
+# ── Projects ─────────────────────────────────────────────────────────────────
+
+class ProjectOut(BaseModel):
+    id: str
+    name: str
+    client: str
+    budget_jh: float
+    consumed_jh: float
+    taux_jh: float
+    status: str
+    start_date: str
+    end_date: str | None
+    budget_tnd: float
+    spent_tnd: float
+
+
+class ProjectPhaseOut(BaseModel):
+    id: str
+    project_id: str
+    name: str
+    planned_jh: float
+    consumed_jh: float
+    status: str
+
+
 # ── NL Query ─────────────────────────────────────────────────────────────────
 
 class NLQueryRequest(BaseModel):

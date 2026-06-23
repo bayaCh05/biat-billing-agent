@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '../components/ui/PageHeader'
 import { listJournal } from '../api/endpoints'
-import { grandLivreMock } from '../data/mockJournaux'
 import { formatTND } from '../utils/formatters'
 import type { JournalEntry } from '../types'
 
@@ -53,7 +52,7 @@ function exportFEC(gl: GrandLivreData) {
 }
 
 export default function GrandLivre() {
-  const [gl, setGl] = useState<GrandLivreData>(grandLivreMock)
+  const [gl, setGl] = useState<GrandLivreData>({})
   const [search, setSearch] = useState('')
 
   useEffect(() => {
@@ -62,7 +61,7 @@ export default function GrandLivre() {
         const built = buildGrandLivre(entries)
         if (Object.keys(built).length > 0) setGl(built)
       })
-      .catch(() => { /* keep mock */ })
+      .catch(() => {})
   }, [])
 
   const allComptes = Object.keys(gl)

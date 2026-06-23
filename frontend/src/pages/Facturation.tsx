@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus } from 'lucide-react'
 import type { Project, ProjectStatus } from '../types'
-import { mockProjects } from '../data/mockProjects'
+import { listProjects } from '../api/endpoints'
 
 const STATUS_MAP: Record<ProjectStatus, { label: string; bg: string; color: string }> = {
   ACTIVE:    { label: 'OUVERT',   bg: '#E8F5F0', color: '#1D9E76' },
@@ -67,6 +67,11 @@ function ProjectCard({ project }: { project: Project }) {
 
 export default function Facturation() {
   const [activeTab, setActiveTab] = useState(0)
+  const [projects, setProjects] = useState<Project[]>([])
+
+  useEffect(() => {
+    listProjects().then(setProjects).catch(() => {})
+  }, [])
 
   return (
     <div style={{ background: '#F0F4F9', minHeight: '100vh' }}>
@@ -109,9 +114,13 @@ export default function Facturation() {
       {/* Content */}
       {activeTab === 0 && (
         <div className="grid grid-cols-2 gap-4 p-6">
-          {mockProjects.map(project => (
-            <ProjectCard key={project.id} project={project} />
-          ))}
+          {projects.length === 0 ? (
+            <p className="col-span-2 text-center text-sm py-8" style={{ color: '#5D6D7E' }}>
+              Aucun projet — démarrez l'API et rechargez la page.
+            </p>
+          ) : (
+            projects.map(project => <ProjectCard key={project.id} project={project} />)
+          )}
         </div>
       )}
 

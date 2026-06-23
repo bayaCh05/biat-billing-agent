@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { Download } from 'lucide-react'
 import type { JournalEntry } from '../types'
 import { listJournal } from '../api/endpoints'
-import { mockJournalEntries } from '../data/mockJournaux'
 import { formatTND } from '../utils/formatters'
 
 function formatDateFr(iso: string) {
@@ -21,7 +20,7 @@ function groupByDate(entries: JournalEntry[]): [string, JournalEntry[]][] {
 }
 
 export default function Journaux() {
-  const [entries, setEntries] = useState<JournalEntry[]>(mockJournalEntries)
+  const [entries, setEntries] = useState<JournalEntry[]>([])
   const [startDate, setStartDate] = useState('2026-06-01')
   const [endDate, setEndDate] = useState('2026-06-18')
   const [compteFilter, setCompteFilter] = useState('Tous')
@@ -30,7 +29,7 @@ export default function Journaux() {
   useEffect(() => {
     listJournal(startDate, endDate)
       .then(data => { if (data.length) setEntries(data) })
-      .catch(() => setEntries(mockJournalEntries))
+      .catch(() => {})
   }, [startDate, endDate])
 
   const allLines = entries.flatMap(e => e.lines)

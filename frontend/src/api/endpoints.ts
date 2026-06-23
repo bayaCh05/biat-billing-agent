@@ -2,6 +2,7 @@ import { apiFetch, apiUpload } from './client'
 import type {
   Invoice, InvoiceSummary, JournalEntry, BudgetSummary,
   Asset, KpiData, ClientTemplate, NLQueryResult, SuiviSnapshot,
+  Project, ProjectPhase,
 } from '../types'
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
@@ -94,6 +95,14 @@ export const getSuiviSnapshot = () =>
 
 export const getNotificationCount = () =>
   apiFetch<{ count: number }>('/notifications/count')
+
+// ── Projects ──────────────────────────────────────────────────────────────────
+
+export const listProjects = () =>
+  apiFetch<Project[]>('/projects')
+
+export const listProjectPhases = (project_id: string) =>
+  apiFetch<ProjectPhase[]>(`/projects/${project_id}/phases`)
 
 // ── Health ────────────────────────────────────────────────────────────────────
 

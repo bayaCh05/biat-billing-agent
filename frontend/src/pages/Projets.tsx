@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { CreditCard } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import { listTemplates } from '../api/endpoints'
-import { mockProjects } from '../data/mockProjects'
 import { formatTND } from '../utils/formatters'
 import type { ClientTemplate } from '../types'
 
@@ -34,29 +33,15 @@ const STATUS_MAP = {
   ON_HOLD: { label: 'Sur devis',  bg: '#FFF8E8', color: '#F0A600' },
 }
 
-// Mock fallback shaped as ProjectCards
-const mockCards: ProjectCard[] = mockProjects.slice(0, 3).map(p => ({
-  id: p.id,
-  name: p.name,
-  client: p.client,
-  description: 'Service informatique mensuel',
-  unit_price_ht: p.budget_tnd / 12,
-  tva_rate: 19,
-  status: p.status === 'ACTIVE' ? 'ACTIVE' : 'ON_HOLD',
-}))
-
 export default function Projets() {
   const navigate = useNavigate()
-  const [cards, setCards] = useState<ProjectCard[]>(mockCards)
+  const [cards, setCards] = useState<ProjectCard[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     listTemplates()
-      .then(templates => {
-        const mapped = templates.map(templateToCard)
-        if (mapped.length > 0) setCards(mapped)
-      })
-      .catch(() => { /* keep mock */ })
+      .then(templates => setCards(templates.map(templateToCard)))
+      .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
 

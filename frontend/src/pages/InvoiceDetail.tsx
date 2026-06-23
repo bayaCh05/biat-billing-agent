@@ -4,7 +4,6 @@ import StatusChip from '../components/ui/StatusChip'
 import { listInvoices, getInvoice } from '../api/endpoints'
 import type { InvoiceSummary, Invoice, InvoiceDirection } from '../types'
 import { formatTND, formatDate } from '../utils/formatters'
-import { mockInvoices } from '../data/mockInvoices'
 import { useAuth } from '../context/AuthContext'
 
 const TERMINAL = new Set(['EXPORTED', 'JOURNALED', 'JOURNALING', 'PAID', 'COLLECTED'])
@@ -18,7 +17,7 @@ function confColor(c: number): string {
 
 export default function InvoiceDetail() {
   const { role, initials } = useAuth()
-  const [invoices, setInvoices] = useState<InvoiceSummary[]>(mockInvoices)
+  const [invoices, setInvoices] = useState<InvoiceSummary[]>([])
   const [tab, setTab] = useState<'all' | 'supplier' | 'client'>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<Invoice | null>(null)

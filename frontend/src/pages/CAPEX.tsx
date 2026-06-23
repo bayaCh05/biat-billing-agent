@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { Plus } from 'lucide-react'
 import type { Asset } from '../types'
 import { listAssets } from '../api/endpoints'
-import { assetsMock } from '../data/mockInvoices'
 import { formatTND } from '../utils/formatters'
 
 const NOW = new Date('2026-06-22')
@@ -35,13 +34,13 @@ function formatAcqDate(iso: string) {
 const TABS = ['Registre des actifs', "Plan d'amortissement", 'Ajouter un actif']
 
 export default function CAPEX() {
-  const [assets, setAssets] = useState<Asset[]>(assetsMock as unknown as Asset[])
+  const [assets, setAssets] = useState<Asset[]>([])
   const [activeTab, setActiveTab] = useState(0)
 
   useEffect(() => {
     listAssets()
-      .then(data => { if (data.length) setAssets(data) })
-      .catch(() => setAssets(assetsMock as unknown as Asset[]))
+      .then(data => setAssets(data))
+      .catch(() => {})
   }, [])
 
   const depreciations = assets.map(a => computeDepreciation(a))

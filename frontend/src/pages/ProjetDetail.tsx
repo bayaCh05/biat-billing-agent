@@ -4,25 +4,11 @@ import { ArrowLeft } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import Card from '../components/ui/Card'
 import { listTemplates, generateInvoice } from '../api/endpoints'
-import { mockProjects } from '../data/mockProjects'
 import { formatTND } from '../utils/formatters'
 import type { ClientTemplate } from '../types'
 
 function titleCase(id: string) {
   return id.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-}
-
-// Fallback from mock projects
-function mockFallback(id: string): ClientTemplate {
-  const p = mockProjects.find(m => m.id === id) ?? mockProjects[0]
-  return {
-    id: p.id,
-    client_code: p.client,
-    client_name: p.client,
-    service_description: `Service informatique — ${p.name}`,
-    unit_price_ht: p.budget_tnd / 12,
-    tva_rate: 19,
-  }
 }
 
 export default function ProjetDetail() {
@@ -37,9 +23,9 @@ export default function ProjetDetail() {
     listTemplates()
       .then(templates => {
         const found = templates.find(t => t.id === id)
-        setTemplate(found ?? mockFallback(id))
+        if (found) setTemplate(found)
       })
-      .catch(() => setTemplate(mockFallback(id!)))
+      .catch(() => {})
   }, [id])
 
   if (!template) {

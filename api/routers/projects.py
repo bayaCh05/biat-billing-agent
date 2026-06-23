@@ -1,0 +1,66 @@
+"""Projects / chartes endpoints."""
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from api.deps import get_session
+from api.schemas import ProjectOut, ProjectPhaseOut
+from src.storage.orm_models_projects import CharteProjetORM, PhaseORM
+
+router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _phase_status(status: str, consumed_jh: float) -> str:
+    if status in ("closed", "cancelled"):
+        return "CLOSED"
+    return "IN_PROGRESS" if consumed_jh > 0 else "OPEN"
+
+
+@router.get("", response_model=list[ProjectOut])
+def list_projects(session: Session = Depends(get_session)):
+    chartes = session.execute(
+        select(CharteProjetORM).order_by(CharteProjetORM.valid_from.desc())
+    ).scalars().all()
+
+    result = []
+    for c in chartes:
+        phases = session.execute(
+            select(PhaseORM).where(PhaseORM.project_id == c.project_id)
+        ).scalars().all()
+        consumed_jh = sum(p.consumed_jh for p in phases)
+        result.append(ProjectOut(
+            id=c.project_id,
+            name=c.project_name,
+            client=c.client,
+            budget_jh=c.budget_jh,
+            consumed_jh=consumed_jh,
+            taux_jh=c.taux_jh,
+            status="ACTIVE" if c.is_active else "COMPLETED",
+            start_date=c.valid_from.isoformat(),
+            end_date=c.valid_until.isoformat() if c.valid_until else None,
+            budget_tnd=round(c.budget_jh * c.taux_jh, 3),
+            spent_tnd=round(consumed_jh * c.taux_jh, 3),
+        ))
+    return result
+
+
+@router.get("/{project_id}/phases", response_model=list[ProjectPhaseOut])
+def list_phases(project_id: str, session: Session = Depends(get_session)):
+    phases = session.execute(
+        select(PhaseORM)
+        .where(PhaseORM.project_id == project_id)
+        .order_by(PhaseORM.id)
+    ).scalars().all()
+    return [
+        ProjectPhaseOut(
+            id=p.id,
+            project_id=p.project_id,
+            name=p.name,
+            planned_jh=p.planned_jh,
+            consumed_jh=p.consumed_jh,
+            status=_phase_status(p.status, p.consumed_jh),
+        )
+        for p in phases
+    ]

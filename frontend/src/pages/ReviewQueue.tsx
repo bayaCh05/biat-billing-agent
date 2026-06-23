@@ -3,7 +3,6 @@ import { CheckCircle, XCircle, Wrench, ChevronDown, ChevronUp, Calendar } from '
 import { getReviewQueue, approveInvoice, rejectInvoice } from '../api/endpoints'
 import type { InvoiceSummary, InvoiceFlag } from '../types'
 import { formatTND } from '../utils/formatters'
-import { reviewQueueMock } from '../data/mockInvoices'
 import { useAuth } from '../context/AuthContext'
 
 const FLAG_STYLE: Record<string, { bg: string; color: string; label: string }> = {
@@ -40,7 +39,7 @@ interface Toast { id: number; msg: string; type: 'ok' | 'err' }
 
 export default function ReviewQueue() {
   const { role, initials } = useAuth()
-  const [items, setItems] = useState<InvoiceSummary[]>(reviewQueueMock)
+  const [items, setItems] = useState<InvoiceSummary[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
   const [acting, setActing] = useState<string | null>(null)
   const [search, setSearch] = useState('')

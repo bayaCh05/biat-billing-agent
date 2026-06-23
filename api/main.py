@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications
+from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications, projects
 
 app = FastAPI(
     title="BIAT IT Billing Agent API",
@@ -40,6 +40,7 @@ app.include_router(billing.router, prefix="/api")
 app.include_router(nl_query.router, prefix="/api")
 app.include_router(suivi.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
+app.include_router(projects.router, prefix="/api")
 
 
 @app.get("/api/health")

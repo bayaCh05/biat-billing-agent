@@ -2,18 +2,14 @@ import { useState, useEffect } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { BudgetSummary, BudgetLine } from '../types'
 import { getBudgetSummary } from '../api/endpoints'
-import { budgetLinesMock } from '../data/mockInvoices'
 import { formatTND, formatVariance } from '../utils/formatters'
 
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc']
 
-const FALLBACK: BudgetSummary = {
-  year: 2026, through_month: 6,
-  total_budget_ytd: 936000,
-  total_actual_ytd: 874200,
-  variance_pct: -6.6,
-  lines_over_budget: 2,
-  lines: budgetLinesMock,
+const EMPTY: BudgetSummary = {
+  year: new Date().getFullYear(), through_month: new Date().getMonth() + 1,
+  total_budget_ytd: 0, total_actual_ytd: 0,
+  variance_pct: 0, lines_over_budget: 0, lines: [],
 }
 
 function periodLabel(month: number) {
@@ -23,12 +19,12 @@ function periodLabel(month: number) {
 export default function Budget() {
   const [year, setYear] = useState(2026)
   const [month, setMonth] = useState(6)
-  const [budget, setBudget] = useState<BudgetSummary>(FALLBACK)
+  const [budget, setBudget] = useState<BudgetSummary>(EMPTY)
 
   useEffect(() => {
     getBudgetSummary(year, month)
       .then(data => setBudget(data))
-      .catch(() => setBudget(FALLBACK))
+      .catch(() => setBudget(EMPTY))
   }, [year, month])
 
   const variance = budget.total_actual_ytd - budget.total_budget_ytd
