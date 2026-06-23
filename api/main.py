@@ -8,7 +8,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi
+from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications
 
 app = FastAPI(
     title="BIAT IT Billing Agent API",
@@ -34,6 +34,7 @@ app.include_router(kpi.router, prefix="/api")
 app.include_router(billing.router, prefix="/api")
 app.include_router(nl_query.router, prefix="/api")
 app.include_router(suivi.router, prefix="/api")
+app.include_router(notifications.router, prefix="/api")
 
 
 @app.get("/api/health")

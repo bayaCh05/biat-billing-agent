@@ -255,6 +255,32 @@ export default function KPIDashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {cards.map(card => <KpiCard key={card.name} {...card} />)}
       </div>
+
+      {/* Pipeline funnel */}
+      <div style={{ marginTop: 24, background: '#fff', border: '1px solid #D5E8F5', borderRadius: 12, padding: '18px 20px' }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: '#1A3A5C', marginBottom: 14 }}>
+          Pipeline des factures — statuts en cours
+        </p>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[
+            { keys: ['RECEIVED'],                  label: 'Reçues',       bg: '#3B4F6B' },
+            { keys: ['EXTRACTING', 'EXTRACTED'],   label: 'Extraites',    bg: '#2E6B8A' },
+            { keys: ['CLASSIFYING', 'CLASSIFIED'], label: 'Classifiées',  bg: '#2A7A8A' },
+            { keys: ['VALIDATING', 'VALIDATED'],   label: 'Validées',     bg: '#1D8A6B' },
+            { keys: ['EXPORTING', 'EXPORTED'],     label: 'Exportées',    bg: '#1A9060' },
+            { keys: ['JOURNALING', 'JOURNALED'],   label: 'Journalisées', bg: '#178050' },
+            { keys: ['PAID', 'COLLECTED'],         label: 'Payées',       bg: '#147040' },
+          ].map(stage => {
+            const count = stage.keys.reduce((s, k) => s + (kpi.by_status[k] ?? 0), 0)
+            return (
+              <div key={stage.label} style={{ flex: 1, borderRadius: 8, padding: '12px 8px', textAlign: 'center', background: stage.bg }}>
+                <p style={{ fontSize: 20, fontWeight: 700, color: '#fff', lineHeight: 1 }}>{count}</p>
+                <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.8)', marginTop: 4, lineHeight: 1.3 }}>{stage.label}</p>
+              </div>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }

@@ -90,6 +90,11 @@ export const nlQuery = (question: string) =>
 export const getSuiviSnapshot = () =>
   apiFetch<SuiviSnapshot>('/suivi/snapshot')
 
+// ── Notifications ─────────────────────────────────────────────────────────────
+
+export const getNotificationCount = () =>
+  apiFetch<{ count: number }>('/notifications/count')
+
 // ── Health ────────────────────────────────────────────────────────────────────
 
 export const checkHealth = () =>

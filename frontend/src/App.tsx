@@ -9,7 +9,6 @@ import GrandLivre from './pages/GrandLivre'
 import Facturation from './pages/Facturation'
 import Budget from './pages/Budget'
 import CAPEX from './pages/CAPEX'
-import Dashboard from './pages/Dashboard'
 import KPIDashboard from './pages/KPIDashboard'
 import Direction from './pages/Direction'
 import Requetes from './pages/Requetes'
@@ -23,8 +22,8 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route element={<Layout />}>
-          <Route path="/" element={<InvoicePipeline />} />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/" element={<Navigate to="/kpi" replace />} />
+          <Route path="/upload" element={<InvoicePipeline />} />
           <Route path="/review" element={<ReviewQueue />} />
           <Route path="/invoices" element={<InvoiceDetail />} />
           <Route path="/suivi" element={<Suivi />} />
@@ -39,7 +38,7 @@ export default function App() {
           <Route path="/projects" element={<Projets />} />
           <Route path="/projects/:id" element={<ProjetDetail />} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/kpi" replace />} />
       </Routes>
     </BrowserRouter>
   )

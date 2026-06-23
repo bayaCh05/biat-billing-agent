@@ -19,7 +19,7 @@ export default function Login() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     setRole(selectedRole)
-    navigate('/')
+    navigate('/kpi')
   }
 
   return (

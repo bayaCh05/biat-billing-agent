@@ -1,4 +1,4 @@
-const BASE = 'http://localhost:8000/api'
+const BASE = `${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/api`
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

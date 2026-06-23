@@ -1,13 +1,20 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Upload, FileText, CheckCircle, Loader2, X, ChevronRight, Wifi, WifiOff } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import Card from '../components/ui/Card'
 import StatusChip from '../components/ui/StatusChip'
-import type { Invoice } from '../types'
+import type { Invoice, InvoiceSummary } from '../types'
 import { formatTND } from '../utils/formatters'
-import { uploadInvoice } from '../api/endpoints'
+import { uploadInvoice, listInvoices } from '../api/endpoints'
 
 type Stage = 'idle' | 'running' | 'done' | 'error'
+
+function timeAgo(iso: string): string {
+  const h = Math.floor((Date.now() - new Date(iso).getTime()) / 3_600_000)
+  if (h < 1) return "À l'instant"
+  if (h < 24) return `Il y a ${h}h`
+  return `Il y a ${Math.floor(h / 24)}j`
+}
 
 export default function InvoicePipeline() {
   const [file, setFile] = useState<File | null>(null)
@@ -16,7 +23,12 @@ export default function InvoicePipeline() {
   const [live, setLive] = useState(false)
   const [result, setResult] = useState<Invoice | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [recent, setRecent] = useState<InvoiceSummary[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    listInvoices().then(data => setRecent(data.slice(0, 5))).catch(() => {})
+  }, [stage])
 
   const handleFile = (f: File) => {
     setFile(f)
@@ -252,6 +264,35 @@ export default function InvoicePipeline() {
           )}
         </div>
       </div>
+
+      {/* Recent activity */}
+      {recent.length > 0 && (
+        <div className="mx-6 mb-6 bg-white rounded-xl border p-5" style={{ borderColor: '#D5E8F5' }}>
+          <p className="font-semibold text-sm mb-3" style={{ color: '#1A3A5C' }}>Activité récente</p>
+          <div className="space-y-3">
+            {recent.map(inv => (
+              <div key={inv.id} className="flex items-center gap-3">
+                <span className="w-2 h-2 rounded-full shrink-0 mt-0.5" style={{
+                  background: inv.has_errors ? '#C0391B' : inv.human_review_required ? '#F0A600' : '#1D9E76',
+                }} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold truncate" style={{ color: '#1A1A2E' }}>
+                    {inv.issuer_name ?? '—'}
+                  </p>
+                  <p className="text-[10px]" style={{ color: '#5D6D7E' }}>
+                    {inv.amount_ttc != null ? formatTND(inv.amount_ttc, 0) : '—'}
+                    {inv.invoice_number ? ` · ${inv.invoice_number}` : ''}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right flex flex-col items-end gap-0.5">
+                  <StatusChip status={inv.status} />
+                  <span className="text-[10px]" style={{ color: '#5D6D7E' }}>{timeAgo(inv.received_at)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
