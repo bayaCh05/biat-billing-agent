@@ -8,6 +8,17 @@ Processes supplier and client invoices: OCR/LLM extraction → classification �
 
 ---
 
+## Two UIs — which one to use
+
+| UI | When to use | How to start |
+|----|-------------|--------------|
+| **React + FastAPI** (primary) | Full-featured demo, supervisor review, production deployment | `uvicorn api.main:app --reload` + `npm run dev` in `frontend/` |
+| **Streamlit** (local demo) | Quick local test of the OCR/LLM pipeline without the React app | `streamlit run app/Home.py` |
+
+The React app is served from the Docker container at port 8000. The Streamlit app is a standalone tool for testing the core pipeline.
+
+---
+
 ## Prerequisites
 
 | Requirement | Version |
@@ -89,14 +100,23 @@ Log in with any of these demo accounts on the login screen:
 
 ## Running tests
 
+**Python (629 tests):**
 ```bash
 source .venv/bin/activate
-
-.venv/bin/pytest                      # all 629 tests
+.venv/bin/pytest                      # all tests
 .venv/bin/pytest tests/unit/         # unit only (mocked deps)
 .venv/bin/pytest tests/integration/  # integration (needs Tesseract)
 .venv/bin/pytest --tb=short -q       # compact output
 ```
+
+**Frontend (35 tests — Vitest + Testing Library):**
+```bash
+cd frontend
+npm test           # run once
+npm run test:watch # watch mode
+```
+
+Tests cover: `formatTND` / `formatDate` / `formatVariance` utilities, `AuthContext` localStorage persistence and role-to-name mapping, `ReviewQueue` approve/reject toasts and error recovery.
 
 ---
 

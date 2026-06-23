@@ -1,4 +1,8 @@
-const BASE = `${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/api`
+// In dev: VITE_API_URL=http://localhost:8000 (cross-origin, frontend on :5173)
+// In Docker: VITE_API_URL="" → relative /api (same-origin, everything on :8000)
+const BASE = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api`
+  : '/api'
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

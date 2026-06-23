@@ -30,6 +30,14 @@ st.set_page_config(
 
 require_auth()
 
+st.info(
+    "**Interface de démonstration locale (Streamlit).** "
+    "L'interface de production complète est l'application React — "
+    "démarrez-la avec `npm run dev` dans `frontend/` "
+    "et `uvicorn api.main:app --reload` pour l'API.",
+    icon="ℹ️",
+)
+
 from app._styles import page_header
 page_header("🧾 Traitement de Factures", badge="Upload & Traitement", badge_cls="biat-badge-blue")
 

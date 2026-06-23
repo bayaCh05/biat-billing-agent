@@ -5,8 +5,13 @@ Start with:
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications
 
@@ -40,3 +45,16 @@ app.include_router(notifications.router, prefix="/api")
 @app.get("/api/health")
 def health():
     return {"status": "ok", "service": "biat-billing-api"}
+
+
+# ── Serve React SPA (production / Docker) ─────────────────────────────────────
+# Only mounted when the compiled dist/ directory is present.
+# In local dev the Vite dev server handles the frontend separately.
+_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+
+if _DIST.exists():
+    app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str) -> FileResponse:  # noqa: ARG001
+        return FileResponse(str(_DIST / "index.html"))

@@ -31,6 +31,10 @@ jobs:
         run: npx tsc --noEmit
         working-directory: frontend
 
+      - name: Unit tests
+        run: npm test
+        working-directory: frontend
+
       - name: Build
         run: npm run build
         working-directory: frontend
@@ -108,11 +112,11 @@ jobs:
       - name: Test container starts
         run: |
           docker run -d --name test_app \
-            -p 8501:8501 \
-            -e DATABASE_URL=sqlite:////app/data/biat_billing.db \
+            -p 8000:8000 \
+            -e DATABASE_URL=sqlite:////app/data/invoices.db \
             biat-billing:latest
           sleep 15
-          curl -f http://localhost:8501/_stcore/health
+          curl -f http://localhost:8000/api/health
           docker stop test_app
 
   publish:
