@@ -36,6 +36,8 @@ function confColor(c: number) {
   return '#C0391B'
 }
 
+interface Toast { id: number; msg: string; type: 'ok' | 'err' }
+
 export default function ReviewQueue() {
   const { role, initials } = useAuth()
   const [items, setItems] = useState<InvoiceSummary[]>(reviewQueueMock)
@@ -43,6 +45,14 @@ export default function ReviewQueue() {
   const [acting, setActing] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('Tous')
+  const [toasts, setToasts] = useState<Toast[]>([])
+  const toastId = useState(0)
+
+  const addToast = (msg: string, type: 'ok' | 'err') => {
+    const id = ++toastId[0]
+    setToasts(prev => [...prev, { id, msg, type }])
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500)
+  }
 
   useEffect(() => {
     getReviewQueue()
@@ -59,18 +69,32 @@ export default function ReviewQueue() {
 
   const approve = async (id: string) => {
     setActing(id)
-    try { await approveInvoice(id) } catch { /* offline */ }
-    setItems(prev => prev.filter(i => i.id !== id))
-    if (expanded === id) setExpanded(null)
-    setActing(null)
+    const inv = items.find(i => i.id === id)
+    try {
+      await approveInvoice(id)
+      setItems(prev => prev.filter(i => i.id !== id))
+      if (expanded === id) setExpanded(null)
+      addToast(`✓ ${inv?.issuer_name ?? 'Facture'} — approuvée`, 'ok')
+    } catch {
+      addToast(`Erreur réseau — action non enregistrée`, 'err')
+    } finally {
+      setActing(null)
+    }
   }
 
   const reject = async (id: string) => {
     setActing(id)
-    try { await rejectInvoice(id) } catch { /* offline */ }
-    setItems(prev => prev.filter(i => i.id !== id))
-    if (expanded === id) setExpanded(null)
-    setActing(null)
+    const inv = items.find(i => i.id === id)
+    try {
+      await rejectInvoice(id)
+      setItems(prev => prev.filter(i => i.id !== id))
+      if (expanded === id) setExpanded(null)
+      addToast(`✗ ${inv?.issuer_name ?? 'Facture'} — rejetée`, 'err')
+    } catch {
+      addToast(`Erreur réseau — action non enregistrée`, 'err')
+    } finally {
+      setActing(null)
+    }
   }
 
   return (
@@ -141,9 +165,13 @@ export default function ReviewQueue() {
                 <>
                   <tr
                     key={item.id}
-                    className="cursor-pointer hover:bg-[#F8FAFC] transition-colors"
-                    style={{ borderBottom: '1px solid #F0F4F9' }}
-                    onClick={() => setExpanded(expanded === item.id ? null : item.id)}
+                    className="cursor-pointer transition-colors"
+                    style={{
+                      borderBottom: '1px solid #F0F4F9',
+                      background: acting === item.id ? '#FFFBF0' : undefined,
+                      opacity: acting === item.id ? 0.7 : 1,
+                    }}
+                    onClick={() => acting !== item.id && setExpanded(expanded === item.id ? null : item.id)}
                   >
                     <td className="px-4 py-3 font-medium" style={{ color: '#5D6D7E' }}>{String(idx + 1).padStart(2, '0')}</td>
                     <td className="px-4 py-3 font-semibold" style={{ color: '#1A1A2E' }}>{item.issuer_name ?? '—'}</td>
@@ -243,6 +271,25 @@ export default function ReviewQueue() {
           </table>
         </div>
         <div className="h-6" />
+      </div>
+
+      {/* Toast stack — bottom-right */}
+      <div className="fixed bottom-5 right-5 flex flex-col gap-2 z-50 pointer-events-none">
+        {toasts.map(t => (
+          <div
+            key={t.id}
+            className="flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium pointer-events-auto"
+            style={{
+              background: t.type === 'ok' ? '#E8F5F0' : '#FDECEA',
+              color:      t.type === 'ok' ? '#1D9E76' : '#C0391B',
+              border:     `1px solid ${t.type === 'ok' ? '#1D9E76' : '#C0391B'}`,
+              minWidth: 260,
+            }}
+          >
+            {t.type === 'ok' ? <CheckCircle size={15} /> : <XCircle size={15} />}
+            {t.msg}
+          </div>
+        ))}
       </div>
     </div>
   )

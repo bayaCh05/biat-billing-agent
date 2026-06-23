@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from api.deps import get_session
-from api.schemas import InvoiceSummary, ReviewActionRequest
+from api.schemas import InvoiceSummary, ReviewActionRequest, ActionResultOut
 from src.models.enums import InvoiceStatus
 from src.storage.repository import InvoiceRepository
 
@@ -26,7 +26,7 @@ def get_review_queue(session: Session = Depends(get_session)):
     return [InvoiceSummary.from_record(inv) for inv in queue]
 
 
-@router.post("/{invoice_id}/approve")
+@router.post("/{invoice_id}/approve", response_model=ActionResultOut)
 def approve(
     invoice_id: str,
     body: ReviewActionRequest = ReviewActionRequest(),
@@ -43,10 +43,10 @@ def approve(
     inv.human_review_notes = body.notes or None
     inv.status = InvoiceStatus.VALIDATED
     repo.save(inv)
-    return {"id": invoice_id, "action": "approved", "new_status": inv.status.value}
+    return ActionResultOut(id=invoice_id, action="approved", new_status=inv.status.value)
 
 
-@router.post("/{invoice_id}/reject")
+@router.post("/{invoice_id}/reject", response_model=ActionResultOut)
 def reject(
     invoice_id: str,
     body: ReviewActionRequest = ReviewActionRequest(),
@@ -58,7 +58,7 @@ def reject(
     inv.human_review_required = False
     inv.human_review_notes = body.notes or None
     repo.save(inv)
-    return {"id": invoice_id, "action": "rejected", "new_status": inv.status.value}
+    return ActionResultOut(id=invoice_id, action="rejected", new_status=inv.status.value)
 
 
 def _get_or_404(repo: InvoiceRepository, invoice_id: str):

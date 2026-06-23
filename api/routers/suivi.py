@@ -44,10 +44,9 @@ def _build_ageing(invoices, today: date) -> AgeingBucketOut:
     bucket = AgeingBucketOut()
     for inv in invoices:
         amount = inv.amount_ttc.value or 0.0
-        received = inv.received_at
-        if isinstance(received, datetime):
-            received = received.date()
-        age_days = (today - received).days
+        # Ageing = days past due (negative = not yet due → current bucket)
+        due = inv.due_date.value if inv.due_date and inv.due_date.value else None
+        age_days = (today - due).days if due else 0
 
         if age_days <= 0:
             bucket.current += amount

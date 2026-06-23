@@ -1,30 +1,32 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   Home, LayoutDashboard, ClipboardList, Files,
-  Activity, BookOpen, CreditCard, BarChart2,
-  Building2, TrendingUp, Gauge, MessageSquare, LogOut,
+  Activity, BookOpen, BookMarked, CreditCard, BarChart2,
+  Building2, TrendingUp, Gauge, MessageSquare, FolderKanban, LogOut,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 
 const NAV_BY_ROLE: Record<string, string[]> = {
-  'Comptable':      ['/', '/dashboard', '/review', '/invoices', '/suivi', '/journal', '/billing', '/budget', '/capex', '/kpi', '/requetes'],
-  'Chef de Projet': ['/', '/dashboard', '/invoices', '/suivi', '/billing', '/budget'],
+  'Comptable':      ['/', '/dashboard', '/review', '/invoices', '/suivi', '/journal', '/grand-livre', '/billing', '/projects', '/budget', '/capex', '/kpi', '/requetes'],
+  'Chef de Projet': ['/', '/dashboard', '/invoices', '/suivi', '/billing', '/projects', '/budget'],
   'Direction':      ['/', '/direction', '/kpi', '/budget', '/capex', '/requetes'],
 }
 
 const nav = [
-  { path: '/',          icon: Home,            label: 'Accueil' },
-  { path: '/dashboard', icon: LayoutDashboard, label: 'Tableau de bord' },
-  { path: '/review',    icon: ClipboardList,   label: 'File de révision' },
-  { path: '/invoices',  icon: Files,           label: 'Factures' },
-  { path: '/suivi',     icon: Activity,        label: 'Suivi' },
-  { path: '/journal',   icon: BookOpen,        label: 'Journal' },
-  { path: '/billing',   icon: CreditCard,      label: 'Facturation' },
-  { path: '/budget',    icon: BarChart2,       label: 'Budget' },
-  { path: '/capex',     icon: Building2,       label: 'Immobilisations' },
-  { path: '/direction', icon: TrendingUp,      label: 'Direction' },
-  { path: '/kpi',       icon: Gauge,           label: 'KPI Dashboard' },
-  { path: '/requetes',  icon: MessageSquare,   label: 'Requêtes' },
+  { path: '/',            icon: Home,            label: 'Accueil' },
+  { path: '/dashboard',   icon: LayoutDashboard, label: 'Tableau de bord' },
+  { path: '/review',      icon: ClipboardList,   label: 'File de révision' },
+  { path: '/invoices',    icon: Files,           label: 'Factures' },
+  { path: '/suivi',       icon: Activity,        label: 'Suivi' },
+  { path: '/journal',     icon: BookOpen,        label: 'Journal' },
+  { path: '/grand-livre', icon: BookMarked,      label: 'Grand Livre' },
+  { path: '/billing',     icon: CreditCard,      label: 'Facturation' },
+  { path: '/projects',    icon: FolderKanban,    label: 'Projets' },
+  { path: '/budget',      icon: BarChart2,       label: 'Budget' },
+  { path: '/capex',       icon: Building2,       label: 'Immobilisations' },
+  { path: '/direction',   icon: TrendingUp,      label: 'Direction' },
+  { path: '/kpi',         icon: Gauge,           label: 'KPI Dashboard' },
+  { path: '/requetes',    icon: MessageSquare,   label: 'Requêtes' },
 ]
 
 export default function Sidebar() {

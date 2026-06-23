@@ -33,8 +33,17 @@ const invoicesMock: InvoiceSummary[] = [
     extraction_method: 'NATIVE_PDF', flags: [],
     human_review_required: false, has_errors: false, received_at: new Date(Date.now() - 14 * 86400000).toISOString() },
 ]
-const monthlyMock = [142, 165, 198, 172, 210, 247]
-const monthLabels = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin']
+const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
+
+function computeMonthlyKTnd(invoices: InvoiceSummary[], year: number, upToMonth: number) {
+  return Array.from({ length: upToMonth }, (_, i) => {
+    const prefix = `${year}-${String(i + 1).padStart(2, '0')}`
+    const total = invoices
+      .filter(inv => inv.received_at.startsWith(prefix))
+      .reduce((s, inv) => s + (inv.amount_ttc ?? 0), 0)
+    return Math.round(total / 1000)
+  })
+}
 
 function ageInDays(dateStr: string): number {
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)
@@ -104,13 +113,26 @@ export default function Direction() {
   const flaggedInvoice = invoices.find(i => i.status === 'FLAGGED')
   const bigInvoice = invoices.find(i => (i.amount_ttc ?? 0) > 10000)
 
+  // Monthly chart — last N months of current year from real invoice data
+  const chartYear = now.getFullYear()
+  const chartMonths = now.getMonth() + 1
+  const monthlyKTnd = computeMonthlyKTnd(invoices, chartYear, chartMonths)
+  const monthLabels = MONTH_LABELS.slice(0, chartMonths)
+  const maxVal = Math.max(...monthlyKTnd, 1)
+
+  // Current-month billing delta
+  const currentMonthPrefix = `${chartYear}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const thisMonthTotal = invoices
+    .filter(i => i.received_at.startsWith(currentMonthPrefix))
+    .reduce((s, i) => s + (i.amount_ttc ?? 0), 0)
+  const thisMonthDelta = thisMonthTotal > 0
+    ? `${Math.round(thisMonthTotal / 1000)}k TND ce mois`
+    : `${kpi.by_status?.COLLECTED ?? 0} factures émises`
+
   // SVG donut
   const r = 54
-  const circ = 2 * Math.PI * r // ≈ 338.6
+  const circ = 2 * Math.PI * r
   const dashOffset = circ * (1 - consumedPct / 100)
-
-  // Bar chart
-  const maxVal = Math.max(...monthlyMock)
 
   const kpiCards1 = [
     {
@@ -144,7 +166,7 @@ export default function Direction() {
     },
     {
       label: 'Factures client émises', value: kpi.by_status?.COLLECTED ?? 24, suffix: '',
-      delta: '180k TND ce mois', deltaColor: '#1D9E76',
+      delta: thisMonthDelta, deltaColor: '#1D9E76',
       accent: '#804CD7',
     },
   ]
@@ -291,8 +313,8 @@ export default function Direction() {
           Facturation mensuelle 2026 (k TND)
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 0, height: 110 }}>
-          {monthlyMock.map((val, i) => {
-            const isLast = i === monthlyMock.length - 1
+          {monthlyKTnd.map((val, i) => {
+            const isLast = i === monthlyKTnd.length - 1
             const barH = Math.round((val / maxVal) * 90)
             return (
               <div key={monthLabels[i]} style={{

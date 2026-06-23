@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
-from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -246,6 +245,21 @@ class GenerateInvoiceRequest(BaseModel):
     template_id: str
     year: int
     month: int
+
+
+class GeneratedInvoiceOut(BaseModel):
+    invoice_number: str
+    client_name: str
+    amount_ht: float
+    tva_amount: float
+    amount_ttc: float
+    status: str
+
+
+class ActionResultOut(BaseModel):
+    id: str
+    action: str
+    new_status: str
 
 
 # ── NL Query ─────────────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from api.deps import get_session, get_components
-from api.schemas import InvoiceOut, InvoiceSummary
+from api.schemas import InvoiceOut, InvoiceSummary, ActionResultOut
 from src.agent.pipeline import extract, classify, validate, export_file, post_journal
 from src.models.enums import InvoiceStatus
 from src.models.invoice import InvoiceRecord
@@ -132,7 +132,7 @@ def get_invoice(
     return InvoiceOut.from_record(inv)
 
 
-@router.patch("/{invoice_id}/status")
+@router.patch("/{invoice_id}/status", response_model=ActionResultOut)
 def update_status(
     invoice_id: str,
     new_status: str,
@@ -149,4 +149,4 @@ def update_status(
         raise HTTPException(404, "Invoice not found")
     inv.status = status
     repo.save(inv)
-    return {"id": invoice_id, "status": new_status}
+    return ActionResultOut(id=invoice_id, action="status_updated", new_status=new_status)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../api/client'
-import type { KpiData, BudgetSummary, Asset } from '../types'
+import type { KpiData, BudgetSummary, Asset, InvoiceSummary } from '../types'
 import { formatTND } from '../utils/formatters'
 
 const kpiMock: KpiData = {
@@ -81,11 +81,13 @@ export default function KPIDashboard() {
   const [kpi, setKpi] = useState<KpiData>(kpiMock)
   const [budget, setBudget] = useState<BudgetSummary>(budgetMock)
   const [assets, setAssets] = useState<Asset[]>([])
+  const [invoices, setInvoices] = useState<InvoiceSummary[]>([])
 
   useEffect(() => {
     apiFetch<KpiData>('/kpi').then(setKpi).catch(() => {})
     apiFetch<BudgetSummary>('/budget/summary').then(setBudget).catch(() => {})
     apiFetch<Asset[]>('/assets').then(setAssets).catch(() => {})
+    apiFetch<InvoiceSummary[]>('/invoices').then(setInvoices).catch(() => {})
   }, [])
 
   const now = new Date()
@@ -98,6 +100,19 @@ export default function KPIDashboard() {
   const catalogRate = (((kpi.total_invoices - kpi.flagged) / Math.max(kpi.total_invoices, 1)) * 100).toFixed(1)
 
   const grossCapex = assets.reduce((s, a) => s + a.acquisition_cost_ht, 0) || 3140000
+
+  // Amounts derived from the invoices list — no hardcoded values
+  const flaggedInvoices = invoices.filter(i => i.status === 'FLAGGED')
+  const exposedAmount = flaggedInvoices.reduce((s, i) => s + (i.amount_ttc ?? 0), 0)
+  const dupCount = kpi.by_status?.DUPLICATE ?? 0
+  const suspCount = kpi.by_status?.SUSPECTED_DUPLICATE ?? 0
+  const blockedAmount = invoices
+    .filter(i => i.flags.some(f => f.flag_type === 'DUPLICATE' || f.flag_type === 'SUSPECTED_DUPLICATE'))
+    .reduce((s, i) => s + (i.amount_ttc ?? 0), 0)
+
+  // Linear amortisation YTD: cost / life * (months elapsed / 12)
+  const monthsElapsed = now.getMonth() + 1
+  const amortYTD = assets.reduce((s, a) => s + (a.acquisition_cost_ht / a.useful_life_years) * (monthsElapsed / 12), 0)
   const acqYear = (a: Asset) => new Date(a.acquisition_date).getFullYear()
   const currentYear = now.getFullYear()
   const vncTotal = assets.length > 0
@@ -116,9 +131,8 @@ export default function KPIDashboard() {
       sub: 'De la réception à l\'export comptable. Objectif ≤ 3h.',
       sparkHeights: [20, 28, 24, 32, 22, 16], sparkColor: '#1D9E76',
       footer: [
-        { label: 'Médiane', val: '1.8h' },
-        { label: 'Max', val: '8.4h' },
         { label: 'Volume', val: `${kpi.total_invoices} factures` },
+        { label: 'En cours', val: String(kpi.pending_review) },
       ],
     },
     {
@@ -140,7 +154,7 @@ export default function KPIDashboard() {
       sparkHeights: [20, 22, 26, 28, 30, 34], sparkColor: '#1D9E76',
       footer: [
         { label: 'Sans match', val: `${kpi.flagged} factures` },
-        { label: 'Conf. ML moy.', val: '0.87' },
+        { label: 'Auto-traitées', val: `${kpi.auto_approved}` },
       ],
     },
     {
@@ -174,30 +188,30 @@ export default function KPIDashboard() {
       sparkHeights: [14, 18, 16, 20, 22, 30], sparkColor: '#F0A600',
       footer: [
         { label: 'Factures en retard', val: String(kpi.flagged) },
-        { label: 'Montant exposé', val: formatTND(27040, 3) },
+        { label: 'Montant exposé', val: formatTND(exposedAmount, 0) },
       ],
     },
     {
       name: '🔁 Doublons détectés',
-      value: String(kpi.by_status?.DUPLICATE ?? 2), unit: 'ce mois',
+      value: String(dupCount + suspCount), unit: 'ce mois',
       trend: '↓ −3 vs M-1', trendType: 'up',
       sub: 'DUPLICATE + SUSPECTED_DUPLICATE. Évite les doubles paiements.',
       sparkHeights: [20, 16, 24, 18, 14, 8], sparkColor: '#1D9E76',
       footer: [
-        { label: 'DUPLICATE', val: '1' },
-        { label: 'SUSPECTED', val: '1' },
-        { label: 'Montant bloqué', val: '4 800,000 TND' },
+        { label: 'DUPLICATE', val: String(dupCount) },
+        { label: 'SUSPECTED', val: String(suspCount) },
+        { label: 'Montant bloqué', val: formatTND(blockedAmount, 0) },
       ],
     },
     {
       name: '🏗️ Valeur nette comptable CAPEX',
       value: `${(vncTotal / 1000).toFixed(0)}k`, unit: 'TND VNC',
-      trend: `${assets.length || 18} actifs`, trendType: 'neutral',
+      trend: `${assets.length || 0} actifs`, trendType: 'neutral',
       sub: 'Valeur nette après amortissements YTD. Plan linéaire & dégressif.',
       sparkHeights: [36, 34, 32, 30, 28, 26], sparkColor: '#804CD7',
       footer: [
         { label: 'Valeur brute', val: formatTND(grossCapex, 0) },
-        { label: 'Amort. YTD', val: '460 000,000 TND' },
+        { label: 'Amort. YTD', val: formatTND(amortYTD, 0) },
       ],
     },
   ]
