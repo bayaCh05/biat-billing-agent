@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BarChart2, FolderOpen, TrendingUp } from 'lucide-react'
 import { useAuth, roleHome, type UserRole } from '../context/AuthContext'
+import { apiLogin } from '../api/client'
 
 const DEMO_CREDENTIALS: Record<UserRole, { email: string; pages: string }> = {
   'Comptable':      { email: 'comptable@biat-it.tn',  pages: 'Factures, Journal, Grand Livre, Révision' },
@@ -16,17 +17,28 @@ const roles: { id: UserRole; label: string; sub: string; icon: React.ReactNode }
 ]
 
 export default function Login() {
-  const { setRole } = useAuth()
+  const { loginWithToken } = useAuth()
   const navigate = useNavigate()
   const [selectedRole, setSelectedRole] = useState<UserRole>('Comptable')
   const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
-  const selectRole = (r: UserRole) => setSelectedRole(r)
+  const selectRole = (r: UserRole) => { setSelectedRole(r); setError('') }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setRole(selectedRole)
-    navigate(roleHome(selectedRole))
+    setError('')
+    setLoading(true)
+    try {
+      const { access_token, role } = await apiLogin(DEMO_CREDENTIALS[selectedRole].email, password || 'biat2026')
+      loginWithToken(access_token, role as UserRole)
+      navigate(roleHome(role as UserRole))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur de connexion.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -164,13 +176,18 @@ export default function Login() {
               {DEMO_CREDENTIALS[selectedRole].pages}
             </div>
 
+            {error && (
+              <p className="text-xs text-center py-1" style={{ color: '#C0391B' }}>{error}</p>
+            )}
+
             {/* Submit */}
             <button
               type="submit"
-              className="w-full py-3 rounded-xl text-white text-sm font-semibold transition-all hover:opacity-90 mt-1"
+              disabled={loading}
+              className="w-full py-3 rounded-xl text-white text-sm font-semibold transition-all hover:opacity-90 mt-1 disabled:opacity-60"
               style={{ background: '#1A3A5C' }}
             >
-              Se connecter
+              {loading ? 'Connexion…' : 'Se connecter'}
             </button>
           </form>
 

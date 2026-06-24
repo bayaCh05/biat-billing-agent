@@ -8,12 +8,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from api.auth import get_current_user
 from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications, projects
+from api.routers import auth as auth_router
+
+_PROTECTED = [Depends(get_current_user)]
 
 app = FastAPI(
     title="BIAT IT Billing Agent API",
@@ -21,7 +25,6 @@ app = FastAPI(
     description="Local-only REST API for invoice processing. All LLM inference via Ollama.",
 )
 
-# Allow all origins for local development (no credentials sent from the SPA)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,17 +33,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(invoices.router, prefix="/api")
-app.include_router(review.router, prefix="/api")
-app.include_router(journal.router, prefix="/api")
-app.include_router(budget.router, prefix="/api")
-app.include_router(capex.router, prefix="/api")
-app.include_router(kpi.router, prefix="/api")
-app.include_router(billing.router, prefix="/api")
-app.include_router(nl_query.router, prefix="/api")
-app.include_router(suivi.router, prefix="/api")
-app.include_router(notifications.router, prefix="/api")
-app.include_router(projects.router, prefix="/api")
+# Auth endpoints — no token required
+app.include_router(auth_router.router, prefix="/api")
+
+# All other endpoints — JWT required
+app.include_router(invoices.router,      prefix="/api", dependencies=_PROTECTED)
+app.include_router(review.router,        prefix="/api", dependencies=_PROTECTED)
+app.include_router(journal.router,       prefix="/api", dependencies=_PROTECTED)
+app.include_router(budget.router,        prefix="/api", dependencies=_PROTECTED)
+app.include_router(capex.router,         prefix="/api", dependencies=_PROTECTED)
+app.include_router(kpi.router,           prefix="/api", dependencies=_PROTECTED)
+app.include_router(billing.router,       prefix="/api", dependencies=_PROTECTED)
+app.include_router(nl_query.router,      prefix="/api", dependencies=_PROTECTED)
+app.include_router(suivi.router,         prefix="/api", dependencies=_PROTECTED)
+app.include_router(notifications.router, prefix="/api", dependencies=_PROTECTED)
+app.include_router(projects.router,      prefix="/api", dependencies=_PROTECTED)
 
 
 @app.get("/api/health")

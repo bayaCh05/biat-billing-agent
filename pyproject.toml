@@ -55,6 +55,7 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "python-multipart>=0.0.9",
+    "pyjwt>=2.8",
 
     # Configuration & environment
     "pyyaml>=6.0",

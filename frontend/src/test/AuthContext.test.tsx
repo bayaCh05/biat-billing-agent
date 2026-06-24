@@ -47,7 +47,8 @@ describe('AuthContext', () => {
     expect(result.current.name).toBe('Karim B.')
   })
 
-  it('fetches notifCount from API on mount', async () => {
+  it('fetches notifCount from API on mount when authenticated', async () => {
+    localStorage.setItem('biat_token', 'test-token')
     const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider })
     await act(async () => {})
     expect(result.current.notifCount).toBe(5)

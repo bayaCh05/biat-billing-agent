@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import { getNotificationCount } from '../api/endpoints'
+import { getToken, saveToken, clearToken } from '../api/client'
 
 export type UserRole = 'Comptable' | 'Chef de Projet' | 'Direction'
 
@@ -32,7 +33,10 @@ interface AuthState {
   name: string
   initials: string
   notifCount: number
+  isAuthenticated: boolean
   setRole: (r: UserRole) => void
+  loginWithToken: (token: string, role: UserRole) => void
+  logout: () => void
 }
 
 const AuthContext = createContext<AuthState>({} as AuthState)
@@ -42,6 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const stored = localStorage.getItem(STORAGE_KEY)
     return (stored as UserRole) ?? 'Comptable'
   })
+  const [isAuthenticated, setIsAuthenticated] = useState(() => !!getToken())
   const [notifCount, setNotifCount] = useState(0)
 
   const setRole = (r: UserRole) => {
@@ -49,7 +54,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setRoleState(r)
   }
 
+  const loginWithToken = (token: string, r: UserRole) => {
+    saveToken(token)
+    setRole(r)
+    setIsAuthenticated(true)
+  }
+
+  const logout = () => {
+    clearToken()
+    setIsAuthenticated(false)
+  }
+
   useEffect(() => {
+    if (!isAuthenticated) return
     getNotificationCount()
       .then(d => setNotifCount(d.count))
       .catch(() => {})
@@ -59,12 +76,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .catch(() => {})
     }, 60_000)
     return () => clearInterval(id)
-  }, [])
+  }, [isAuthenticated])
 
   const name = ROLE_NAMES[role]
 
   return (
-    <AuthContext.Provider value={{ role, setRole, name, initials: initials(name), notifCount }}>
+    <AuthContext.Provider value={{ role, setRole, name, initials: initials(name), notifCount, isAuthenticated, loginWithToken, logout }}>
       {children}
     </AuthContext.Provider>
   )

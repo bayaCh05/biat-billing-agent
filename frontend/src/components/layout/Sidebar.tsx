@@ -24,7 +24,7 @@ const nav = [
 
 export default function Sidebar() {
   const navigate = useNavigate()
-  const { name, initials, role } = useAuth()
+  const { name, initials, role, logout } = useAuth()
 
   const visibleNav = nav.filter(item => {
     const allowed = ROLE_PATHS[role]
@@ -96,7 +96,7 @@ export default function Sidebar() {
           <p className="text-xs truncate" style={{ color: '#5BA3C9' }}>{role}</p>
         </div>
         <button
-          onClick={() => navigate('/login')}
+          onClick={() => { logout(); navigate('/login') }}
           className="opacity-60 hover:opacity-100 transition-opacity shrink-0"
           title="Déconnexion"
         >

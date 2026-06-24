@@ -22,6 +22,13 @@ function HomeRedirect() {
   return <Navigate to={roleHome(role)} replace />
 }
 
+function AuthGuard() {
+  const { isAuthenticated } = useAuth()
+  const location = useLocation()
+  if (!isAuthenticated) return <Navigate to="/login" state={{ from: location }} replace />
+  return <Outlet />
+}
+
 function RoleGuard() {
   const { role } = useAuth()
   const location = useLocation()
@@ -39,6 +46,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route element={<Layout />}>
+          <Route element={<AuthGuard />}>
           <Route element={<RoleGuard />}>
             <Route path="/" element={<HomeRedirect />} />
             <Route path="/upload"      element={<InvoicePipeline />} />
@@ -55,6 +63,7 @@ export default function App() {
             <Route path="/requetes"    element={<Requetes />} />
             <Route path="/projects"    element={<Projets />} />
             <Route path="/projects/:id" element={<ProjetDetail />} />
+          </Route>
           </Route>
         </Route>
         <Route path="*" element={<HomeRedirect />} />
