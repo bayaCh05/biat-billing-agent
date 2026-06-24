@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react'
 import type { Asset } from '../types'
 import { listAssets } from '../api/endpoints'
 import { formatTND } from '../utils/formatters'
+import PageSpinner from '../components/ui/PageSpinner'
 
 const NOW = new Date('2026-06-22')
 
@@ -36,12 +37,17 @@ const TABS = ['Registre des actifs', "Plan d'amortissement", 'Ajouter un actif']
 export default function CAPEX() {
   const [assets, setAssets] = useState<Asset[]>([])
   const [activeTab, setActiveTab] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
     listAssets()
       .then(data => setAssets(data))
-      .catch(() => {})
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
   }, [])
+
+  if (loading || error) return <PageSpinner loading={loading} error={error} />
 
   const depreciations = assets.map(a => computeDepreciation(a))
   const totalBrut = assets.reduce((s, a) => s + a.acquisition_cost_ht, 0)

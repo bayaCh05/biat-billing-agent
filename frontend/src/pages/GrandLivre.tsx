@@ -3,6 +3,7 @@ import PageHeader from '../components/ui/PageHeader'
 import { listJournal } from '../api/endpoints'
 import { formatTND } from '../utils/formatters'
 import type { JournalEntry } from '../types'
+import PageSpinner from '../components/ui/PageSpinner'
 
 type GrandLivreData = Record<string, {
   libelle: string
@@ -54,15 +55,17 @@ function exportFEC(gl: GrandLivreData) {
 export default function GrandLivre() {
   const [gl, setGl] = useState<GrandLivreData>({})
   const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
     listJournal()
-      .then(entries => {
-        const built = buildGrandLivre(entries)
-        if (Object.keys(built).length > 0) setGl(built)
-      })
-      .catch(() => {})
+      .then(entries => setGl(buildGrandLivre(entries)))
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
   }, [])
+
+  if (loading || error) return <PageSpinner loading={loading} error={error} empty={!error && Object.keys(gl).length === 0} emptyMsg="Aucune écriture trouvée dans cette période." />
 
   const allComptes = Object.keys(gl)
   const comptes = allComptes.filter(c =>

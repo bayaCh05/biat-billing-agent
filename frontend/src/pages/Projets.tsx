@@ -5,6 +5,7 @@ import PageHeader from '../components/ui/PageHeader'
 import { listTemplates } from '../api/endpoints'
 import { formatTND } from '../utils/formatters'
 import type { ClientTemplate } from '../types'
+import PageSpinner from '../components/ui/PageSpinner'
 
 interface ProjectCard {
   id: string
@@ -37,13 +38,16 @@ export default function Projets() {
   const navigate = useNavigate()
   const [cards, setCards] = useState<ProjectCard[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
     listTemplates()
       .then(templates => setCards(templates.map(templateToCard)))
-      .catch(() => {})
+      .catch(() => setError(true))
       .finally(() => setLoading(false))
   }, [])
+
+  if (loading || error) return <PageSpinner loading={loading} error={error} />
 
   const totalMonthly = cards.reduce((s, c) => s + c.unit_price_ht, 0)
   const uniqueClients = new Set(cards.map(c => c.client)).size
@@ -66,10 +70,6 @@ export default function Projets() {
             </div>
           ))}
         </div>
-
-        {loading && (
-          <p className="text-sm text-center py-4" style={{ color: '#5D6D7E' }}>Chargement…</p>
-        )}
 
         <div className="space-y-3">
           {cards.map(card => {

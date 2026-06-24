@@ -3,6 +3,7 @@ import { Download } from 'lucide-react'
 import type { JournalEntry } from '../types'
 import { listJournal } from '../api/endpoints'
 import { formatTND } from '../utils/formatters'
+import PageSpinner from '../components/ui/PageSpinner'
 
 function formatDateFr(iso: string) {
   const [y, m, d] = iso.split('-')
@@ -25,12 +26,19 @@ export default function Journaux() {
   const [endDate, setEndDate] = useState('2026-06-18')
   const [compteFilter, setCompteFilter] = useState('Tous')
   const [typeFilter, setTypeFilter] = useState('Tous')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
+    setLoading(true)
+    setError(false)
     listJournal(startDate, endDate)
-      .then(data => { if (data.length) setEntries(data) })
-      .catch(() => {})
+      .then(data => setEntries(data))
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
   }, [startDate, endDate])
+
+  if (loading || error) return <PageSpinner loading={loading} error={error} />
 
   const allLines = entries.flatMap(e => e.lines)
   const totalDebit = allLines.reduce((s, l) => s + l.debit, 0)

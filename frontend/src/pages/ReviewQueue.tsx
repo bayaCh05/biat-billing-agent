@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { CheckCircle, XCircle, Wrench, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
 import { getReviewQueue, approveInvoice, rejectInvoice } from '../api/endpoints'
 import type { InvoiceSummary, InvoiceFlag } from '../types'
+import PageSpinner from '../components/ui/PageSpinner'
 import { formatTND } from '../utils/formatters'
 import { useAuth } from '../context/AuthContext'
 
@@ -46,6 +47,8 @@ export default function ReviewQueue() {
   const [statusFilter, setStatusFilter] = useState('Tous')
   const [toasts, setToasts] = useState<Toast[]>([])
   const toastId = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   const addToast = (msg: string, type: 'ok' | 'err') => {
     const id = ++toastId[0]
@@ -55,9 +58,12 @@ export default function ReviewQueue() {
 
   useEffect(() => {
     getReviewQueue()
-      .then(data => { if (data.length) setItems(data) })
-      .catch(() => {})
+      .then(data => setItems(data))
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
   }, [])
+
+  if (loading || error) return <PageSpinner loading={loading} error={error} />
 
   const filtered = items.filter(item => {
     const q = search.toLowerCase()

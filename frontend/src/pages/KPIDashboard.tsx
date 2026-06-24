@@ -2,17 +2,17 @@ import { useEffect, useState } from 'react'
 import { apiFetch } from '../api/client'
 import type { KpiData, BudgetSummary, Asset, InvoiceSummary } from '../types'
 import { formatTND } from '../utils/formatters'
+import PageSpinner from '../components/ui/PageSpinner'
 
-const kpiMock: KpiData = {
-  total_invoices: 247, total_amount_ttc: 874200,
-  auto_approved: 213, auto_approval_rate: 86,
-  flagged: 34, pending_review: 8,
-  by_status: { EXPORTED: 180, PAID: 45, ERROR: 5, EXTRACTION_FAILED: 3, FLAGGED: 14 },
+const KPI_EMPTY: KpiData = {
+  total_invoices: 0, total_amount_ttc: 0,
+  auto_approved: 0, auto_approval_rate: 0,
+  flagged: 0, pending_review: 0, by_status: {},
 }
-const budgetMock: BudgetSummary = {
-  year: 2026, through_month: 6,
-  total_budget_ytd: 936000, total_actual_ytd: 874200,
-  variance_pct: -6.6, lines_over_budget: 2, lines: [],
+const BUDGET_EMPTY: BudgetSummary = {
+  year: new Date().getFullYear(), through_month: new Date().getMonth() + 1,
+  total_budget_ytd: 0, total_actual_ytd: 0,
+  variance_pct: 0, lines_over_budget: 0, lines: [],
 }
 
 function Spark({ heights, lastColor }: { heights: number[]; lastColor: string }) {
@@ -78,16 +78,22 @@ function KpiCard({ name, value, unit, trend, trendType, sub, sparkHeights, spark
 }
 
 export default function KPIDashboard() {
-  const [kpi, setKpi] = useState<KpiData>(kpiMock)
-  const [budget, setBudget] = useState<BudgetSummary>(budgetMock)
+  const [kpi, setKpi] = useState<KpiData>(KPI_EMPTY)
+  const [budget, setBudget] = useState<BudgetSummary>(BUDGET_EMPTY)
   const [assets, setAssets] = useState<Asset[]>([])
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
-    apiFetch<KpiData>('/kpi').then(setKpi).catch(() => {})
-    apiFetch<BudgetSummary>('/budget/summary').then(setBudget).catch(() => {})
-    apiFetch<Asset[]>('/assets').then(setAssets).catch(() => {})
-    apiFetch<InvoiceSummary[]>('/invoices').then(setInvoices).catch(() => {})
+    Promise.all([
+      apiFetch<KpiData>('/kpi').then(setKpi),
+      apiFetch<BudgetSummary>('/budget/summary').then(setBudget),
+      apiFetch<Asset[]>('/assets').then(setAssets),
+      apiFetch<InvoiceSummary[]>('/invoices').then(setInvoices),
+    ])
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
   }, [])
 
   const now = new Date()
@@ -215,6 +221,8 @@ export default function KPIDashboard() {
       ],
     },
   ]
+
+  if (loading || error) return <PageSpinner loading={loading} error={error} />
 
   return (
     <div style={{ padding: '20px 24px' }}>

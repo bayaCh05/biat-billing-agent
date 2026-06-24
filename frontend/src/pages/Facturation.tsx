@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Plus } from 'lucide-react'
 import type { Project, ProjectStatus } from '../types'
 import { listProjects } from '../api/endpoints'
+import PageSpinner from '../components/ui/PageSpinner'
 
 const STATUS_MAP: Record<ProjectStatus, { label: string; bg: string; color: string }> = {
   ACTIVE:    { label: 'OUVERT',   bg: '#E8F5F0', color: '#1D9E76' },
@@ -68,10 +69,17 @@ function ProjectCard({ project }: { project: Project }) {
 export default function Facturation() {
   const [activeTab, setActiveTab] = useState(0)
   const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
-    listProjects().then(setProjects).catch(() => {})
+    listProjects()
+      .then(setProjects)
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
   }, [])
+
+  if (loading || error) return <PageSpinner loading={loading} error={error} />
 
   return (
     <div style={{ background: '#F0F4F9', minHeight: '100vh' }}>

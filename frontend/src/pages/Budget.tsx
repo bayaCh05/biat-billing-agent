@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { BudgetSummary, BudgetLine } from '../types'
 import { getBudgetSummary } from '../api/endpoints'
 import { formatTND, formatVariance } from '../utils/formatters'
+import PageSpinner from '../components/ui/PageSpinner'
 
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc']
 
@@ -20,12 +21,19 @@ export default function Budget() {
   const [year, setYear] = useState(2026)
   const [month, setMonth] = useState(6)
   const [budget, setBudget] = useState<BudgetSummary>(EMPTY)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
+    setLoading(true)
+    setError(false)
     getBudgetSummary(year, month)
       .then(data => setBudget(data))
-      .catch(() => setBudget(EMPTY))
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
   }, [year, month])
+
+  if (loading || error) return <PageSpinner loading={loading} error={error} />
 
   const variance = budget.total_actual_ytd - budget.total_budget_ytd
   const varianceOver = variance > 0

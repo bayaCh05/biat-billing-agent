@@ -2,18 +2,14 @@ import { useState, useEffect } from 'react'
 import { apiFetch } from '../api/client'
 import { formatTND, formatDate } from '../utils/formatters'
 import type { SuiviSnapshot, AgeingBucket, InvoiceSummary } from '../types'
+import PageSpinner from '../components/ui/PageSpinner'
 
-const snapshotMock: SuiviSnapshot = {
-  total_payables: 89740,
-  total_receivables: 42800,
-  overdue_count: 4,
-  pending_payment_count: 8,
-  pending_collection_count: 3,
-  payables_ageing: { current: 42800, count_current: 6, days_1_30: 18400, count_1_30: 3, days_31_60: 8640, count_31_60: 1, days_61_90: 0, count_61_90: 0, over_90: 0, count_over_90: 0 },
-  receivables_ageing: { current: 28000, count_current: 4, days_1_30: 12000, count_1_30: 2, days_31_60: 2800, count_31_60: 1, days_61_90: 0, count_61_90: 0, over_90: 0, count_over_90: 0 },
-  pending_payment: [],
-  pending_collection: [],
-  overdue: [],
+const SNAPSHOT_EMPTY: SuiviSnapshot = {
+  total_payables: 0, total_receivables: 0,
+  overdue_count: 0, pending_payment_count: 0, pending_collection_count: 0,
+  payables_ageing:    { current: 0, count_current: 0, days_1_30: 0, count_1_30: 0, days_31_60: 0, count_31_60: 0, days_61_90: 0, count_61_90: 0, over_90: 0, count_over_90: 0 },
+  receivables_ageing: { current: 0, count_current: 0, days_1_30: 0, count_1_30: 0, days_31_60: 0, count_31_60: 0, days_61_90: 0, count_61_90: 0, over_90: 0, count_over_90: 0 },
+  pending_payment: [], pending_collection: [], overdue: [],
 }
 
 const AGEING_ROWS = [
@@ -93,15 +89,18 @@ const TABS = [
 ] as const
 
 export default function Suivi() {
-  const [snapshot, setSnapshot] = useState<SuiviSnapshot>(snapshotMock)
+  const [snapshot, setSnapshot] = useState<SuiviSnapshot>(SNAPSHOT_EMPTY)
   const [tab, setTab] = useState<'payment' | 'collection' | 'overdue'>('payment')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const today = new Date()
   const monthLabel = today.toLocaleDateString('fr-TN', { month: 'long', year: 'numeric' })
 
   useEffect(() => {
     apiFetch<SuiviSnapshot>('/suivi/snapshot')
       .then(data => setSnapshot(data))
-      .catch(() => {})
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
   }, [])
 
   const kpis = [
@@ -117,6 +116,8 @@ export default function Suivi() {
     snapshot.overdue
 
   const activeTab = TABS.find(t => t.key === tab)!
+
+  if (loading || error) return <PageSpinner loading={loading} error={error} />
 
   return (
     <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>

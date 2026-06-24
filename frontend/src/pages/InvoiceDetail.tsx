@@ -5,6 +5,7 @@ import { listInvoices, getInvoice } from '../api/endpoints'
 import type { InvoiceSummary, Invoice, InvoiceDirection } from '../types'
 import { formatTND, formatDate } from '../utils/formatters'
 import { useAuth } from '../context/AuthContext'
+import PageSpinner from '../components/ui/PageSpinner'
 
 const TERMINAL = new Set(['EXPORTED', 'JOURNALED', 'JOURNALING', 'PAID', 'COLLECTED'])
 const PENDING  = new Set(['RECEIVED', 'EXTRACTING', 'EXTRACTED', 'CLASSIFYING', 'CLASSIFIED', 'VALIDATING', 'VALIDATED', 'FLAGGED', 'EXPORTING'])
@@ -22,11 +23,14 @@ export default function InvoiceDetail() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<Invoice | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
     listInvoices()
-      .then(data => { if (data.length) setInvoices(data) })
-      .catch(() => {})
+      .then(data => setInvoices(data))
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
@@ -37,6 +41,8 @@ export default function InvoiceDetail() {
       .catch(() => setDetail(null))
       .finally(() => setDetailLoading(false))
   }, [selectedId])
+
+  if (loading || error) return <PageSpinner loading={loading} error={error} />
 
   const byDir = (dir: InvoiceDirection) => invoices.filter(i => i.direction === dir)
   const displayed = tab === 'supplier' ? byDir('SUPPLIER') : tab === 'client' ? byDir('CLIENT') : invoices
