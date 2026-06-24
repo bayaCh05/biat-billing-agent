@@ -450,7 +450,7 @@ def seed(session, *, append: bool = False) -> None:
     existing_hashes = {inv.file_hash.value for inv in inv_repo.list_all()}
 
     # ── 1. Supplier invoices ──────────────────────────────────────────────────
-    print("\n[1/4] Supplier invoices…")
+    print("\n[1/5] Supplier invoices…")
     journal_queue: list[tuple[InvoiceRecord, str]] = []
     created = skipped = 0
 
@@ -485,7 +485,7 @@ def seed(session, *, append: bool = False) -> None:
         jnl_repo.save(make_journal(inv, compte))
 
     # ── 2. CAPEX assets + depreciation ───────────────────────────────────────
-    print("\n[2/4] CAPEX assets + depreciation (Jan–Jun 2026)…")
+    print("\n[2/5] CAPEX assets + depreciation (Jan–Jun 2026)…")
     assets: list[Asset] = []
     for spec in ASSET_SPECS:
         asset = Asset(**spec)
@@ -515,14 +515,75 @@ def seed(session, *, append: bool = False) -> None:
             dep_count += 1
     print(f"  {dep_count} depreciation entries (5 assets × 6 months)")
 
-    # ── 3. Client invoices ────────────────────────────────────────────────────
-    print("\n[3/4] Client invoices…")
+    # ── 3. Projects + phases ──────────────────────────────────────────────────
+    from src.storage.orm_models_projects import CharteProjetORM, PhaseORM  # noqa: PLC0415
+    print("\n[3/5] Projects + phases…")
+    proj_data = [
+        dict(id="CHR-2026-0001", project_id="PRJ-CBK", project_name="Migration Core Banking System",
+             client="BIAT", valid_from=d(2026,1,5), valid_until=d(2026,12,31),
+             budget_jh=120.0, taux_jh=850.0, is_active=True),
+        dict(id="CHR-2026-0002", project_id="PRJ-IC", project_name="Infrastructure Cloud Hybride",
+             client="BIAT", valid_from=d(2026,2,1), valid_until=d(2026,9,30),
+             budget_jh=80.0, taux_jh=850.0, is_active=True),
+        dict(id="CHR-2026-0003", project_id="PRJ-PCD", project_name="Portail Client Digital",
+             client="BIAT", valid_from=d(2026,3,1), valid_until=d(2026,11,30),
+             budget_jh=100.0, taux_jh=850.0, is_active=True),
+    ]
+    phase_data = [
+        dict(id="PH-CBK-001", project_id="PRJ-CBK", name="Analyse & spécifications",
+             description="Cadrage fonctionnel, recueil besoins",
+             planned_jh=20.0, consumed_jh=20.0, status="closed",
+             closed_date=d(2026,3,31), livrables='["Cahier des charges"]'),
+        dict(id="PH-CBK-002", project_id="PRJ-CBK", name="Architecture technique",
+             description="Conception architecture cible, prototypage",
+             planned_jh=18.0, consumed_jh=18.0, status="closed",
+             closed_date=d(2026,5,15), livrables='["Dossier d\'architecture"]'),
+        dict(id="PH-CBK-003", project_id="PRJ-CBK", name="Développement & tests",
+             description="Développement modules, tests unitaires",
+             planned_jh=82.0, consumed_jh=24.0, status="open",
+             closed_date=None, livrables='[]'),
+        dict(id="PH-IC-001", project_id="PRJ-IC", name="Audit infrastructure existante",
+             description="Inventaire, audit sécurité",
+             planned_jh=15.0, consumed_jh=15.0, status="closed",
+             closed_date=d(2026,3,15), livrables='["Rapport d\'audit"]'),
+        dict(id="PH-IC-002", project_id="PRJ-IC", name="POC Cloud hybride",
+             description="Migration pilote, validation",
+             planned_jh=28.0, consumed_jh=28.0, status="closed",
+             closed_date=d(2026,5,30), livrables='["Environnement POC"]'),
+        dict(id="PH-IC-003", project_id="PRJ-IC", name="Déploiement production",
+             description="Migration complète, formation équipes",
+             planned_jh=37.0, consumed_jh=8.0, status="open",
+             closed_date=None, livrables='[]'),
+        dict(id="PH-PCD-001", project_id="PRJ-PCD", name="UX/UI Design",
+             description="Wireframes, maquettes Figma",
+             planned_jh=15.0, consumed_jh=15.0, status="closed",
+             closed_date=d(2026,4,20), livrables='["Maquettes validées"]'),
+        dict(id="PH-PCD-002", project_id="PRJ-PCD", name="Développement frontend React",
+             description="Implémentation composants, intégration API",
+             planned_jh=42.0, consumed_jh=42.0, status="closed",
+             closed_date=d(2026,6,16), livrables='["Application web"]'),
+        dict(id="PH-PCD-003", project_id="PRJ-PCD", name="Recette & mise en production",
+             description="Tests de recette, déploiement production",
+             planned_jh=43.0, consumed_jh=0.0, status="open",
+             closed_date=None, livrables='[]'),
+    ]
+    for pd in proj_data:
+        if not session.get(CharteProjetORM, pd["id"]):
+            session.add(CharteProjetORM(**pd))
+    for phd in phase_data:
+        if not session.get(PhaseORM, phd["id"]):
+            session.add(PhaseORM(**phd))
+    session.flush()
+    print(f"  {len(proj_data)} projects, {len(phase_data)} phases")
+
+    # ── 4. Client invoices ────────────────────────────────────────────────────
+    print("\n[4/5] Client invoices…")
     for ci in _make_client_invoices():
         ci_repo.save(ci)
         print(f"  {ci.invoice_number}  HT={ci.amount_ht:,.3f} TND  [{ci.status.value}]")
 
-    # ── 4. Budget plan ────────────────────────────────────────────────────────
-    print("\n[4/4] Updating budget_plan.yaml…")
+    # ── 5. Budget plan ────────────────────────────────────────────────────────
+    print("\n[5/5] Updating budget_plan.yaml…")
     _update_budget_plan()
 
 

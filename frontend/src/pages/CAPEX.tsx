@@ -153,10 +153,98 @@ export default function CAPEX() {
       )}
 
       {activeTab === 1 && (
-        <div className="px-6 pb-6">
-          <div className="bg-white rounded-xl border p-6" style={{ borderColor: '#D5E8F5' }}>
-            <p className="text-sm text-center" style={{ color: '#5D6D7E' }}>Plan d'amortissement — à venir</p>
-          </div>
+        <div className="px-6 pb-6 space-y-4">
+          {assets.map(asset => {
+            const acqYear = parseInt(asset.acquisition_date.slice(0, 4), 10)
+            const annual = Math.round(asset.acquisition_cost_ht / asset.useful_life_years)
+            const rows = Array.from({ length: asset.useful_life_years }, (_, i) => {
+              const year = acqYear + i
+              const cumul = Math.min(asset.acquisition_cost_ht, annual * (i + 1))
+              const vnc = Math.max(0, asset.acquisition_cost_ht - cumul)
+              const pct = Math.round((cumul / asset.acquisition_cost_ht) * 100)
+              const isPast = year < NOW.getFullYear()
+              const isCurrent = year === NOW.getFullYear()
+              return { year, annuite: annual, cumul, vnc, pct, isPast, isCurrent }
+            })
+            const meta = compteMeta(asset.compte_immobilisation)
+            return (
+              <div key={asset.id} className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: '#D5E8F5' }}>
+                <div className="flex items-center gap-3 px-4 py-3" style={{ background: '#F0F4F9' }}>
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: meta.bg, color: meta.color }}>
+                    {meta.label}
+                  </span>
+                  <span className="font-semibold text-sm flex-1" style={{ color: '#1A1A2E' }}>{asset.designation}</span>
+                  <span className="text-xs" style={{ color: '#5D6D7E' }}>
+                    {formatTND(asset.acquisition_cost_ht, 0)} · {asset.useful_life_years} ans · {formatAcqDate(asset.acquisition_date)}
+                  </span>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b" style={{ borderColor: '#D5E8F5' }}>
+                      {['Exercice', 'Annuité (TND)', 'Amort. cumulé (TND)', 'VNC (TND)', '% amorti'].map(h => (
+                        <th key={h} className="px-4 py-2 text-xs font-semibold uppercase text-right first:text-left" style={{ color: '#5D6D7E' }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(row => (
+                      <tr
+                        key={row.year}
+                        className="border-b"
+                        style={{
+                          borderColor: '#F0F4F9',
+                          background: row.isCurrent ? '#EFF8F3' : row.isPast ? 'transparent' : '#FAFBFC',
+                          opacity: row.isPast ? 0.7 : 1,
+                        }}
+                      >
+                        <td className="px-4 py-2 font-semibold text-sm" style={{ color: row.isCurrent ? '#1D9E76' : '#1A1A2E' }}>
+                          {row.year}{row.isCurrent ? ' ← en cours' : ''}
+                        </td>
+                        <td className="px-4 py-2 text-right text-sm" style={{ color: '#1A1A2E' }}>
+                          {row.annuite.toLocaleString('fr-TN', { minimumFractionDigits: 3 })}
+                        </td>
+                        <td className="px-4 py-2 text-right text-sm" style={{ color: '#1A1A2E' }}>
+                          {row.cumul.toLocaleString('fr-TN', { minimumFractionDigits: 3 })}
+                        </td>
+                        <td className="px-4 py-2 text-right text-sm font-semibold" style={{ color: row.vnc === 0 ? '#C0391B' : '#1A3A5C' }}>
+                          {row.vnc.toLocaleString('fr-TN', { minimumFractionDigits: 3 })}
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ background: '#E8EFF7' }}>
+                              <div
+                                className="h-full rounded-full"
+                                style={{
+                                  width: `${row.pct}%`,
+                                  background: row.pct < 33 ? '#1D9E76' : row.pct < 66 ? '#F0A600' : '#C0391B',
+                                }}
+                              />
+                            </div>
+                            <span className="text-xs w-10 text-right" style={{ color: '#5D6D7E' }}>{row.pct}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ background: '#E8F5F0' }}>
+                      <td className="px-4 py-2 text-sm font-semibold" style={{ color: '#1D9E76' }}>Total</td>
+                      <td className="px-4 py-2 text-right text-sm font-semibold" style={{ color: '#1A1A2E' }}>
+                        {asset.acquisition_cost_ht.toLocaleString('fr-TN', { minimumFractionDigits: 3 })}
+                      </td>
+                      <td className="px-4 py-2 text-right text-sm font-semibold" style={{ color: '#1A1A2E' }}>
+                        {asset.acquisition_cost_ht.toLocaleString('fr-TN', { minimumFractionDigits: 3 })}
+                      </td>
+                      <td className="px-4 py-2 text-right text-sm font-semibold" style={{ color: '#C0391B' }}>0,000</td>
+                      <td className="px-4 py-2 text-right text-xs font-semibold" style={{ color: '#1D9E76' }}>100%</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )
+          })}
         </div>
       )}
 
