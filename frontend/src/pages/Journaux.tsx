@@ -20,10 +20,13 @@ function groupByDate(entries: JournalEntry[]): [string, JournalEntry[]][] {
   return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]))
 }
 
+function today() { return new Date().toISOString().slice(0, 10) }
+function yearStart() { return `${new Date().getFullYear()}-01-01` }
+
 export default function Journaux() {
   const [entries, setEntries] = useState<JournalEntry[]>([])
-  const [startDate, setStartDate] = useState('2026-06-01')
-  const [endDate, setEndDate] = useState('2026-06-18')
+  const [startDate, setStartDate] = useState(yearStart)
+  const [endDate, setEndDate] = useState(today)
   const [compteFilter, setCompteFilter] = useState('Tous')
   const [typeFilter, setTypeFilter] = useState('Tous')
   const [loading, setLoading] = useState(true)

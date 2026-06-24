@@ -1,6 +1,8 @@
 """Client invoice (facturation) endpoints."""
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -52,10 +54,10 @@ def generate_invoice(
     numberer = InvoiceNumberer(repo)
     builder = InvoiceBuilder(loader=loader, numberer=numberer)
 
-    invoice = builder.build(
-        client_code=tpl.default_client_id or body.template_id,
-        year=body.year,
-        month=body.month,
+    invoice_date = date(body.year, body.month, 1)
+    invoice = builder.from_template(
+        template_id=body.template_id,
+        invoice_date=invoice_date,
     )
     repo.save(invoice)
 
