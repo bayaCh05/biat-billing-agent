@@ -4,13 +4,7 @@ import {
   Activity, BookOpen, BookMarked, CreditCard, BarChart2,
   Building2, TrendingUp, Gauge, MessageSquare, FolderKanban, LogOut,
 } from 'lucide-react'
-import { useAuth } from '../../context/AuthContext'
-
-const NAV_BY_ROLE: Record<string, string[]> = {
-  'Comptable':      ['/upload', '/kpi', '/review', '/invoices', '/suivi', '/journal', '/grand-livre', '/billing', '/projects', '/budget', '/capex', '/requetes'],
-  'Chef de Projet': ['/upload', '/kpi', '/invoices', '/suivi', '/billing', '/projects', '/budget'],
-  'Direction':      ['/direction', '/kpi', '/budget', '/capex', '/requetes'],
-}
+import { useAuth, ROLE_PATHS } from '../../context/AuthContext'
 
 const nav = [
   { path: '/upload',      icon: Home,            label: 'Accueil' },
@@ -33,7 +27,7 @@ export default function Sidebar() {
   const { name, initials, role } = useAuth()
 
   const visibleNav = nav.filter(item => {
-    const allowed = NAV_BY_ROLE[role]
+    const allowed = ROLE_PATHS[role]
     return !allowed || allowed.includes(item.path)
   })
 

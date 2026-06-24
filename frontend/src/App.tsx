@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
 import Layout from './components/layout/Layout'
 import Login from './pages/Login'
 import InvoicePipeline from './pages/InvoicePipeline'
@@ -15,6 +15,23 @@ import Requetes from './pages/Requetes'
 import Suivi from './pages/Suivi'
 import Projets from './pages/Projets'
 import ProjetDetail from './pages/ProjetDetail'
+import { useAuth, ROLE_PATHS, roleHome } from './context/AuthContext'
+
+function HomeRedirect() {
+  const { role } = useAuth()
+  return <Navigate to={roleHome(role)} replace />
+}
+
+function RoleGuard() {
+  const { role } = useAuth()
+  const location = useLocation()
+  const base = '/' + location.pathname.split('/')[1]
+  const allowed = ROLE_PATHS[role] ?? []
+  if (base !== '/' && !allowed.includes(base)) {
+    return <Navigate to={roleHome(role)} replace />
+  }
+  return <Outlet />
+}
 
 export default function App() {
   return (
@@ -22,23 +39,25 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route element={<Layout />}>
-          <Route path="/" element={<Navigate to="/kpi" replace />} />
-          <Route path="/upload" element={<InvoicePipeline />} />
-          <Route path="/review" element={<ReviewQueue />} />
-          <Route path="/invoices" element={<InvoiceDetail />} />
-          <Route path="/suivi" element={<Suivi />} />
-          <Route path="/journal" element={<Journaux />} />
-          <Route path="/grand-livre" element={<GrandLivre />} />
-          <Route path="/billing" element={<Facturation />} />
-          <Route path="/budget" element={<Budget />} />
-          <Route path="/capex" element={<CAPEX />} />
-          <Route path="/direction" element={<Direction />} />
-          <Route path="/kpi" element={<KPIDashboard />} />
-          <Route path="/requetes" element={<Requetes />} />
-          <Route path="/projects" element={<Projets />} />
-          <Route path="/projects/:id" element={<ProjetDetail />} />
+          <Route element={<RoleGuard />}>
+            <Route path="/" element={<HomeRedirect />} />
+            <Route path="/upload"      element={<InvoicePipeline />} />
+            <Route path="/review"      element={<ReviewQueue />} />
+            <Route path="/invoices"    element={<InvoiceDetail />} />
+            <Route path="/suivi"       element={<Suivi />} />
+            <Route path="/journal"     element={<Journaux />} />
+            <Route path="/grand-livre" element={<GrandLivre />} />
+            <Route path="/billing"     element={<Facturation />} />
+            <Route path="/budget"      element={<Budget />} />
+            <Route path="/capex"       element={<CAPEX />} />
+            <Route path="/direction"   element={<Direction />} />
+            <Route path="/kpi"         element={<KPIDashboard />} />
+            <Route path="/requetes"    element={<Requetes />} />
+            <Route path="/projects"    element={<Projets />} />
+            <Route path="/projects/:id" element={<ProjetDetail />} />
+          </Route>
         </Route>
-        <Route path="*" element={<Navigate to="/kpi" replace />} />
+        <Route path="*" element={<HomeRedirect />} />
       </Routes>
     </BrowserRouter>
   )

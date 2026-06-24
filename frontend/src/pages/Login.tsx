@@ -1,7 +1,13 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BarChart2, FolderOpen, TrendingUp } from 'lucide-react'
-import { useAuth, type UserRole } from '../context/AuthContext'
+import { useAuth, roleHome, type UserRole } from '../context/AuthContext'
+
+const DEMO_CREDENTIALS: Record<UserRole, { email: string; pages: string }> = {
+  'Comptable':      { email: 'comptable@biat-it.tn',  pages: 'Factures, Journal, Grand Livre, Révision' },
+  'Chef de Projet': { email: 'chef@biat-it.tn',       pages: 'Projets, Facturation, Budget' },
+  'Direction':      { email: 'directeur@biat-it.tn',  pages: 'Direction, KPI, Budget, CAPEX' },
+}
 
 const roles: { id: UserRole; label: string; sub: string; icon: React.ReactNode }[] = [
   { id: 'Comptable',      label: 'Comptable',      sub: 'Factures & Journal', icon: <BarChart2 size={16} /> },
@@ -12,14 +18,15 @@ const roles: { id: UserRole; label: string; sub: string; icon: React.ReactNode }
 export default function Login() {
   const { setRole } = useAuth()
   const navigate = useNavigate()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [selectedRole, setSelectedRole] = useState<UserRole>('Comptable')
+  const [password, setPassword] = useState('')
+
+  const selectRole = (r: UserRole) => setSelectedRole(r)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     setRole(selectedRole)
-    navigate('/kpi')
+    navigate(roleHome(selectedRole))
   }
 
   return (
@@ -85,36 +92,6 @@ export default function Login() {
           <p className="text-sm mb-7" style={{ color: '#5D6D7E' }}>Accédez à votre espace de gestion</p>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {/* Email */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium" style={{ color: '#374151' }}>Adresse email</label>
-              <input
-                type="email"
-                placeholder="vous@biat-it.tn"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className="rounded-lg border px-3 py-2.5 text-sm outline-none transition-all w-full"
-                style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
-                onFocus={e => (e.target.style.borderColor = '#5BA3C9')}
-                onBlur={e => (e.target.style.borderColor = '#D5E8F5')}
-              />
-            </div>
-
-            {/* Password */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium" style={{ color: '#374151' }}>Mot de passe</label>
-              <input
-                type="password"
-                placeholder="············"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                className="rounded-lg border px-3 py-2.5 text-sm outline-none transition-all w-full"
-                style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
-                onFocus={e => (e.target.style.borderColor = '#5BA3C9')}
-                onBlur={e => (e.target.style.borderColor = '#D5E8F5')}
-              />
-            </div>
-
             {/* Role selector */}
             <div className="flex flex-col gap-2">
               <label className="text-xs font-medium" style={{ color: '#374151' }}>Votre rôle</label>
@@ -125,7 +102,7 @@ export default function Login() {
                     <button
                       key={r.id}
                       type="button"
-                      onClick={() => setSelectedRole(r.id)}
+                      onClick={() => selectRole(r.id)}
                       className="flex flex-col items-center gap-1.5 rounded-xl p-3 text-center transition-all"
                       style={{
                         border: active ? '2px solid #1A3A5C' : '1px solid #D5E8F5',
@@ -154,10 +131,43 @@ export default function Login() {
               </div>
             </div>
 
+            {/* Email (auto-filled) */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium" style={{ color: '#374151' }}>Adresse email</label>
+              <input
+                type="email"
+                value={DEMO_CREDENTIALS[selectedRole].email}
+                readOnly
+                className="rounded-lg border px-3 py-2.5 text-sm outline-none w-full"
+                style={{ borderColor: '#D5E8F5', color: '#5D6D7E', background: '#F8FAFC' }}
+              />
+            </div>
+
+            {/* Password */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium" style={{ color: '#374151' }}>Mot de passe</label>
+              <input
+                type="password"
+                placeholder="biat2026"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className="rounded-lg border px-3 py-2.5 text-sm outline-none transition-all w-full"
+                style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
+                onFocus={e => (e.target.style.borderColor = '#5BA3C9')}
+                onBlur={e => (e.target.style.borderColor = '#D5E8F5')}
+              />
+            </div>
+
+            {/* Access hint */}
+            <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: '#EFF4FA', color: '#1A3A5C' }}>
+              <span className="font-semibold">Accès {selectedRole} :</span>{' '}
+              {DEMO_CREDENTIALS[selectedRole].pages}
+            </div>
+
             {/* Submit */}
             <button
               type="submit"
-              className="w-full py-3 rounded-xl text-white text-sm font-semibold transition-all hover:opacity-90 mt-2"
+              className="w-full py-3 rounded-xl text-white text-sm font-semibold transition-all hover:opacity-90 mt-1"
               style={{ background: '#1A3A5C' }}
             >
               Se connecter
@@ -165,7 +175,7 @@ export default function Login() {
           </form>
 
           <p className="text-xs text-center mt-6" style={{ color: '#9BAFBF' }}>
-            © 2026 BIAT Innovation &amp; Technology — Système sécurisé
+            © 2026 BIAT Innovation &amp; Technology — Système sécurisé · Démo
           </p>
         </div>
       </div>

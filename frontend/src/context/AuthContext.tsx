@@ -3,6 +3,18 @@ import { getNotificationCount } from '../api/endpoints'
 
 export type UserRole = 'Comptable' | 'Chef de Projet' | 'Direction'
 
+export const ROLE_PATHS: Record<UserRole, string[]> = {
+  'Comptable':      ['/upload', '/kpi', '/review', '/invoices', '/suivi', '/journal', '/grand-livre', '/billing', '/projects', '/budget', '/capex', '/requetes'],
+  'Chef de Projet': ['/upload', '/kpi', '/invoices', '/suivi', '/billing', '/projects', '/budget'],
+  'Direction':      ['/direction', '/kpi', '/budget', '/capex', '/requetes'],
+}
+
+export function roleHome(role: UserRole): string {
+  if (role === 'Direction')      return '/direction'
+  if (role === 'Chef de Projet') return '/projects'
+  return '/kpi'
+}
+
 const ROLE_NAMES: Record<UserRole, string> = {
   'Comptable':      'Baya C.',
   'Chef de Projet': 'Karim B.',
