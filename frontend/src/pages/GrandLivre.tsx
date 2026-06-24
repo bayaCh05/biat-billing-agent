@@ -65,7 +65,10 @@ export default function GrandLivre() {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading || error) return <PageSpinner loading={loading} error={error} empty={!error && Object.keys(gl).length === 0} emptyMsg="Aucune écriture trouvée dans cette période." />
+  if (loading || error) return <PageSpinner loading={loading} error={error} />
+  if (Object.keys(gl).length === 0) return (
+    <PageSpinner loading={false} error={false} empty emptyMsg="Aucun journal comptable — importez des factures et lancez l'API." />
+  )
 
   const allComptes = Object.keys(gl)
   const comptes = allComptes.filter(c =>

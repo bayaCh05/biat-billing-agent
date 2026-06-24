@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
-import { Plus } from 'lucide-react'
-import type { Project, ProjectStatus } from '../types'
-import { listProjects } from '../api/endpoints'
+import { Plus, X, CheckCircle } from 'lucide-react'
+import type { Project, ProjectStatus, ClientTemplate } from '../types'
+import { listProjects, listTemplates, generateInvoice } from '../api/endpoints'
 import PageSpinner from '../components/ui/PageSpinner'
+
+const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre']
 
 const STATUS_MAP: Record<ProjectStatus, { label: string; bg: string; color: string }> = {
   ACTIVE:    { label: 'OUVERT',   bg: '#E8F5F0', color: '#1D9E76' },
@@ -72,12 +74,49 @@ export default function Facturation() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
 
+  // Modal state
+  const [showModal, setShowModal] = useState(false)
+  const [templates, setTemplates] = useState<ClientTemplate[]>([])
+  const [selectedTemplate, setSelectedTemplate] = useState('')
+  const [invoiceYear, setInvoiceYear] = useState(new Date().getFullYear())
+  const [invoiceMonth, setInvoiceMonth] = useState(new Date().getMonth() + 1)
+  const [generating, setGenerating] = useState(false)
+  const [generated, setGenerated] = useState<{ invoice_number: string; amount_ttc: number } | null>(null)
+  const [generateError, setGenerateError] = useState('')
+
   useEffect(() => {
     listProjects()
       .then(setProjects)
       .catch(() => setError(true))
       .finally(() => setLoading(false))
   }, [])
+
+  const openModal = async () => {
+    setShowModal(true)
+    setGenerated(null)
+    setGenerateError('')
+    if (templates.length === 0) {
+      try {
+        const t = await listTemplates()
+        setTemplates(t)
+        if (t.length) setSelectedTemplate(t[0].id)
+      } catch {}
+    }
+  }
+
+  const handleGenerate = async () => {
+    if (!selectedTemplate) return
+    setGenerating(true)
+    setGenerateError('')
+    try {
+      const result = await generateInvoice(selectedTemplate, invoiceYear, invoiceMonth)
+      setGenerated(result)
+    } catch {
+      setGenerateError("Erreur lors de la génération — vérifiez que l'API est démarrée.")
+    } finally {
+      setGenerating(false)
+    }
+  }
 
   if (loading || error) return <PageSpinner loading={loading} error={error} />
 
@@ -93,6 +132,7 @@ export default function Facturation() {
           ● Chef de Projet
         </span>
         <button
+          onClick={openModal}
           className="flex items-center gap-1.5 text-sm font-semibold text-white px-4 py-2 rounded-lg"
           style={{ background: '#F0A600' }}
         >
@@ -144,6 +184,113 @@ export default function Facturation() {
         <div className="p-6">
           <div className="bg-white rounded-xl border p-8 text-center" style={{ borderColor: '#D5E8F5' }}>
             <p className="text-sm" style={{ color: '#5D6D7E' }}>Historique des factures — à venir</p>
+          </div>
+        </div>
+      )}
+
+      {/* Modal — Nouvelle facture */}
+      {showModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(10,20,35,0.45)' }}
+          onClick={e => { if (e.target === e.currentTarget) setShowModal(false) }}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: '#D5E8F5' }}>
+              <h2 className="text-base font-bold" style={{ color: '#1A1A2E' }}>Nouvelle facture client</h2>
+              <button onClick={() => setShowModal(false)} className="opacity-50 hover:opacity-100 transition-opacity">
+                <X size={18} style={{ color: '#1A1A2E' }} />
+              </button>
+            </div>
+
+            <div className="px-6 py-5">
+              {generated ? (
+                /* Success state */
+                <div className="flex flex-col items-center gap-4 py-4 text-center">
+                  <CheckCircle size={40} style={{ color: '#1D9E76' }} />
+                  <div>
+                    <p className="text-base font-bold" style={{ color: '#1A1A2E' }}>Facture générée</p>
+                    <p className="text-sm mt-1" style={{ color: '#5D6D7E' }}>N° {generated.invoice_number}</p>
+                    <p className="text-lg font-bold mt-2" style={{ color: '#1A3A5C' }}>
+                      {generated.amount_ttc.toLocaleString('fr-TN', { minimumFractionDigits: 3 })} TND TTC
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowModal(false)}
+                    className="mt-2 px-6 py-2 rounded-xl text-sm font-semibold text-white"
+                    style={{ background: '#1A3A5C' }}
+                  >
+                    Fermer
+                  </button>
+                </div>
+              ) : (
+                /* Form */
+                <div className="flex flex-col gap-4">
+                  {/* Template selector */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-medium" style={{ color: '#374151' }}>Modèle de facturation</label>
+                    {templates.length === 0 ? (
+                      <p className="text-xs py-2" style={{ color: '#5D6D7E' }}>Chargement des modèles…</p>
+                    ) : (
+                      <select
+                        value={selectedTemplate}
+                        onChange={e => setSelectedTemplate(e.target.value)}
+                        className="rounded-lg border px-3 py-2.5 text-sm outline-none w-full"
+                        style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
+                      >
+                        {templates.map(t => (
+                          <option key={t.id} value={t.id}>
+                            {t.client_name} — {t.service_description.slice(0, 40)}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Period */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-medium" style={{ color: '#374151' }}>Mois</label>
+                      <select
+                        value={invoiceMonth}
+                        onChange={e => setInvoiceMonth(Number(e.target.value))}
+                        className="rounded-lg border px-3 py-2.5 text-sm outline-none"
+                        style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
+                      >
+                        {MONTHS.map((m, i) => (
+                          <option key={i + 1} value={i + 1}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-medium" style={{ color: '#374151' }}>Année</label>
+                      <input
+                        type="number"
+                        value={invoiceYear}
+                        onChange={e => setInvoiceYear(Number(e.target.value))}
+                        min={2020} max={2030}
+                        className="rounded-lg border px-3 py-2.5 text-sm outline-none"
+                        style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
+                      />
+                    </div>
+                  </div>
+
+                  {generateError && (
+                    <p className="text-xs py-2" style={{ color: '#C0391B' }}>{generateError}</p>
+                  )}
+
+                  <button
+                    onClick={handleGenerate}
+                    disabled={generating || !selectedTemplate}
+                    className="w-full py-3 rounded-xl text-white text-sm font-semibold mt-1 disabled:opacity-50 transition-opacity"
+                    style={{ background: '#F0A600' }}
+                  >
+                    {generating ? 'Génération…' : 'Générer la facture'}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
