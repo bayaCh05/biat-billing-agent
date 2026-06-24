@@ -256,6 +256,19 @@ class GeneratedInvoiceOut(BaseModel):
     status: str
 
 
+class ClientInvoiceOut(BaseModel):
+    invoice_number: str
+    client_name: str
+    invoice_date: str
+    due_date: str
+    amount_ht: float
+    tva_amount: float
+    amount_ttc: float
+    status: str
+    sent_at: str | None
+    paid_at: str | None
+
+
 class ActionResultOut(BaseModel):
     id: str
     action: str

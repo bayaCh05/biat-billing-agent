@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Plus, X, CheckCircle } from 'lucide-react'
-import type { Project, ProjectStatus, ClientTemplate } from '../types'
-import { listProjects, listTemplates, generateInvoice } from '../api/endpoints'
+import type { Project, ProjectStatus, ClientTemplate, ClientInvoice } from '../types'
+import { listProjects, listTemplates, generateInvoice, listClientInvoices } from '../api/endpoints'
+import { formatTND } from '../utils/formatters'
 import PageSpinner from '../components/ui/PageSpinner'
 
 const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre']
@@ -74,6 +75,8 @@ export default function Facturation() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
 
+  const [clientInvoices, setClientInvoices] = useState<ClientInvoice[]>([])
+
   // Modal state
   const [showModal, setShowModal] = useState(false)
   const [templates, setTemplates] = useState<ClientTemplate[]>([])
@@ -85,8 +88,8 @@ export default function Facturation() {
   const [generateError, setGenerateError] = useState('')
 
   useEffect(() => {
-    listProjects()
-      .then(setProjects)
+    Promise.all([listProjects(), listClientInvoices()])
+      .then(([projs, cis]) => { setProjects(projs); setClientInvoices(cis) })
       .catch(() => setError(true))
       .finally(() => setLoading(false))
   }, [])
@@ -182,9 +185,67 @@ export default function Facturation() {
 
       {activeTab === 2 && (
         <div className="p-6">
-          <div className="bg-white rounded-xl border p-8 text-center" style={{ borderColor: '#D5E8F5' }}>
-            <p className="text-sm" style={{ color: '#5D6D7E' }}>Historique des factures — à venir</p>
-          </div>
+          {clientInvoices.length === 0 ? (
+            <div className="bg-white rounded-xl border p-8 text-center" style={{ borderColor: '#D5E8F5' }}>
+              <p className="text-sm" style={{ color: '#5D6D7E' }}>Aucune facture émise.</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: '#D5E8F5' }}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: '#D5E8F5', background: '#F0F4F9' }}>
+                    {['N° Facture', 'Date', 'Client', 'Montant HT', 'TVA', 'Montant TTC', 'Statut'].map(h => (
+                      <th key={h} className="px-4 py-3 text-xs font-semibold uppercase text-left" style={{ color: '#5D6D7E' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {clientInvoices.map(inv => {
+                    const STATUS_CI: Record<string, { label: string; bg: string; color: string }> = {
+                      draft:     { label: 'BROUILLON', bg: '#F0F4F9', color: '#5D6D7E' },
+                      sent:      { label: 'ENVOYÉE',   bg: '#FFF8E8', color: '#A0700A' },
+                      paid:      { label: 'PAYÉE',     bg: '#E8F5F0', color: '#1D9E76' },
+                      cancelled: { label: 'ANNULÉE',   bg: '#FDECEA', color: '#C0391B' },
+                    }
+                    const s = STATUS_CI[inv.status] ?? STATUS_CI.draft
+                    const [y, m, d] = inv.invoice_date.split('-')
+                    return (
+                      <tr key={inv.invoice_number} className="border-b" style={{ borderColor: '#F0F4F9' }}>
+                        <td className="px-4 py-3 font-mono text-xs font-semibold" style={{ color: '#1A3A5C' }}>{inv.invoice_number}</td>
+                        <td className="px-4 py-3 text-xs" style={{ color: '#5D6D7E' }}>{d}/{m}/{y}</td>
+                        <td className="px-4 py-3 text-sm" style={{ color: '#1A1A2E' }}>{inv.client_name}</td>
+                        <td className="px-4 py-3 text-sm font-medium" style={{ color: '#1A1A2E' }}>{formatTND(inv.amount_ht)}</td>
+                        <td className="px-4 py-3 text-sm" style={{ color: '#5D6D7E' }}>{formatTND(inv.tva_amount)}</td>
+                        <td className="px-4 py-3 text-sm font-bold" style={{ color: '#1A3A5C' }}>{formatTND(inv.amount_ttc)}</td>
+                        <td className="px-4 py-3">
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: s.bg, color: s.color }}>
+                            {s.label}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: '#E8F5F0' }}>
+                    <td colSpan={3} className="px-4 py-2.5 text-sm font-semibold" style={{ color: '#1D9E76' }}>
+                      Total — {clientInvoices.length} facture{clientInvoices.length > 1 ? 's' : ''}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: '#1A1A2E' }}>
+                      {formatTND(clientInvoices.reduce((s, i) => s + i.amount_ht, 0))}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm font-semibold" style={{ color: '#5D6D7E' }}>
+                      {formatTND(clientInvoices.reduce((s, i) => s + i.tva_amount, 0))}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm font-bold" style={{ color: '#1A3A5C' }}>
+                      {formatTND(clientInvoices.reduce((s, i) => s + i.amount_ttc, 0))}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

@@ -1,7 +1,7 @@
 import { apiFetch, apiUpload } from './client'
 import type {
   Invoice, InvoiceSummary, JournalEntry, BudgetSummary,
-  Asset, KpiData, ClientTemplate, NLQueryResult, SuiviSnapshot,
+  Asset, KpiData, ClientTemplate, ClientInvoice, NLQueryResult, SuiviSnapshot,
   Project, ProjectPhase,
 } from '../types'
 
@@ -71,6 +71,9 @@ export const getKpi = () =>
 
 export const listTemplates = () =>
   apiFetch<ClientTemplate[]>('/billing/templates')
+
+export const listClientInvoices = () =>
+  apiFetch<ClientInvoice[]>('/billing/invoices')
 
 export const generateInvoice = (template_id: string, year: number, month: number) =>
   apiFetch<{ invoice_number: string; amount_ttc: number }>('/billing/generate', {

@@ -153,6 +153,21 @@ export interface ClientTemplate {
   tva_rate: number
 }
 
+export type ClientInvoiceStatus = 'draft' | 'sent' | 'paid' | 'cancelled'
+
+export interface ClientInvoice {
+  invoice_number: string
+  client_name: string
+  invoice_date: string
+  due_date: string
+  amount_ht: number
+  tva_amount: number
+  amount_ttc: number
+  status: ClientInvoiceStatus
+  sent_at: string | null
+  paid_at: string | null
+}
+
 // ── Projects ─────────────────────────────────────────────────────────────────
 
 export type ProjectStatus = 'ACTIVE' | 'COMPLETED' | 'ON_HOLD' | 'CANCELLED'
