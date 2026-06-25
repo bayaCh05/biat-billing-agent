@@ -48,6 +48,11 @@ def get_config() -> dict:
     return cfg
 
 
+def get_engine():
+    engine, _, _, _, _ = _shared_resources()
+    return engine
+
+
 def get_components() -> PipelineComponents:
     """Build a fresh PipelineComponents (Ollama backend). Close after use."""
     components, _ = build_pipeline_components()

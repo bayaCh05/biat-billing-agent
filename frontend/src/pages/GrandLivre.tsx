@@ -55,6 +55,7 @@ function exportFEC(gl: GrandLivreData) {
 export default function GrandLivre() {
   const [gl, setGl] = useState<GrandLivreData>({})
   const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
 
@@ -74,7 +75,6 @@ export default function GrandLivre() {
   const comptes = allComptes.filter(c =>
     c.includes(search) || gl[c].libelle.toLowerCase().includes(search.toLowerCase())
   )
-  const [selected, setSelected] = useState<string>('')
   const activeCompte = selected && gl[selected] ? selected : (comptes[0] ?? '')
   const compte = gl[activeCompte]
 
