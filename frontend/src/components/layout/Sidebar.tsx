@@ -40,20 +40,14 @@ export default function Sidebar() {
     >
       {/* Header */}
       <div
-        className="flex items-center gap-2.5 px-4 py-3"
-        style={{ background: '#0F1E2E' }}
+        className="flex items-center justify-center px-3"
+        style={{ background: '#fff', borderBottom: '1px solid #D5E8F5', height: 44 }}
       >
-        <div
-          className="flex flex-col items-center justify-center gap-1 rounded-lg shrink-0"
-          style={{ width: 32, height: 32, background: '#1A3A5C' }}
-        >
-          <div className="rounded-full" style={{ width: 16, height: 2, background: '#5BA3C9' }} />
-          <div className="rounded-full" style={{ width: 12, height: 2, background: '#F0A600' }} />
-        </div>
-        <div>
-          <p className="text-sm font-bold text-white leading-tight">BIAT IT</p>
-          <p className="text-xs" style={{ color: '#5BA3C9' }}>Facturation</p>
-        </div>
+        <img
+          src="/biat-logo.jpeg"
+          alt="BIAT Innovation & Technology"
+          style={{ height: 30, width: 'auto' }}
+        />
       </div>
 
       {/* Nav */}
