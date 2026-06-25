@@ -218,6 +218,16 @@ class AssetOut(BaseModel):
     fully_depreciated: bool
 
 
+class AssetCreateRequest(BaseModel):
+    designation: str
+    compte_immobilisation: str
+    compte_amortissement: str
+    acquisition_date: date
+    acquisition_cost_ht: float
+    useful_life_years: int
+    depreciation_method: str = "linear"
+
+
 # ── KPI ───────────────────────────────────────────────────────────────────────
 
 class KpiOut(BaseModel):

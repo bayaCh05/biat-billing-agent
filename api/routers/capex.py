@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from api.deps import get_session
-from api.schemas import AssetOut
+from api.schemas import AssetOut, AssetCreateRequest
 from src.capex.asset_repository import AssetRepository
 
 router = APIRouter(prefix="/assets", tags=["capex"])
@@ -34,3 +34,31 @@ def list_assets(
         )
         for a in assets
     ]
+
+
+@router.post("", response_model=AssetOut, status_code=status.HTTP_201_CREATED)
+def create_asset(body: AssetCreateRequest, session: Session = Depends(get_session)):
+    from src.models.asset import Asset
+
+    asset = Asset(
+        designation=body.designation,
+        compte_immobilisation=body.compte_immobilisation,
+        compte_amortissement=body.compte_amortissement,
+        acquisition_date=body.acquisition_date,
+        acquisition_cost_ht=body.acquisition_cost_ht,
+        useful_life_years=body.useful_life_years,
+        depreciation_method=body.depreciation_method,
+    )
+    repo = AssetRepository(session)
+    repo.save(asset)
+    today = date.today()
+    return AssetOut(
+        id=str(asset.id),
+        designation=asset.designation,
+        compte_immobilisation=asset.compte_immobilisation,
+        acquisition_date=asset.acquisition_date,
+        acquisition_cost_ht=asset.acquisition_cost_ht,
+        useful_life_years=asset.useful_life_years,
+        depreciation_method=str(asset.depreciation_method),
+        fully_depreciated=asset.book_value_at(today) <= 0,
+    )

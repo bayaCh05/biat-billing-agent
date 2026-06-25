@@ -62,6 +62,17 @@ export const getBudgetSummary = (year?: number, month?: number) => {
 export const listAssets = () =>
   apiFetch<Asset[]>('/assets')
 
+export const createAsset = (body: {
+  designation: string
+  compte_immobilisation: string
+  compte_amortissement: string
+  acquisition_date: string
+  acquisition_cost_ht: number
+  useful_life_years: number
+  depreciation_method: string
+}) =>
+  apiFetch<Asset>('/assets', { method: 'POST', body: JSON.stringify(body) })
+
 // ── KPI ───────────────────────────────────────────────────────────────────────
 
 export const getKpi = () =>

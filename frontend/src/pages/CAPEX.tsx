@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, CheckCircle } from 'lucide-react'
 import type { Asset } from '../types'
-import { listAssets } from '../api/endpoints'
+import { listAssets, createAsset } from '../api/endpoints'
 import { formatTND } from '../utils/formatters'
 import PageSpinner from '../components/ui/PageSpinner'
 
@@ -17,10 +17,25 @@ function computeDepreciation(asset: Asset) {
   return { annual: Math.round(annual), cumul, vnc, pct }
 }
 
+const COMPTE_OPTIONS = [
+  { value: '2183', label: 'Matériel informatique',  amort: '2893' },
+  { value: '205',  label: 'Licences logicielles',   amort: '2805' },
+  { value: '2184', label: 'Matériel réseau',         amort: '2894' },
+]
+
 const COMPTE_META: Record<string, { label: string; bg: string; color: string }> = {
   '2183': { label: 'Matériel informatique', bg: '#EFF4FA', color: '#1A3A5C' },
   '205':  { label: 'Licences logicielles',  bg: '#F3E5F5', color: '#804CD7' },
   '2184': { label: 'Matériel réseau',        bg: '#E8F5F0', color: '#1D9E76' },
+}
+
+const EMPTY_FORM = {
+  designation: '',
+  compte_immobilisation: '2183',
+  acquisition_date: '',
+  acquisition_cost_ht: '',
+  useful_life_years: '5',
+  depreciation_method: 'linear',
 }
 
 function compteMeta(compte: string) {
@@ -40,12 +55,51 @@ export default function CAPEX() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
 
+  // Add asset form state
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitSuccess, setSubmitSuccess] = useState(false)
+  const [submitError, setSubmitError] = useState('')
+
+  const loadAssets = () => listAssets().then(setAssets).catch(() => setError(true))
+
   useEffect(() => {
-    listAssets()
-      .then(data => setAssets(data))
-      .catch(() => setError(true))
-      .finally(() => setLoading(false))
+    loadAssets().finally(() => setLoading(false))
   }, [])
+
+  const compteOpt = COMPTE_OPTIONS.find(c => c.value === form.compte_immobilisation) ?? COMPTE_OPTIONS[0]
+
+  const handleSubmit = async () => {
+    if (!form.designation.trim() || !form.acquisition_date || !form.acquisition_cost_ht) {
+      setSubmitError('Remplissez tous les champs obligatoires.')
+      return
+    }
+    setSubmitting(true)
+    setSubmitError('')
+    try {
+      await createAsset({
+        designation: form.designation.trim(),
+        compte_immobilisation: form.compte_immobilisation,
+        compte_amortissement: compteOpt.amort,
+        acquisition_date: form.acquisition_date,
+        acquisition_cost_ht: parseFloat(form.acquisition_cost_ht),
+        useful_life_years: parseInt(form.useful_life_years, 10),
+        depreciation_method: form.depreciation_method,
+      })
+      setSubmitSuccess(true)
+      await loadAssets()
+    } catch {
+      setSubmitError("Erreur lors de l'enregistrement — vérifiez que l'API est démarrée.")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const resetForm = () => {
+    setForm(EMPTY_FORM)
+    setSubmitSuccess(false)
+    setSubmitError('')
+  }
 
   if (loading || error) return <PageSpinner loading={loading} error={error} />
 
@@ -68,6 +122,7 @@ export default function CAPEX() {
           ● Comptable
         </span>
         <button
+          onClick={() => { setActiveTab(2); resetForm() }}
           className="flex items-center gap-1.5 text-sm font-semibold text-white px-4 py-2 rounded-lg"
           style={{ background: '#F0A600' }}
         >
@@ -249,9 +304,186 @@ export default function CAPEX() {
       )}
 
       {activeTab === 2 && (
-        <div className="px-6 pb-6">
-          <div className="bg-white rounded-xl border p-6" style={{ borderColor: '#D5E8F5' }}>
-            <p className="text-sm text-center" style={{ color: '#5D6D7E' }}>Formulaire d'ajout — à venir</p>
+        <div className="px-6 pb-6 max-w-2xl">
+          <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: '#D5E8F5' }}>
+            <div className="px-6 py-4 border-b" style={{ borderColor: '#D5E8F5', background: '#F7FAFD' }}>
+              <p className="text-sm font-semibold" style={{ color: '#1A1A2E' }}>Nouvelle immobilisation</p>
+              <p className="text-xs mt-0.5" style={{ color: '#5D6D7E' }}>
+                L'actif sera ajouté au registre et son plan d'amortissement calculé automatiquement.
+              </p>
+            </div>
+
+            <div className="p-6">
+              {submitSuccess ? (
+                <div className="flex flex-col items-center gap-4 py-6 text-center">
+                  <CheckCircle size={40} style={{ color: '#1D9E76' }} />
+                  <div>
+                    <p className="text-base font-bold" style={{ color: '#1A1A2E' }}>Actif enregistré</p>
+                    <p className="text-sm mt-1" style={{ color: '#5D6D7E' }}>
+                      {form.designation} a été ajouté au registre des immobilisations.
+                    </p>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={resetForm}
+                      className="px-5 py-2 rounded-xl text-sm font-semibold border"
+                      style={{ borderColor: '#D5E8F5', color: '#1A3A5C' }}
+                    >
+                      Ajouter un autre
+                    </button>
+                    <button
+                      onClick={() => setActiveTab(0)}
+                      className="px-5 py-2 rounded-xl text-sm font-semibold text-white"
+                      style={{ background: '#1A3A5C' }}
+                    >
+                      Voir le registre
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {/* Désignation */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5D6D7E' }}>
+                      Désignation <span style={{ color: '#C0391B' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={form.designation}
+                      onChange={e => setForm(f => ({ ...f, designation: e.target.value }))}
+                      placeholder="Ex : Serveur Dell PowerEdge R750"
+                      className="rounded-lg border px-3 py-2.5 text-sm outline-none w-full"
+                      style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
+                    />
+                  </div>
+
+                  {/* Catégorie */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5D6D7E' }}>
+                      Catégorie (compte PCE) <span style={{ color: '#C0391B' }}>*</span>
+                    </label>
+                    <select
+                      value={form.compte_immobilisation}
+                      onChange={e => setForm(f => ({ ...f, compte_immobilisation: e.target.value }))}
+                      className="rounded-lg border px-3 py-2.5 text-sm outline-none"
+                      style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
+                    >
+                      {COMPTE_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.value} — {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs" style={{ color: '#5D6D7E' }}>
+                      Compte amortissement associé : <span className="font-mono">{compteOpt.amort}</span>
+                    </p>
+                  </div>
+
+                  {/* Date + Coût */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5D6D7E' }}>
+                        Date d'acquisition <span style={{ color: '#C0391B' }}>*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={form.acquisition_date}
+                        onChange={e => setForm(f => ({ ...f, acquisition_date: e.target.value }))}
+                        className="rounded-lg border px-3 py-2.5 text-sm outline-none"
+                        style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5D6D7E' }}>
+                        Coût d'acquisition HT (TND) <span style={{ color: '#C0391B' }}>*</span>
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.001}
+                        value={form.acquisition_cost_ht}
+                        onChange={e => setForm(f => ({ ...f, acquisition_cost_ht: e.target.value }))}
+                        placeholder="0.000"
+                        className="rounded-lg border px-3 py-2.5 text-sm outline-none"
+                        style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Durée + Méthode */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5D6D7E' }}>
+                        Durée d'amortissement (années)
+                      </label>
+                      <select
+                        value={form.useful_life_years}
+                        onChange={e => setForm(f => ({ ...f, useful_life_years: e.target.value }))}
+                        className="rounded-lg border px-3 py-2.5 text-sm outline-none"
+                        style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
+                      >
+                        {[1,2,3,4,5,6,7,8,10,12,15,20].map(n => (
+                          <option key={n} value={n}>{n} an{n > 1 ? 's' : ''}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#5D6D7E' }}>
+                        Méthode d'amortissement
+                      </label>
+                      <select
+                        value={form.depreciation_method}
+                        onChange={e => setForm(f => ({ ...f, depreciation_method: e.target.value }))}
+                        className="rounded-lg border px-3 py-2.5 text-sm outline-none"
+                        style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
+                      >
+                        <option value="linear">Linéaire</option>
+                        <option value="degressive">Dégressif</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Preview */}
+                  {form.acquisition_cost_ht && parseFloat(form.acquisition_cost_ht) > 0 && (
+                    <div
+                      className="rounded-lg p-4 text-sm"
+                      style={{ background: '#F0F4F9', borderLeft: '3px solid #1A3A5C' }}
+                    >
+                      <p className="font-semibold mb-1" style={{ color: '#1A3A5C' }}>Aperçu</p>
+                      <p style={{ color: '#5D6D7E' }}>
+                        Annuité linéaire :{' '}
+                        <span className="font-semibold" style={{ color: '#1A1A2E' }}>
+                          {formatTND(parseFloat(form.acquisition_cost_ht) / parseInt(form.useful_life_years, 10))}
+                        </span>
+                        {' '}/ an sur {form.useful_life_years} ans
+                      </p>
+                    </div>
+                  )}
+
+                  {submitError && (
+                    <p className="text-xs" style={{ color: '#C0391B' }}>{submitError}</p>
+                  )}
+
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      onClick={resetForm}
+                      className="px-4 py-2.5 rounded-xl text-sm font-medium border"
+                      style={{ borderColor: '#D5E8F5', color: '#5D6D7E' }}
+                    >
+                      Réinitialiser
+                    </button>
+                    <button
+                      onClick={handleSubmit}
+                      disabled={submitting}
+                      className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-opacity"
+                      style={{ background: '#F0A600' }}
+                    >
+                      {submitting ? 'Enregistrement…' : 'Enregistrer l\'actif'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
