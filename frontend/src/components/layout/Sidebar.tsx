@@ -79,12 +79,14 @@ export default function Sidebar() {
         className="flex items-center gap-2 px-3 py-3"
         style={{ background: '#0F1E2E' }}
       >
-        <div
-          className="flex items-center justify-center rounded-full shrink-0 text-white text-xs font-bold"
+        <NavLink
+          to="/profile"
+          title="Mon profil"
+          className="shrink-0 flex items-center justify-center rounded-full text-white text-xs font-bold hover:opacity-80 hover:ring-2 hover:ring-white/30 transition-all"
           style={{ width: 30, height: 30, background: avatarBg }}
         >
           {initials}
-        </div>
+        </NavLink>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold text-white truncate">{name}</p>
           <p className="text-xs truncate" style={{ color: '#5BA3C9' }}>{role}</p>

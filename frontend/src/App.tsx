@@ -15,6 +15,7 @@ import Requetes from './pages/Requetes'
 import Suivi from './pages/Suivi'
 import Projets from './pages/Projets'
 import ProjetDetail from './pages/ProjetDetail'
+import Profile from './pages/Profile'
 import { useAuth, ROLE_PATHS, roleHome } from './context/AuthContext'
 
 function HomeRedirect() {
@@ -47,7 +48,8 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route element={<Layout />}>
           <Route element={<AuthGuard />}>
-          <Route element={<RoleGuard />}>
+            <Route path="/profile" element={<Profile />} />
+            <Route element={<RoleGuard />}>
             <Route path="/" element={<HomeRedirect />} />
             <Route path="/upload"      element={<InvoicePipeline />} />
             <Route path="/review"      element={<ReviewQueue />} />
