@@ -1,7 +1,7 @@
 """Projects / chartes endpoints."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -44,6 +44,28 @@ def list_projects(session: Session = Depends(get_session)):
             spent_tnd=round(consumed_jh * c.taux_jh, 3),
         ))
     return result
+
+
+@router.get("/{project_id}", response_model=ProjectOut)
+def get_project(project_id: str, session: Session = Depends(get_session)):
+    charte = session.execute(
+        select(CharteProjetORM).where(CharteProjetORM.project_id == project_id)
+    ).scalar_one_or_none()
+    if not charte:
+        raise HTTPException(status_code=404, detail="Projet non trouvé.")
+    phases = session.execute(
+        select(PhaseORM).where(PhaseORM.project_id == project_id)
+    ).scalars().all()
+    consumed_jh = sum(p.consumed_jh for p in phases)
+    return ProjectOut(
+        id=charte.project_id, name=charte.project_name, client=charte.client,
+        budget_jh=charte.budget_jh, consumed_jh=consumed_jh, taux_jh=charte.taux_jh,
+        status="ACTIVE" if charte.is_active else "COMPLETED",
+        start_date=charte.valid_from.isoformat(),
+        end_date=charte.valid_until.isoformat() if charte.valid_until else None,
+        budget_tnd=round(charte.budget_jh * charte.taux_jh, 3),
+        spent_tnd=round(consumed_jh * charte.taux_jh, 3),
+    )
 
 
 @router.get("/{project_id}/phases", response_model=list[ProjectPhaseOut])

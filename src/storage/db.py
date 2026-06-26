@@ -40,4 +40,6 @@ def init_db(engine) -> None:
     import src.billing.client_invoice_store     # noqa: F401  registers billing tables
     import src.capex.asset_repository           # noqa: F401  registers assets table
     import src.storage.orm_models_projects      # noqa: F401  registers project tables
+    import src.storage.orm_models_users         # noqa: F401  registers users table
+    import src.storage.orm_models_extra         # noqa: F401  registers budget/roadmap/livrables tables
     Base.metadata.create_all(engine)

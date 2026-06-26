@@ -1,39 +1,49 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BarChart2, FolderOpen, TrendingUp } from 'lucide-react'
+import { BarChart2, FolderOpen, TrendingUp, ShieldCheck } from 'lucide-react'
 import { useAuth, roleHome, type UserRole } from '../context/AuthContext'
 import { apiLogin } from '../api/client'
 
-const DEMO_CREDENTIALS: Record<UserRole, { email: string; pages: string }> = {
-  'Comptable':      { email: 'comptable@biat-it.tn',  pages: 'Factures, Journal, Grand Livre, Révision' },
-  'Chef de Projet': { email: 'chef@biat-it.tn',       pages: 'Projets, Facturation, Budget' },
-  'Direction':      { email: 'directeur@biat-it.tn',  pages: 'Direction, KPI, Budget, CAPEX' },
+const DEMO_CREDENTIALS: Record<UserRole, { email: string; password: string; pages: string }> = {
+  'Comptable':      { email: 'comptable@biat-it.tn',  password: 'biat2026',  pages: 'Factures, Journal, Grand Livre, Révision' },
+  'Chef de Projet': { email: 'chef@biat-it.tn',       password: 'biat2026',  pages: 'Projets, Facturation, Budget, Roadmap' },
+  'Direction':      { email: 'directeur@biat-it.tn',  password: 'biat2026',  pages: 'Direction, KPI, Budget, CAPEX' },
+  'Admin':          { email: 'admin@biat-it.tn',       password: 'admin2026', pages: 'Gestion utilisateurs, Habilitations' },
 }
 
 const roles: { id: UserRole; label: string; sub: string; icon: React.ReactNode }[] = [
   { id: 'Comptable',      label: 'Comptable',      sub: 'Factures & Journal', icon: <BarChart2 size={16} /> },
   { id: 'Chef de Projet', label: 'Chef de Projet', sub: 'Billing & Budget',   icon: <FolderOpen size={16} /> },
   { id: 'Direction',      label: 'Direction',      sub: 'KPIs & Tableaux',    icon: <TrendingUp size={16} /> },
+  { id: 'Admin',          label: 'Admin',          sub: 'Gestion & Accès',    icon: <ShieldCheck size={16} /> },
 ]
 
 export default function Login() {
   const { loginWithToken } = useAuth()
   const navigate = useNavigate()
   const [selectedRole, setSelectedRole] = useState<UserRole>('Comptable')
+  const [customEmail, setCustomEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const selectRole = (r: UserRole) => { setSelectedRole(r); setError('') }
+  const selectRole = (r: UserRole) => { setSelectedRole(r); setCustomEmail(''); setError('') }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
+    const creds = DEMO_CREDENTIALS[selectedRole]
+    const email = customEmail.trim() || creds.email
+    const pw = password || creds.password
     try {
-      const { access_token, role } = await apiLogin(DEMO_CREDENTIALS[selectedRole].email, password || 'biat2026')
-      loginWithToken(access_token, role as UserRole)
-      navigate(roleHome(role as UserRole))
+      const { access_token, role, force_password_change } = await apiLogin(email, pw)
+      loginWithToken(access_token, role as UserRole, force_password_change)
+      if (force_password_change) {
+        navigate('/changer-mot-de-passe')
+      } else {
+        navigate(roleHome(role as UserRole))
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de connexion.')
     } finally {
@@ -107,7 +117,7 @@ export default function Login() {
             {/* Role selector */}
             <div className="flex flex-col gap-2">
               <label className="text-xs font-medium" style={{ color: '#374151' }}>Votre rôle</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {roles.map(r => {
                   const active = selectedRole === r.id
                   return (
@@ -143,15 +153,20 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Email (auto-filled) */}
+            {/* Email */}
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium" style={{ color: '#374151' }}>Adresse email</label>
               <input
                 type="email"
-                value={DEMO_CREDENTIALS[selectedRole].email}
-                readOnly
-                className="rounded-lg border px-3 py-2.5 text-sm outline-none w-full"
-                style={{ borderColor: '#D5E8F5', color: '#5D6D7E', background: '#F8FAFC' }}
+                value={customEmail || DEMO_CREDENTIALS[selectedRole].email}
+                onChange={e => setCustomEmail(e.target.value)}
+                className="rounded-lg border px-3 py-2.5 text-sm outline-none transition-all w-full"
+                style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
+                onFocus={e => {
+                  if (!customEmail) setCustomEmail(DEMO_CREDENTIALS[selectedRole].email)
+                  e.target.style.borderColor = '#5BA3C9'
+                }}
+                onBlur={e => (e.target.style.borderColor = '#D5E8F5')}
               />
             </div>
 
@@ -174,6 +189,9 @@ export default function Login() {
             <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: '#EFF4FA', color: '#1A3A5C' }}>
               <span className="font-semibold">Accès {selectedRole} :</span>{' '}
               {DEMO_CREDENTIALS[selectedRole].pages}
+              {!customEmail && (
+                <span className="ml-1 opacity-60">· mot de passe : <code>{DEMO_CREDENTIALS[selectedRole].password}</code></span>
+              )}
             </div>
 
             {error && (

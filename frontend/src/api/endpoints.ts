@@ -3,6 +3,10 @@ import type {
   Invoice, InvoiceSummary, JournalEntry, BudgetSummary,
   Asset, KpiData, ClientTemplate, ClientInvoice, NLQueryResult, SuiviSnapshot,
   Project, ProjectPhase,
+  UserMe, AdminUser,
+  LigneBudget, BudgetSynthese,
+  RoadmapItem,
+  Livrable,
 } from '../types'
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
@@ -117,6 +121,87 @@ export const listProjects = () =>
 
 export const listProjectPhases = (project_id: string) =>
   apiFetch<ProjectPhase[]>(`/projects/${project_id}/phases`)
+
+// ── Users / Me ───────────────────────────────────────────────────────────────
+
+export const getMe = () =>
+  apiFetch<UserMe>('/users/me')
+
+export const updateMe = (body: { nom?: string; prenom?: string; departement?: string }) =>
+  apiFetch<UserMe>('/users/me', { method: 'PATCH', body: JSON.stringify(body) })
+
+export const changePassword = (current_password: string, new_password: string) =>
+  apiFetch<{ message: string }>('/auth/change-password', {
+    method: 'PATCH',
+    body: JSON.stringify({ current_password, new_password }),
+  })
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+export const listAdminUsers = () =>
+  apiFetch<AdminUser[]>('/admin/users')
+
+export const createAdminUser = (body: { nom: string; prenom: string; email: string; role: string; departement: string }) =>
+  apiFetch<{ user_id: string; email: string; temp_password: string }>('/admin/users', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
+export const updateAdminUser = (id: string, body: { role?: string; is_active?: boolean; departement?: string }) =>
+  apiFetch<AdminUser>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+
+export const resetAdminUserPassword = (id: string) =>
+  apiFetch<{ temp_password: string }>(`/admin/users/${id}/reset-password`, { method: 'POST' })
+
+// ── Project (single) ──────────────────────────────────────────────────────────
+
+export const getProject = (id: string) =>
+  apiFetch<Project>(`/projects/${id}`)
+
+// ── Budget projet ─────────────────────────────────────────────────────────────
+
+export const listProjetBudget = (projetId: string) =>
+  apiFetch<LigneBudget[]>(`/projets/${projetId}/budget`)
+
+export const createLigneBudget = (projetId: string, body: { categorie: string; montant_prevu: number; devise?: string }) =>
+  apiFetch<LigneBudget>(`/projets/${projetId}/budget`, { method: 'POST', body: JSON.stringify(body) })
+
+export const updateLigneBudget = (ligneId: string, body: { categorie?: string; montant_prevu?: number }) =>
+  apiFetch<LigneBudget>(`/projet-budget/${ligneId}`, { method: 'PATCH', body: JSON.stringify(body) })
+
+export const deleteLigneBudget = (ligneId: string) =>
+  apiFetch<void>(`/projet-budget/${ligneId}`, { method: 'DELETE' })
+
+export const getBudgetSynthese = (projetId: string) =>
+  apiFetch<BudgetSynthese>(`/projets/${projetId}/budget/synthese`)
+
+// ── Roadmap ───────────────────────────────────────────────────────────────────
+
+export const listRoadmap = (annee = 2026) =>
+  apiFetch<RoadmapItem[]>(`/roadmap?annee=${annee}`)
+
+export const createRoadmapItem = (body: Partial<RoadmapItem>) =>
+  apiFetch<RoadmapItem>('/roadmap', { method: 'POST', body: JSON.stringify(body) })
+
+export const updateRoadmapItem = (id: string, body: Partial<RoadmapItem>) =>
+  apiFetch<RoadmapItem>(`/roadmap/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+
+export const deleteRoadmapItem = (id: string) =>
+  apiFetch<void>(`/roadmap/${id}`, { method: 'DELETE' })
+
+// ── Livrables ─────────────────────────────────────────────────────────────────
+
+export const listLivrables = (phaseId: string) =>
+  apiFetch<Livrable[]>(`/phases/${phaseId}/livrables`)
+
+export const createLivrable = (phaseId: string, body: { titre: string; description?: string; date_livraison_prevue: string; statut?: string }) =>
+  apiFetch<Livrable>(`/phases/${phaseId}/livrables`, { method: 'POST', body: JSON.stringify(body) })
+
+export const updateLivrable = (id: string, body: { statut?: string; date_livraison_reelle?: string; titre?: string }) =>
+  apiFetch<Livrable>(`/livrables/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+
+export const validerPhase = (phaseId: string) =>
+  apiFetch<{ message: string; status: string }>(`/phases/${phaseId}/valider`, { method: 'POST' })
 
 // ── Health ────────────────────────────────────────────────────────────────────
 

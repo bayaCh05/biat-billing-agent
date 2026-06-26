@@ -15,7 +15,12 @@ import Requetes from './pages/Requetes'
 import Suivi from './pages/Suivi'
 import Projets from './pages/Projets'
 import ProjetDetail from './pages/ProjetDetail'
+import ProjetDetailIT from './pages/ProjetDetailIT'
 import Profile from './pages/Profile'
+import ChangerMotDePassePage from './pages/ChangerMotDePassePage'
+import RoadmapPage from './pages/RoadmapPage'
+import InscriptionPage from './pages/admin/InscriptionPage'
+import HabilitationsPage from './pages/admin/HabilitationsPage'
 import { useAuth, ROLE_PATHS, roleHome } from './context/AuthContext'
 
 function HomeRedirect() {
@@ -27,6 +32,15 @@ function AuthGuard() {
   const { isAuthenticated } = useAuth()
   const location = useLocation()
   if (!isAuthenticated) return <Navigate to="/login" state={{ from: location }} replace />
+  return <Outlet />
+}
+
+function PasswordChangeGuard() {
+  const { forcePasswordChange } = useAuth()
+  const location = useLocation()
+  if (forcePasswordChange && location.pathname !== '/changer-mot-de-passe') {
+    return <Navigate to="/changer-mot-de-passe" replace />
+  }
   return <Outlet />
 }
 
@@ -46,26 +60,34 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/changer-mot-de-passe" element={<ChangerMotDePassePage />} />
         <Route element={<Layout />}>
           <Route element={<AuthGuard />}>
-            <Route path="/profile" element={<Profile />} />
-            <Route element={<RoleGuard />}>
-            <Route path="/" element={<HomeRedirect />} />
-            <Route path="/upload"      element={<InvoicePipeline />} />
-            <Route path="/review"      element={<ReviewQueue />} />
-            <Route path="/invoices"    element={<InvoiceDetail />} />
-            <Route path="/suivi"       element={<Suivi />} />
-            <Route path="/journal"     element={<Journaux />} />
-            <Route path="/grand-livre" element={<GrandLivre />} />
-            <Route path="/billing"     element={<Facturation />} />
-            <Route path="/budget"      element={<Budget />} />
-            <Route path="/capex"       element={<CAPEX />} />
-            <Route path="/direction"   element={<Direction />} />
-            <Route path="/kpi"         element={<KPIDashboard />} />
-            <Route path="/requetes"    element={<Requetes />} />
-            <Route path="/projects"    element={<Projets />} />
-            <Route path="/projects/:id" element={<ProjetDetail />} />
-          </Route>
+            <Route element={<PasswordChangeGuard />}>
+              {/* Profile accessible to all roles */}
+              <Route path="/profile" element={<Profile />} />
+              <Route element={<RoleGuard />}>
+                <Route path="/" element={<HomeRedirect />} />
+                <Route path="/upload"         element={<InvoicePipeline />} />
+                <Route path="/review"         element={<ReviewQueue />} />
+                <Route path="/invoices"       element={<InvoiceDetail />} />
+                <Route path="/suivi"          element={<Suivi />} />
+                <Route path="/journal"        element={<Journaux />} />
+                <Route path="/grand-livre"    element={<GrandLivre />} />
+                <Route path="/billing"        element={<Facturation />} />
+                <Route path="/budget"         element={<Budget />} />
+                <Route path="/capex"          element={<CAPEX />} />
+                <Route path="/direction"      element={<Direction />} />
+                <Route path="/kpi"            element={<KPIDashboard />} />
+                <Route path="/requetes"       element={<Requetes />} />
+                <Route path="/projects"       element={<Projets />} />
+                <Route path="/projects/:id"   element={<ProjetDetail />} />
+                <Route path="/projets-it/:id" element={<ProjetDetailIT />} />
+                <Route path="/roadmap"        element={<RoadmapPage />} />
+                <Route path="/admin/inscription"   element={<InscriptionPage />} />
+                <Route path="/admin/habilitations" element={<HabilitationsPage />} />
+              </Route>
+            </Route>
           </Route>
         </Route>
         <Route path="*" element={<HomeRedirect />} />

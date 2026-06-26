@@ -2,17 +2,19 @@ import { createContext, useContext, useState, useEffect, type ReactNode } from '
 import { getNotificationCount } from '../api/endpoints'
 import { getToken, saveToken, clearToken } from '../api/client'
 
-export type UserRole = 'Comptable' | 'Chef de Projet' | 'Direction'
+export type UserRole = 'Comptable' | 'Chef de Projet' | 'Direction' | 'Admin'
 
 export const ROLE_PATHS: Record<UserRole, string[]> = {
-  'Comptable':      ['/upload', '/kpi', '/review', '/invoices', '/suivi', '/journal', '/grand-livre', '/billing', '/projects', '/budget', '/capex', '/requetes'],
-  'Chef de Projet': ['/upload', '/kpi', '/invoices', '/suivi', '/billing', '/projects', '/budget'],
-  'Direction':      ['/direction', '/kpi', '/budget', '/capex', '/requetes'],
+  'Admin':          ['/admin', '/kpi'],
+  'Comptable':      ['/upload', '/kpi', '/review', '/invoices', '/suivi', '/journal', '/grand-livre', '/billing', '/projects', '/projets-it', '/budget', '/capex', '/requetes', '/roadmap'],
+  'Chef de Projet': ['/upload', '/kpi', '/invoices', '/suivi', '/billing', '/projects', '/projets-it', '/budget', '/roadmap'],
+  'Direction':      ['/direction', '/kpi', '/budget', '/capex', '/requetes', '/roadmap'],
 }
 
 export function roleHome(role: UserRole): string {
   if (role === 'Direction')      return '/direction'
   if (role === 'Chef de Projet') return '/projects'
+  if (role === 'Admin')          return '/admin/inscription'
   return '/kpi'
 }
 
@@ -20,6 +22,7 @@ const ROLE_NAMES: Record<UserRole, string> = {
   'Comptable':      'Baya C.',
   'Chef de Projet': 'Karim B.',
   'Direction':      'Directeur',
+  'Admin':          'Admin',
 }
 
 function initials(name: string) {
@@ -34,9 +37,11 @@ interface AuthState {
   initials: string
   notifCount: number
   isAuthenticated: boolean
+  forcePasswordChange: boolean
   setRole: (r: UserRole) => void
-  loginWithToken: (token: string, role: UserRole) => void
+  loginWithToken: (token: string, role: UserRole, forcePasswordChange?: boolean) => void
   logout: () => void
+  clearForcePasswordChange: () => void
 }
 
 const AuthContext = createContext<AuthState>({} as AuthState)
@@ -48,22 +53,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   })
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!getToken())
   const [notifCount, setNotifCount] = useState(0)
+  const [forcePasswordChange, setForcePasswordChange] = useState(false)
 
   const setRole = (r: UserRole) => {
     localStorage.setItem(STORAGE_KEY, r)
     setRoleState(r)
   }
 
-  const loginWithToken = (token: string, r: UserRole) => {
+  const loginWithToken = (token: string, r: UserRole, fpc = false) => {
     saveToken(token)
     setRole(r)
     setIsAuthenticated(true)
+    setForcePasswordChange(fpc)
   }
 
   const logout = () => {
     clearToken()
     setIsAuthenticated(false)
+    setForcePasswordChange(false)
   }
+
+  const clearForcePasswordChange = () => setForcePasswordChange(false)
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -81,7 +91,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const name = ROLE_NAMES[role]
 
   return (
-    <AuthContext.Provider value={{ role, setRole, name, initials: initials(name), notifCount, isAuthenticated, loginWithToken, logout }}>
+    <AuthContext.Provider value={{
+      role, setRole, name, initials: initials(name), notifCount,
+      isAuthenticated, forcePasswordChange,
+      loginWithToken, logout, clearForcePasswordChange,
+    }}>
       {children}
     </AuthContext.Provider>
   )

@@ -218,6 +218,81 @@ export interface SuiviSnapshot {
   overdue: InvoiceSummary[]
 }
 
+// ── Users / Admin ────────────────────────────────────────────────────────────
+
+export interface UserMe {
+  id: string | null
+  nom: string
+  prenom: string
+  email: string
+  role: string
+  departement: string
+  created_at: string | null
+}
+
+export interface AdminUser {
+  id: string
+  nom: string
+  prenom: string
+  email: string
+  role: string
+  departement: string
+  is_first_login: boolean
+  is_active: boolean
+  created_at: string
+}
+
+// ── Budget projet ─────────────────────────────────────────────────────────────
+
+export interface LigneBudget {
+  id: string
+  projet_id: string
+  categorie: string
+  montant_prevu: number
+  montant_consomme: number
+  devise: string
+  ecart: number
+  taux_consommation: number
+}
+
+export interface BudgetSynthese {
+  total_prevu: number
+  total_consomme: number
+  ecart: number
+  taux_consommation: number
+}
+
+// ── Roadmap ───────────────────────────────────────────────────────────────────
+
+export interface RoadmapItem {
+  id: string
+  titre: string
+  description: string
+  date_debut: string
+  date_fin: string
+  projet_id: string | null
+  responsable_id: string | null
+  statut: 'PLANIFIE' | 'EN_COURS' | 'TERMINE' | 'ANNULE'
+  priorite: 'HAUTE' | 'MOYENNE' | 'BASSE'
+  annee: number
+}
+
+// ── Livrables ─────────────────────────────────────────────────────────────────
+
+export type LivrableStatut = 'EN_ATTENTE' | 'EN_COURS' | 'LIVRE' | 'VALIDE' | 'REJETE'
+
+export interface Livrable {
+  id: string
+  phase_id: string
+  titre: string
+  description: string
+  date_livraison_prevue: string
+  date_livraison_reelle: string | null
+  statut: LivrableStatut
+  fichier_path: string | null
+  created_by: string
+}
+
 // ── NL Query ─────────────────────────────────────────────────────────────────
 
 export interface NLQueryResult {

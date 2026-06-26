@@ -55,7 +55,7 @@ export async function apiUpload<T>(path: string, formData: FormData): Promise<T>
   return res.json() as Promise<T>
 }
 
-export async function apiLogin(email: string, password: string): Promise<{ access_token: string; role: string }> {
+export async function apiLogin(email: string, password: string): Promise<{ access_token: string; role: string; force_password_change: boolean }> {
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

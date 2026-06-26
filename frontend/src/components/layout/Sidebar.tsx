@@ -2,36 +2,46 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   Home, ClipboardList, Files,
   Activity, BookOpen, BookMarked, CreditCard, BarChart2,
-  Building2, TrendingUp, Gauge, MessageSquare, FolderKanban, LogOut,
+  Building2, TrendingUp, Gauge, MessageSquare, FolderKanban,
+  LogOut, Map, ShieldCheck, Users,
 } from 'lucide-react'
 import { useAuth, ROLE_PATHS } from '../../context/AuthContext'
 
-const nav = [
-  { path: '/upload',      icon: Home,            label: 'Accueil' },
-  { path: '/kpi',         icon: Gauge,           label: 'KPI Dashboard' },
-  { path: '/review',      icon: ClipboardList,   label: 'File de révision' },
-  { path: '/invoices',    icon: Files,           label: 'Factures' },
-  { path: '/suivi',       icon: Activity,        label: 'Suivi' },
-  { path: '/journal',     icon: BookOpen,        label: 'Journal' },
-  { path: '/grand-livre', icon: BookMarked,      label: 'Grand Livre' },
-  { path: '/billing',     icon: CreditCard,      label: 'Facturation' },
-  { path: '/projects',    icon: FolderKanban,    label: 'Projets' },
-  { path: '/budget',      icon: BarChart2,       label: 'Budget' },
-  { path: '/capex',       icon: Building2,       label: 'Immobilisations' },
-  { path: '/direction',   icon: TrendingUp,      label: 'Direction' },
-  { path: '/requetes',    icon: MessageSquare,   label: 'Requêtes' },
+const ALL_NAV = [
+  // Admin
+  { path: '/admin/inscription',   icon: Users,         label: 'Inscription',    roles: ['Admin'] },
+  { path: '/admin/habilitations', icon: ShieldCheck,   label: 'Habilitations',  roles: ['Admin'] },
+  // Shared
+  { path: '/upload',      icon: Home,            label: 'Accueil',        roles: ['Comptable', 'Chef de Projet'] },
+  { path: '/kpi',         icon: Gauge,           label: 'KPI Dashboard',  roles: ['Comptable', 'Chef de Projet', 'Direction', 'Admin'] },
+  { path: '/review',      icon: ClipboardList,   label: 'File de révision', roles: ['Comptable'] },
+  { path: '/invoices',    icon: Files,           label: 'Factures',       roles: ['Comptable', 'Chef de Projet'] },
+  { path: '/suivi',       icon: Activity,        label: 'Suivi',          roles: ['Comptable', 'Chef de Projet'] },
+  { path: '/journal',     icon: BookOpen,        label: 'Journal',        roles: ['Comptable'] },
+  { path: '/grand-livre', icon: BookMarked,      label: 'Grand Livre',    roles: ['Comptable'] },
+  { path: '/billing',     icon: CreditCard,      label: 'Facturation',    roles: ['Comptable', 'Chef de Projet'] },
+  { path: '/projects',    icon: FolderKanban,    label: 'Projets',        roles: ['Comptable', 'Chef de Projet'] },
+  { path: '/budget',      icon: BarChart2,       label: 'Budget',         roles: ['Comptable', 'Chef de Projet', 'Direction'] },
+  { path: '/capex',       icon: Building2,       label: 'Immobilisations', roles: ['Comptable', 'Direction'] },
+  { path: '/direction',   icon: TrendingUp,      label: 'Direction',      roles: ['Direction'] },
+  { path: '/roadmap',     icon: Map,             label: 'Feuille de Route', roles: ['Comptable', 'Chef de Projet', 'Direction'] },
+  { path: '/requetes',    icon: MessageSquare,   label: 'Requêtes',       roles: ['Comptable', 'Direction'] },
 ]
 
 export default function Sidebar() {
   const navigate = useNavigate()
   const { name, initials, role, logout } = useAuth()
 
-  const visibleNav = nav.filter(item => {
+  const visibleNav = ALL_NAV.filter(item => {
     const allowed = ROLE_PATHS[role]
-    return !allowed || allowed.includes(item.path)
+    if (!allowed) return false
+    // Check both explicit role list and ROLE_PATHS
+    const baseAllowed = item.roles.includes(role)
+    const pathAllowed = allowed.some(p => item.path === p || item.path.startsWith(p + '/'))
+    return baseAllowed && pathAllowed
   })
 
-  const avatarBg = role === 'Direction' ? '#804CD7' : role === 'Chef de Projet' ? '#F0A600' : '#1A3A5C'
+  const avatarBg = role === 'Direction' ? '#804CD7' : role === 'Chef de Projet' ? '#F0A600' : role === 'Admin' ? '#C0391B' : '#1A3A5C'
 
   return (
     <aside
@@ -56,7 +66,6 @@ export default function Sidebar() {
           <NavLink
             key={path}
             to={path}
-            end={path === '/'}
             className={({ isActive }) =>
               `flex items-center gap-2.5 px-2.5 py-2 text-xs rounded-lg mb-0.5 transition-all ${
                 isActive ? 'font-semibold text-white' : 'font-normal text-white/70 hover:text-white hover:bg-white/5'

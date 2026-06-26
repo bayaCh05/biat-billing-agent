@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from api.auth import get_current_user
 from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications, projects
 from api.routers import auth as auth_router
+from api.routers import admin, users, roadmap, projet_budget, livrables
 
 _PROTECTED = [Depends(get_current_user)]
 
@@ -47,7 +48,12 @@ app.include_router(billing.router,       prefix="/api", dependencies=_PROTECTED)
 app.include_router(nl_query.router,      prefix="/api", dependencies=_PROTECTED)
 app.include_router(suivi.router,         prefix="/api", dependencies=_PROTECTED)
 app.include_router(notifications.router, prefix="/api", dependencies=_PROTECTED)
-app.include_router(projects.router,      prefix="/api", dependencies=_PROTECTED)
+app.include_router(projects.router,        prefix="/api", dependencies=_PROTECTED)
+app.include_router(admin.router,           prefix="/api", dependencies=_PROTECTED)
+app.include_router(users.router,           prefix="/api", dependencies=_PROTECTED)
+app.include_router(roadmap.router,         prefix="/api", dependencies=_PROTECTED)
+app.include_router(projet_budget.router,   prefix="/api", dependencies=_PROTECTED)
+app.include_router(livrables.router,       prefix="/api", dependencies=_PROTECTED)
 
 
 @app.get("/api/health")
