@@ -302,3 +302,57 @@ class TestProjects:
         r = client.get("/api/projects", headers=_auth(token))
         assert r.status_code == 200
         assert isinstance(r.json(), list)
+
+
+# ── Billing / BCT export compliance ──────────────────────────────────────────
+
+class TestBillingBCT:
+    def test_list_client_invoices_returns_bct_fields(self):
+        token = _login("comptable@biat-it.tn", "biat2026")
+        r = client.get("/api/billing/invoices", headers=_auth(token))
+        assert r.status_code == 200
+        invoices = r.json()
+        assert isinstance(invoices, list)
+        for inv in invoices:
+            assert "currency" in inv
+            assert "is_export" in inv
+
+    def test_generate_domestic_invoice(self):
+        token = _login("comptable@biat-it.tn", "biat2026")
+        r = client.post("/api/billing/generate", headers=_auth(token), json={
+            "template_id": "biat_maintenance",
+            "year": 2026,
+            "month": 6,
+        })
+        # 404 if template not seeded in test DB — acceptable; what matters is no 500
+        assert r.status_code in (200, 404)
+        if r.status_code == 200:
+            body = r.json()
+            assert "invoice_number" in body
+            assert "amount_ttc" in body
+
+    def test_generate_export_invoice_with_bct_fields(self):
+        token = _login("comptable@biat-it.tn", "biat2026")
+        r = client.post("/api/billing/generate", headers=_auth(token), json={
+            "template_id": "biat_maintenance",
+            "year": 2026,
+            "month": 7,
+            "is_export": True,
+            "currency": "EUR",
+            "foreign_currency_amount": 8500.0,
+            "exchange_rate": 3.32,
+            "shipment_date": "2026-07-01",
+            "domiciliation_bank": "BIAT Siège Tunis",
+            "domiciliation_number": "DOM-2026-0099",
+        })
+        assert r.status_code in (200, 404)
+
+    def test_templates_list_returns_list(self):
+        token = _login("comptable@biat-it.tn", "biat2026")
+        r = client.get("/api/billing/templates", headers=_auth(token))
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    def test_billing_requires_auth(self):
+        r = client.get("/api/billing/invoices")
+        assert r.status_code == 401

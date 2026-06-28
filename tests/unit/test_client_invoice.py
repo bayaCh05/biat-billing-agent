@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from datetime import date
+from datetime import date, timedelta
 
 from src.models.client_invoice import (
     ClientInvoice,
@@ -153,3 +153,115 @@ class TestClientInvoiceStatus:
         inv  = _make_invoice()
         sent = inv.model_copy(update={"status": ClientInvoiceStatus.SENT})
         assert sent.status == ClientInvoiceStatus.SENT
+
+
+# ── BCT export compliance ─────────────────────────────────────────────────────
+
+class TestBCTCompliance:
+    def test_defaults_are_domestic(self):
+        inv = _make_invoice()
+        assert inv.currency == "TND"
+        assert inv.is_export is False
+        assert inv.domiciliation_bank is None
+        assert inv.domiciliation_number is None
+        assert inv.shipment_date is None
+        assert inv.repatriation_deadline is None
+        assert inv.repatriation_date is None
+        assert inv.payment_guarantee_type is None
+        assert inv.foreign_currency_amount is None
+        assert inv.exchange_rate is None
+
+    def test_repatriation_deadline_auto_computed_from_shipment(self):
+        shipment = date(2026, 2, 1)
+        inv = ClientInvoice(
+            invoice_number="FAC-IT-2026-0010",
+            invoice_date=date(2026, 2, 1),
+            due_date=date(2026, 5, 1),
+            issuer_name="BIAT IT",
+            issuer_tax_id="0000999B/A/M/000",
+            client_id="ste_001",
+            client_name="STE Export SA",
+            client_tax_id="1234567A/P/M/000",
+            line_items=[_make_line()],
+            is_export=True,
+            currency="EUR",
+            shipment_date=shipment,
+        )
+        assert inv.repatriation_deadline == shipment + timedelta(days=120)
+
+    def test_repatriation_deadline_not_overwritten_if_set(self):
+        shipment = date(2026, 2, 1)
+        explicit = date(2026, 7, 1)
+        inv = ClientInvoice(
+            invoice_number="FAC-IT-2026-0011",
+            invoice_date=date(2026, 2, 1),
+            due_date=date(2026, 5, 1),
+            issuer_name="BIAT IT",
+            issuer_tax_id="0000999B/A/M/000",
+            client_id="ste_001",
+            client_name="STE Export SA",
+            client_tax_id="1234567A/P/M/000",
+            line_items=[_make_line()],
+            is_export=True,
+            currency="USD",
+            shipment_date=shipment,
+            repatriation_deadline=explicit,
+        )
+        assert inv.repatriation_deadline == explicit
+
+    def test_no_auto_deadline_when_not_export(self):
+        inv = ClientInvoice(
+            invoice_number="FAC-IT-2026-0012",
+            invoice_date=date(2026, 2, 1),
+            due_date=date(2026, 3, 1),
+            issuer_name="BIAT IT",
+            issuer_tax_id="0000999B/A/M/000",
+            client_id="biat_bank",
+            client_name="BIAT SA",
+            client_tax_id="0000217V/A/M/000",
+            line_items=[_make_line()],
+            is_export=False,
+            shipment_date=date(2026, 2, 1),
+        )
+        assert inv.repatriation_deadline is None
+
+    def test_no_auto_deadline_without_shipment_date(self):
+        inv = ClientInvoice(
+            invoice_number="FAC-IT-2026-0013",
+            invoice_date=date(2026, 2, 1),
+            due_date=date(2026, 5, 1),
+            issuer_name="BIAT IT",
+            issuer_tax_id="0000999B/A/M/000",
+            client_id="ste_001",
+            client_name="STE Export SA",
+            client_tax_id="1234567A/P/M/000",
+            line_items=[_make_line()],
+            is_export=True,
+            currency="EUR",
+        )
+        assert inv.repatriation_deadline is None
+
+    def test_foreign_currency_fields_stored(self):
+        inv = ClientInvoice(
+            invoice_number="FAC-IT-2026-0014",
+            invoice_date=date(2026, 2, 1),
+            due_date=date(2026, 5, 1),
+            issuer_name="BIAT IT",
+            issuer_tax_id="0000999B/A/M/000",
+            client_id="ste_001",
+            client_name="STE Export SA",
+            client_tax_id="1234567A/P/M/000",
+            line_items=[_make_line()],
+            is_export=True,
+            currency="GBP",
+            foreign_currency_amount=5000.0,
+            exchange_rate=4.12,
+            domiciliation_bank="BIAT Siège Tunis",
+            domiciliation_number="DOM-2026-0014",
+            payment_guarantee_type="CREDOC_IRREVOCABLE",
+        )
+        assert inv.currency == "GBP"
+        assert inv.foreign_currency_amount == pytest.approx(5000.0)
+        assert inv.exchange_rate == pytest.approx(4.12)
+        assert inv.domiciliation_bank == "BIAT Siège Tunis"
+        assert inv.payment_guarantee_type == "CREDOC_IRREVOCABLE"
