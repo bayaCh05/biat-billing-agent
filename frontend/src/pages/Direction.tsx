@@ -1,364 +1,418 @@
-import { useEffect, useState } from 'react'
-import { apiFetch } from '../api/client'
-import type { KpiData, BudgetSummary, Asset, InvoiceSummary } from '../types'
+import { useEffect, useState, useCallback } from 'react'
+import {
+  AreaChart, Area, BarChart, Bar,
+  PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer,
+} from 'recharts'
+import type {
+  KpiData, BudgetSummary, Asset, BCTAgingItem,
+  MonthlySpendItem, SupplierSpendItem, AccountSpendItem, AnalyticsKPIs,
+} from '../types'
 import { formatTND } from '../utils/formatters'
+import {
+  getKpi, getBudgetSummary, listAssets, getBctAging,
+  getMonthlySpend, getBySupplier, getByAccount, getAnalyticsKPIs,
+} from '../api/endpoints'
+import { RefreshCw } from 'lucide-react'
 
-const kpiMock: KpiData = {
-  total_invoices: 247, total_amount_ttc: 874200,
-  auto_approved: 213, auto_approval_rate: 86,
-  flagged: 4, pending_review: 6,
-  by_status: { COLLECTED: 24, EXPORTED: 180, PAID: 33, FLAGGED: 4 },
-}
-const budgetMock: BudgetSummary = {
-  year: 2026, through_month: 6,
-  total_budget_ytd: 936000, total_actual_ytd: 874200,
-  variance_pct: -6.6, lines_over_budget: 2, lines: [],
-}
-const assetsMock: Asset[] = [
-  { id: '1', designation: 'Parc IT', compte_immobilisation: '2183',
-    acquisition_date: '2024-01-01', acquisition_cost_ht: 2680000,
-    useful_life_years: 5, depreciation_method: 'linear', fully_depreciated: false },
-]
-const invoicesMock: InvoiceSummary[] = [
-  { id: '1', status: 'FLAGGED', direction: 'SUPPLIER', issuer_name: 'OOREDOO TUNISIE',
-    invoice_number: 'OOR-2026-0427', invoice_date: '2026-05-22',
-    amount_ht: 9530, tva_rate: 19, tva_amount: 1810, amount_ttc: 11340,
-    currency: 'TND', accounting_compte: '6260', accounting_label: 'Télécoms',
-    extraction_method: 'LLM', flags: [{ flag_type: 'TOTAL_MISMATCH', severity: 'ERROR', field_name: 'amount_ttc', message: 'Écart détecté', resolved: false }],
-    human_review_required: true, has_errors: true, received_at: new Date(Date.now() - 3 * 86400000).toISOString() },
-  { id: '2', status: 'VALIDATED', direction: 'SUPPLIER', issuer_name: 'IBM TUNISIE',
-    invoice_number: 'IBM-2026-0441', invoice_date: '2026-06-08',
-    amount_ht: 43697, tva_rate: 19, tva_amount: 8303, amount_ttc: 52000,
-    currency: 'TND', accounting_compte: '2183', accounting_label: 'Matériel',
-    extraction_method: 'NATIVE_PDF', flags: [],
-    human_review_required: false, has_errors: false, received_at: new Date(Date.now() - 14 * 86400000).toISOString() },
-]
-const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
+const MONTH_SHORT = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
 
-function computeMonthlyKTnd(invoices: InvoiceSummary[], year: number, upToMonth: number) {
-  return Array.from({ length: upToMonth }, (_, i) => {
-    const prefix = `${year}-${String(i + 1).padStart(2, '0')}`
-    const total = invoices
-      .filter(inv => inv.received_at.startsWith(prefix))
-      .reduce((s, inv) => s + (inv.amount_ttc ?? 0), 0)
-    return Math.round(total / 1000)
-  })
+const PIE_COLORS = ['#2E86C1', '#1D9E76', '#F0A500', '#804CD7', '#C0391B', '#5D6D7E', '#1ABC9C', '#E67E22']
+
+// ── Skeleton ──────────────────────────────────────────────────────────────────
+
+function Skeleton({ h = 'h-4', w = 'w-full', cls = '' }: { h?: string; w?: string; cls?: string }) {
+  return <div className={`animate-pulse bg-gray-200 rounded ${h} ${w} ${cls}`} />
 }
 
-function ageInDays(dateStr: string): number {
-  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)
-}
-
-interface AgeBucket { label: string; color: string; amount: number; count: number }
-
-function computeAgeing(invoices: InvoiceSummary[]): AgeBucket[] {
-  const buckets: AgeBucket[] = [
-    { label: '0–30 j', color: '#1D9E76', amount: 0, count: 0 },
-    { label: '31–60 j', color: '#F0A600', amount: 0, count: 0 },
-    { label: '61–90 j', color: '#C0391B', amount: 0, count: 0 },
-    { label: '> 90 j', color: '#5D6D7E', amount: 0, count: 0 },
-  ]
-  for (const inv of invoices) {
-    if (!inv.amount_ttc) continue
-    const age = ageInDays(inv.received_at)
-    const idx = age <= 30 ? 0 : age <= 60 ? 1 : age <= 90 ? 2 : 3
-    buckets[idx].amount += inv.amount_ttc
-    buckets[idx].count += 1
-  }
-  const hasData = buckets.some(b => b.count > 0)
-  if (!hasData) {
-    return [
-      { label: '0–30 j', color: '#1D9E76', amount: 42800, count: 6 },
-      { label: '31–60 j', color: '#F0A600', amount: 18400, count: 3 },
-      { label: '61–90 j', color: '#C0391B', amount: 8640, count: 1 },
-      { label: '> 90 j', color: '#5D6D7E', amount: 0, count: 0 },
-    ]
-  }
-  return buckets
-}
-
-const now = new Date()
-const monthName = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
-
-export default function Direction() {
-  const [kpi, setKpi] = useState<KpiData>(kpiMock)
-  const [budget, setBudget] = useState<BudgetSummary>(budgetMock)
-  const [assets, setAssets] = useState<Asset[]>(assetsMock)
-  const [invoices, setInvoices] = useState<InvoiceSummary[]>(invoicesMock)
-
-  useEffect(() => {
-    Promise.allSettled([
-      apiFetch<KpiData>('/kpi'),
-      apiFetch<BudgetSummary>('/budget/summary'),
-      apiFetch<Asset[]>('/assets'),
-      apiFetch<InvoiceSummary[]>('/invoices'),
-    ]).then(([kpiR, budgetR, assetsR, invoicesR]) => {
-      if (kpiR.status === 'fulfilled') setKpi(kpiR.value)
-      if (budgetR.status === 'fulfilled') setBudget(budgetR.value)
-      if (assetsR.status === 'fulfilled') setAssets(assetsR.value)
-      if (invoicesR.status === 'fulfilled') setInvoices(invoicesR.value)
-    })
-  }, [])
-
-  const consumedPct = budget.total_budget_ytd > 0
-    ? (budget.total_actual_ytd / budget.total_budget_ytd) * 100
-    : 93.4
-  const varPct = (consumedPct - 100).toFixed(1)
-
-  const activeAssets = assets.filter(a => !a.fully_depreciated)
-  const vncTotal = activeAssets.reduce((s, a) => s + a.acquisition_cost_ht, 0)
-
-  const ageing = computeAgeing(invoices)
-
-  const flaggedInvoice = invoices.find(i => i.status === 'FLAGGED')
-  const bigInvoice = invoices.find(i => (i.amount_ttc ?? 0) > 10000)
-
-  // Monthly chart — last N months of current year from real invoice data
-  const chartYear = now.getFullYear()
-  const chartMonths = now.getMonth() + 1
-  const monthlyKTnd = computeMonthlyKTnd(invoices, chartYear, chartMonths)
-  const monthLabels = MONTH_LABELS.slice(0, chartMonths)
-  const maxVal = Math.max(...monthlyKTnd, 1)
-
-  // Current-month billing delta
-  const currentMonthPrefix = `${chartYear}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  const thisMonthTotal = invoices
-    .filter(i => i.received_at.startsWith(currentMonthPrefix))
-    .reduce((s, i) => s + (i.amount_ttc ?? 0), 0)
-  const thisMonthDelta = thisMonthTotal > 0
-    ? `${Math.round(thisMonthTotal / 1000)}k TND ce mois`
-    : `${kpi.by_status?.COLLECTED ?? 0} factures émises`
-
-  // SVG donut
-  const r = 54
-  const circ = 2 * Math.PI * r
-  const dashOffset = circ * (1 - consumedPct / 100)
-
-  const kpiCards1 = [
-    {
-      label: 'Factures traitées', value: kpi.total_invoices, suffix: '',
-      delta: `↑ ${kpi.by_status?.EXPORTED ?? 18} ce mois`, deltaColor: '#1D9E76',
-      accent: '#5BA3C9',
-    },
-    {
-      label: 'Taux auto-traitement', value: kpi.auto_approval_rate.toFixed(0), suffix: '%',
-      delta: '↑ +3pp vs M-1', deltaColor: '#1D9E76',
-      accent: '#1D9E76',
-    },
-    {
-      label: 'Budget YTD consommé', value: consumedPct.toFixed(1), suffix: '%',
-      delta: `${varPct}% vs plan`, deltaColor: '#1D9E76',
-      accent: '#1D9E76',
-    },
-  ]
-  const kpiCards2 = [
-    {
-      label: 'Factures en retard', value: kpi.flagged, suffix: '',
-      delta: '↑ +1 cette semaine', deltaColor: '#F0A600',
-      accent: '#F0A600',
-    },
-    {
-      label: 'VNC total CAPEX',
-      value: vncTotal >= 1000 ? `${(vncTotal / 1000).toFixed(0)}k` : String(vncTotal),
-      suffix: ' TND',
-      delta: `${activeAssets.length} actifs`, deltaColor: '#1D9E76',
-      accent: '#1A3A5C',
-    },
-    {
-      label: 'Factures client émises', value: kpi.by_status?.COLLECTED ?? 24, suffix: '',
-      delta: thisMonthDelta, deltaColor: '#1D9E76',
-      accent: '#804CD7',
-    },
-  ]
-
+function ChartSkeleton() {
   return (
-    <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-      {/* Page header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <h1 style={{ fontSize: 18, fontWeight: 700, color: '#1A1A2E', flex: 1 }}>
-          🎯 Vue Direction — Tableau Exécutif
-        </h1>
-        <span style={{ background: '#F0EBF9', color: '#804CD7', borderRadius: 20, padding: '4px 12px', fontSize: 11, fontWeight: 600 }}>
-          ● Direction
-        </span>
-        <span style={{ fontSize: 13, color: '#5D6D7E' }}>
-          {monthName.charAt(0).toUpperCase() + monthName.slice(1)} · YTD
-        </span>
-      </div>
-
-      {/* KPI Row 1 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
-        {kpiCards1.map(c => (
-          <KpiCard key={c.label} {...c} />
+    <div className="flex flex-col gap-2 p-4">
+      <Skeleton h="h-3" w="w-1/3" />
+      <div className="flex items-end gap-2 h-40 mt-2">
+        {Array.from({ length: 12 }, (_, i) => (
+          <div key={i} className="flex-1 bg-gray-200 animate-pulse rounded-t" style={{ height: `${30 + Math.random() * 70}%` }} />
         ))}
-      </div>
-
-      {/* KPI Row 2 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
-        {kpiCards2.map(c => (
-          <KpiCard key={c.label} {...c} />
-        ))}
-      </div>
-
-      {/* Middle row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-
-        {/* Ageing */}
-        <div style={{ background: '#fff', border: '1px solid #D5E8F5', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#1A3A5C', marginBottom: 16 }}>Ageing des créances</div>
-          {ageing.map(b => (
-            <div key={b.label} style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              background: '#F0F4F9', borderRadius: 8, padding: '10px 12px', marginBottom: 8,
-            }}>
-              <div style={{ width: 10, height: 10, borderRadius: '50%', background: b.color, flexShrink: 0 }} />
-              <div style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>{b.label}</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: b.color }}>
-                {formatTND(b.amount, 0)}
-              </div>
-              <div style={{ fontSize: 11, color: '#5D6D7E' }}>{b.count} fac.</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Budget donut */}
-        <div style={{ background: '#fff', border: '1px solid #D5E8F5', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#1A3A5C', marginBottom: 16 }}>
-            Budget YTD — Consommation
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-            <div style={{ position: 'relative', width: 140, height: 140 }}>
-              <svg width="140" height="140" viewBox="0 0 140 140" style={{ transform: 'rotate(-90deg)' }}>
-                <circle cx="70" cy="70" r={r} fill="none" stroke="#E8F4EC" strokeWidth="20" />
-                <circle cx="70" cy="70" r={r} fill="none" stroke="#1D9E76" strokeWidth="20"
-                  strokeDasharray={circ}
-                  strokeDashoffset={dashOffset}
-                  strokeLinecap="round" />
-              </svg>
-              <div style={{
-                position: 'absolute', inset: 0, display: 'flex',
-                flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <span style={{ fontSize: 22, fontWeight: 700, color: '#1A3A5C' }}>
-                  {consumedPct.toFixed(1)}%
-                </span>
-                <span style={{ fontSize: 11, color: '#5D6D7E' }}>consommé</span>
-              </div>
-            </div>
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {[
-                { color: '#1D9E76', label: `Réel YTD : ${(budget.total_actual_ytd / 1000).toFixed(0)} k TND` },
-                { color: '#D5E8F5', label: `Restant : ${((budget.total_budget_ytd - budget.total_actual_ytd) / 1000).toFixed(0)} k TND` },
-                { color: '#C0391B', label: `${budget.lines_over_budget} ligne(s) hors budget` },
-              ].map(item => (
-                <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: item.color, flexShrink: 0 }} />
-                  {item.label}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Alerts */}
-        <div style={{ background: '#fff', border: '1px solid #D5E8F5', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#1A3A5C', marginBottom: 16 }}>
-            Alertes &amp; actions requises
-          </div>
-          {[
-            {
-              bg: '#FEF0EE', icon: '🔴',
-              msg: flaggedInvoice
-                ? `${flaggedInvoice.issuer_name} — ${flaggedInvoice.flags[0]?.flag_type ?? 'FLAGGED'}`
-                : 'Aucune facture signalée',
-              sub: 'Approbation comptable requise',
-            },
-            {
-              bg: '#FFF8E8', icon: '🟠',
-              msg: bigInvoice
-                ? `${bigInvoice.issuer_name} — Facture > 10k TND`
-                : 'Aucune facture > 10 000 TND',
-              sub: 'Validation direction requise',
-            },
-            {
-              bg: '#FFFCE8', icon: '🟡',
-              msg: `${budget.lines_over_budget} catégorie(s) hors budget`,
-              sub: 'Maintenance +20% · Honoraires +25%',
-            },
-            {
-              bg: '#E0F0FA', icon: '🔵',
-              msg: `Plan amortissement Q2 généré`,
-              sub: `${assets.length} actifs · écritures à valider`,
-            },
-          ].map(a => (
-            <div key={a.msg} style={{
-              display: 'flex', alignItems: 'flex-start', gap: 10,
-              borderRadius: 8, padding: '10px 12px', marginBottom: 8,
-              background: a.bg,
-            }}>
-              <span style={{ fontSize: 16, lineHeight: 1.3, flexShrink: 0 }}>{a.icon}</span>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#1A1A2E' }}>{a.msg}</div>
-                <div style={{ fontSize: 10, color: '#5D6D7E', marginTop: 2 }}>{a.sub}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Monthly bar chart */}
-      <div style={{ background: '#1A3A5C', borderRadius: 12, padding: '20px 24px' }}>
-        <div style={{ color: '#fff', fontSize: 14, fontWeight: 600, marginBottom: 16 }}>
-          Facturation mensuelle 2026 (k TND)
-        </div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 0, height: 110 }}>
-          {monthlyKTnd.map((val, i) => {
-            const isLast = i === monthlyKTnd.length - 1
-            const barH = Math.round((val / maxVal) * 90)
-            return (
-              <div key={monthLabels[i]} style={{
-                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-              }}>
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.8)', fontWeight: 600 }}>
-                  {val}k
-                </span>
-                <div style={{
-                  height: barH, width: 64, borderRadius: '4px 4px 0 0',
-                  background: isLast ? '#F0A600' : '#5BA3C9',
-                }} />
-                <span style={{ fontSize: 11, color: '#5BA3C9', marginTop: 4 }}>
-                  {monthLabels[i]}
-                </span>
-              </div>
-            )
-          })}
-        </div>
       </div>
     </div>
   )
 }
 
-function KpiCard({
-  label, value, suffix, delta, deltaColor, accent,
-}: {
-  label: string; value: string | number; suffix: string
-  delta: string; deltaColor: string; accent: string
+// ── Tooltip formatters ────────────────────────────────────────────────────────
+
+function TndTooltip({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number; fill: string }[]; label?: string }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-xs">
+      <p className="font-semibold text-gray-700 mb-1">{label}</p>
+      {payload.map(p => (
+        <p key={p.name} style={{ color: p.fill }}>
+          {p.name}: {formatTND(p.value)}
+        </p>
+      ))}
+    </div>
+  )
+}
+
+// ── KPI card ─────────────────────────────────────────────────────────────────
+
+function KpiCard({ label, value, suffix, delta, color, loading }: {
+  label: string; value: string | number; suffix?: string
+  delta?: string; color: string; loading?: boolean
 }) {
   return (
-    <div style={{
-      background: '#fff', border: '1px solid #D5E8F5', borderRadius: 12,
-      padding: '16px 16px 12px 20px', position: 'relative', overflow: 'hidden',
-    }}>
-      <div style={{
-        position: 'absolute', left: 0, top: 0, bottom: 0,
-        width: 4, background: accent, borderRadius: '4px 0 0 4px',
-      }} />
-      <div style={{ fontSize: 12, color: '#5D6D7E', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: '#1A3A5C', lineHeight: 1 }}>
-        {value}{suffix}
+    <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 relative overflow-hidden shadow-sm">
+      <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: color }} />
+      <p className="text-xs text-gray-500 mb-1">{label}</p>
+      {loading ? (
+        <Skeleton h="h-7" w="w-24" cls="mt-1" />
+      ) : (
+        <p className="text-2xl font-bold" style={{ color: '#1A3A5C' }}>
+          {value}{suffix}
+        </p>
+      )}
+      {delta && !loading && <p className="text-xs mt-1.5" style={{ color }}>{delta}</p>}
+    </div>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export default function Direction() {
+  const now = new Date()
+  const year = now.getFullYear()
+
+  // Analytics data
+  const [monthly, setMonthly]     = useState<MonthlySpendItem[]>([])
+  const [suppliers, setSuppliers] = useState<SupplierSpendItem[]>([])
+  const [accounts, setAccounts]   = useState<AccountSpendItem[]>([])
+  const [kpis, setKpis]           = useState<AnalyticsKPIs | null>(null)
+  const [analyticsLoading, setAnalyticsLoading] = useState(true)
+
+  // Existing overview data
+  const [kpi, setKpi]         = useState<KpiData | null>(null)
+  const [budget, setBudget]   = useState<BudgetSummary | null>(null)
+  const [assets, setAssets]   = useState<Asset[]>([])
+  const [bct, setBct]         = useState<BCTAgingItem[]>([])
+  const [overviewLoading, setOverviewLoading] = useState(true)
+  const [lastRefresh, setLastRefresh] = useState(now)
+
+  const loadAnalytics = useCallback(async () => {
+    setAnalyticsLoading(true)
+    try {
+      const [m, s, a, k] = await Promise.all([
+        getMonthlySpend(year),
+        getBySupplier(year),
+        getByAccount(year),
+        getAnalyticsKPIs(year),
+      ])
+      setMonthly(m)
+      setSuppliers(s)
+      setAccounts(a)
+      setKpis(k)
+    } finally {
+      setAnalyticsLoading(false)
+    }
+  }, [year])
+
+  const loadOverview = useCallback(async () => {
+    setOverviewLoading(true)
+    try {
+      const [k, b, a, bc] = await Promise.all([
+        getKpi(),
+        getBudgetSummary(),
+        listAssets(),
+        getBctAging().catch(() => [] as BCTAgingItem[]),
+      ])
+      setKpi(k)
+      setBudget(b)
+      setAssets(a)
+      setBct(bc)
+    } finally {
+      setOverviewLoading(false)
+    }
+  }, [])
+
+  const refresh = useCallback(() => {
+    setLastRefresh(new Date())
+    loadAnalytics()
+    loadOverview()
+  }, [loadAnalytics, loadOverview])
+
+  useEffect(() => {
+    loadAnalytics()
+    loadOverview()
+  }, [loadAnalytics, loadOverview])
+
+  // Derived
+  const consumedPct = (budget?.total_budget_ytd ?? 0) > 0
+    ? (budget!.total_actual_ytd / budget!.total_budget_ytd) * 100
+    : 0
+  const activeAssets = assets.filter(a => !a.fully_depreciated)
+
+  // Chart data: monthly spend with short labels
+  const monthlyChart = monthly.map((m, i) => ({
+    name: MONTH_SHORT[i],
+    OPEX: m.opex,
+    CAPEX: m.capex,
+    Total: m.total_ht,
+  }))
+
+  // Supplier chart: truncate long names
+  const supplierChart = suppliers.map(s => ({
+    name: s.supplier.length > 22 ? s.supplier.slice(0, 20) + '…' : s.supplier,
+    'Montant TTC': s.total_ttc,
+  }))
+
+  // Pie chart: top 6 accounts + other
+  const pieData = accounts.slice(0, 7).map(a => ({
+    name: `${a.compte} ${a.label.slice(0, 18)}`,
+    value: a.total_ht,
+    pct: a.pct,
+  }))
+
+  // SVG donut params
+  const r = 54, circ = 2 * Math.PI * r
+  const dashOffset = circ * (1 - Math.min(consumedPct, 100) / 100)
+
+  return (
+    <div className="p-6 max-w-[1400px] mx-auto flex flex-col gap-5">
+
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div>
+          <h1 className="text-lg font-bold text-gray-900">Vue Direction — Tableau Exécutif {year}</h1>
+          <p className="text-xs text-gray-400">Actualisé à {lastRefresh.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
+        </div>
+        <span className="ml-auto text-[11px] font-semibold bg-purple-50 text-purple-700 rounded-full px-3 py-1">● Direction</span>
+        <button
+          onClick={refresh}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-600"
+        >
+          <RefreshCw className={`w-3 h-3 ${analyticsLoading || overviewLoading ? 'animate-spin' : ''}`} />
+          Actualiser
+        </button>
       </div>
-      <div style={{ fontSize: 11, marginTop: 8, color: deltaColor }}>{delta}</div>
+
+      {/* ── Analytics KPI cards ────────────────────────────────────────────── */}
+      <div className="grid grid-cols-4 gap-4">
+        <KpiCard
+          label="Délai moyen de traitement"
+          value={analyticsLoading ? '—' : (kpis?.avg_processing_days.toFixed(1) ?? '—')}
+          suffix=" j"
+          delta={kpis ? (kpis.avg_processing_days < 3 ? '✓ Dans les normes' : '⚠ Au-dessus de 3j') : undefined}
+          color="#2E86C1"
+          loading={analyticsLoading}
+        />
+        <KpiCard
+          label="Taux de rejet"
+          value={analyticsLoading ? '—' : (kpis?.rejection_rate.toFixed(1) ?? '—')}
+          suffix="%"
+          delta={kpis ? (kpis.rejection_rate < 10 ? '✓ Taux acceptable' : '⚠ Revoir le flux') : undefined}
+          color="#C0391B"
+          loading={analyticsLoading}
+        />
+        <KpiCard
+          label="Révision humaine"
+          value={analyticsLoading ? '—' : (kpis?.human_review_rate.toFixed(1) ?? '—')}
+          suffix="%"
+          delta={kpis ? `${kpis.pending_count} facture(s) en attente` : undefined}
+          color="#F0A500"
+          loading={analyticsLoading}
+        />
+        <KpiCard
+          label="CAPEX YTD"
+          value={analyticsLoading ? '—' : formatTND(kpis?.total_capex_ytd ?? 0, 0)}
+          delta={kpis ? `OPEX: ${formatTND(kpis.total_opex_ytd, 0)}` : undefined}
+          color="#1D9E76"
+          loading={analyticsLoading}
+        />
+      </div>
+
+      {/* ── Monthly spend area chart ──────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-800">Dépenses mensuelles {year}</h2>
+            <p className="text-xs text-gray-400">Factures fournisseurs traitées — ventilation OPEX / CAPEX</p>
+          </div>
+          <div className="flex items-center gap-4 text-xs">
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#2E86C1] inline-block" />OPEX</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#F0A500] inline-block" />CAPEX</span>
+          </div>
+        </div>
+        {analyticsLoading ? <ChartSkeleton /> : (
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={monthlyChart} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="gradOpex" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#2E86C1" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#2E86C1" stopOpacity={0.02} />
+                </linearGradient>
+                <linearGradient id="gradCapex" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#F0A500" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#F0A500" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#F0F4F9" />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#8898A9' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: '#8898A9' }} axisLine={false} tickLine={false}
+                tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+              <Tooltip content={<TndTooltip />} />
+              <Area type="monotone" dataKey="OPEX" stroke="#2E86C1" strokeWidth={2}
+                fill="url(#gradOpex)" dot={false} activeDot={{ r: 4 }} />
+              <Area type="monotone" dataKey="CAPEX" stroke="#F0A500" strokeWidth={2}
+                fill="url(#gradCapex)" dot={false} activeDot={{ r: 4 }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* ── Suppliers bar + PCE pie ───────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-5">
+
+        {/* Top 10 suppliers — horizontal bar */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-gray-800 mb-1">Top fournisseurs {year}</h2>
+          <p className="text-xs text-gray-400 mb-4">Par montant TTC total traité</p>
+          {analyticsLoading ? <ChartSkeleton /> : supplierChart.length === 0 ? (
+            <p className="text-xs text-gray-400 py-8 text-center">Aucune donnée</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={supplierChart.length * 36 + 20}>
+              <BarChart layout="vertical" data={supplierChart} margin={{ top: 0, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F0F4F9" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: '#8898A9' }} axisLine={false} tickLine={false}
+                  tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+                <YAxis type="category" dataKey="name" width={148}
+                  tick={{ fontSize: 10, fill: '#374151' }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  formatter={(v: number) => [formatTND(v), 'Total TTC']}
+                  contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #E5E7EB' }}
+                />
+                <Bar dataKey="Montant TTC" fill="#2E86C1" radius={[0, 4, 4, 0]} maxBarSize={20} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* PCE account distribution — pie */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-gray-800 mb-1">Répartition par compte PCE</h2>
+          <p className="text-xs text-gray-400 mb-4">Distribution des charges par plan comptable</p>
+          {analyticsLoading ? <ChartSkeleton /> : pieData.length === 0 ? (
+            <p className="text-xs text-gray-400 py-8 text-center">Aucune donnée</p>
+          ) : (
+            <div className="flex items-center gap-4">
+              <ResponsiveContainer width="55%" height={200}>
+                <PieChart>
+                  <Pie
+                    data={pieData} cx="50%" cy="50%"
+                    innerRadius={52} outerRadius={80}
+                    dataKey="value" paddingAngle={2}
+                  >
+                    {pieData.map((_, i) => (
+                      <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(v: number, _name: string, props: { payload?: { pct?: number } }) => [
+                      `${formatTND(v)} (${props.payload?.pct ?? 0}%)`,
+                      'HT',
+                    ]}
+                    contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #E5E7EB' }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="flex-1 flex flex-col gap-1.5">
+                {pieData.map((d, i) => (
+                  <div key={d.name} className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                    <span className="text-[11px] text-gray-600 truncate flex-1">{d.name}</span>
+                    <span className="text-[11px] font-semibold text-gray-700">{d.pct}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Overview row: ageing · budget · alerts ────────────────────────── */}
+      <div className="grid grid-cols-3 gap-4">
+
+        {/* Budget donut */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-gray-800 mb-4">Budget YTD — Consommation</h2>
+          {overviewLoading ? <Skeleton h="h-36" /> : (
+            <div className="flex flex-col items-center gap-3">
+              <div className="relative w-32 h-32">
+                <svg width="128" height="128" viewBox="0 0 140 140" style={{ transform: 'rotate(-90deg)' }}>
+                  <circle cx="70" cy="70" r={r} fill="none" stroke="#E8F4EC" strokeWidth="18" />
+                  <circle cx="70" cy="70" r={r} fill="none" stroke="#1D9E76" strokeWidth="18"
+                    strokeDasharray={circ} strokeDashoffset={dashOffset} strokeLinecap="round" />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-xl font-bold text-gray-900">{consumedPct.toFixed(1)}%</span>
+                  <span className="text-[10px] text-gray-400">consommé</span>
+                </div>
+              </div>
+              <div className="w-full text-xs flex flex-col gap-1.5">
+                {[
+                  { color: '#1D9E76', text: `Réel YTD : ${formatTND(budget?.total_actual_ytd ?? 0, 0)}` },
+                  { color: '#D5E8F5', text: `Restant : ${formatTND((budget?.total_budget_ytd ?? 0) - (budget?.total_actual_ytd ?? 0), 0)}` },
+                  { color: '#C0391B', text: `${budget?.lines_over_budget ?? 0} ligne(s) hors budget` },
+                ].map(item => (
+                  <div key={item.text} className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: item.color }} />
+                    <span className="text-gray-600">{item.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Existing KPI summary */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-gray-800 mb-4">Métriques pipeline</h2>
+          {overviewLoading ? <div className="flex flex-col gap-3"><Skeleton h="h-5" /><Skeleton h="h-5" /><Skeleton h="h-5" /><Skeleton h="h-5" /></div> : (
+            <div className="flex flex-col gap-3">
+              {[
+                { label: 'Factures traitées', value: String(kpi?.total_invoices ?? 0), color: '#2E86C1' },
+                { label: 'Taux auto-approbation', value: `${kpi?.auto_approval_rate ?? 0}%`, color: '#1D9E76' },
+                { label: 'Signalées (FLAGGED)', value: String(kpi?.flagged ?? 0), color: '#F0A500' },
+                { label: 'Actifs CAPEX actifs', value: String(activeAssets.length), color: '#804CD7' },
+              ].map(row => (
+                <div key={row.label} className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">{row.label}</span>
+                  <span className="text-sm font-bold" style={{ color: row.color }}>{row.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* BCT summary */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-gray-800 mb-4">Conformité BCT</h2>
+          {overviewLoading ? <div className="flex flex-col gap-3"><Skeleton h="h-16" /><Skeleton h="h-16" /></div> : (
+            <div className="flex flex-col gap-2">
+              {[
+                { label: 'Conformes', count: bct.filter(i => i.status === 'OK').length, bg: '#E8F5F0', color: '#1D9E76', icon: '✅' },
+                { label: 'À surveiller', count: bct.filter(i => i.status === 'WARNING').length, bg: '#FFF8E8', color: '#F0A500', icon: '⚠️' },
+                { label: 'En retard', count: bct.filter(i => i.status === 'OVERDUE').length, bg: '#FDECEA', color: '#C0391B', icon: '🔴' },
+              ].map(s => (
+                <div key={s.label} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: s.bg }}>
+                  <span className="text-base">{s.icon}</span>
+                  <span className="text-xs font-medium flex-1" style={{ color: s.color }}>{s.label}</span>
+                  <span className="text-lg font-bold" style={{ color: s.color }}>{s.count}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

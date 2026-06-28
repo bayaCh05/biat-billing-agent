@@ -7,6 +7,13 @@ import type {
   LigneBudget, BudgetSynthese,
   RoadmapItem,
   Livrable,
+  NotificationItem,
+  BCTAgingItem,
+  AuditLog,
+  MonthlySpendItem,
+  SupplierSpendItem,
+  AccountSpendItem,
+  AnalyticsKPIs,
 } from '../types'
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
@@ -90,10 +97,23 @@ export const listTemplates = () =>
 export const listClientInvoices = () =>
   apiFetch<ClientInvoice[]>('/billing/invoices')
 
-export const generateInvoice = (template_id: string, year: number, month: number) =>
+export const generateInvoice = (
+  template_id: string,
+  year: number,
+  month: number,
+  bct?: {
+    is_export: boolean
+    currency: string
+    foreign_currency_amount?: number | null
+    exchange_rate?: number | null
+    shipment_date?: string | null
+    domiciliation_bank?: string | null
+    domiciliation_number?: string | null
+  },
+) =>
   apiFetch<{ invoice_number: string; amount_ttc: number }>('/billing/generate', {
     method: 'POST',
-    body: JSON.stringify({ template_id, year, month }),
+    body: JSON.stringify({ template_id, year, month, ...(bct ?? {}) }),
   })
 
 // ── NL Query ─────────────────────────────────────────────────────────────────
@@ -113,6 +133,15 @@ export const getSuiviSnapshot = () =>
 
 export const getNotificationCount = () =>
   apiFetch<{ count: number }>('/notifications/count')
+
+export const getNotificationList = () =>
+  apiFetch<NotificationItem[]>('/notifications/list')
+
+export const markNotificationRead = (id: string) =>
+  apiFetch<NotificationItem>(`/notifications/${id}/read`, { method: 'PATCH' })
+
+export const markAllNotificationsRead = () =>
+  apiFetch<{ count: number }>('/notifications/read-all', { method: 'POST' })
 
 // ── Projects ──────────────────────────────────────────────────────────────────
 
@@ -152,6 +181,52 @@ export const updateAdminUser = (id: string, body: { role?: string; is_active?: b
 
 export const resetAdminUserPassword = (id: string) =>
   apiFetch<{ temp_password: string }>(`/admin/users/${id}/reset-password`, { method: 'POST' })
+
+// ── BCT Export Compliance ─────────────────────────────────────────────────────
+
+export const getBctAging = () =>
+  apiFetch<BCTAgingItem[]>('/export/bct-aging')
+
+export const markRepatriated = (invoiceId: string, repat_date?: string) =>
+  apiFetch<{ invoice_id: string; repatriation_date: string; message: string }>(
+    `/export/client-invoices/${invoiceId}/mark-repatriated`,
+    { method: 'PATCH', body: JSON.stringify({ repatriation_date: repat_date ?? null }) },
+  )
+
+export async function downloadBctReport(from: string, to: string): Promise<void> {
+  const BASE = import.meta.env.VITE_API_URL
+    ? `${import.meta.env.VITE_API_URL}/api`
+    : '/api'
+  const token = localStorage.getItem('biat_token')
+  const res = await fetch(`${BASE}/export/bct-report?from_=${from}&to=${to}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`)
+  const blob = await res.blob()
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = `bct_report_${from}_${to}.zip`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export async function verifyBctReport(csvFile: File, sigFile: File): Promise<{ valid: boolean; message: string }> {
+  const BASE = import.meta.env.VITE_API_URL
+    ? `${import.meta.env.VITE_API_URL}/api`
+    : '/api'
+  const token = localStorage.getItem('biat_token')
+  const fd = new FormData()
+  fd.append('report_file', csvFile)
+  fd.append('signature_file', sigFile)
+  const res = await fetch(`${BASE}/export/bct-report/verify`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  })
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`)
+  return res.json()
+}
 
 // ── Project (single) ──────────────────────────────────────────────────────────
 
@@ -202,6 +277,48 @@ export const updateLivrable = (id: string, body: { statut?: string; date_livrais
 
 export const validerPhase = (phaseId: string) =>
   apiFetch<{ message: string; status: string }>(`/phases/${phaseId}/valider`, { method: 'POST' })
+
+// ── Analytics Direction ───────────────────────────────────────────────────────
+
+export const getMonthlySpend = (year = 2026) =>
+  apiFetch<MonthlySpendItem[]>(`/analytics/monthly-spend?year=${year}`)
+
+export const getBySupplier = (year?: number) =>
+  apiFetch<SupplierSpendItem[]>(`/analytics/by-supplier${year ? `?year=${year}` : ''}`)
+
+export const getByAccount = (year?: number) =>
+  apiFetch<AccountSpendItem[]>(`/analytics/by-account${year ? `?year=${year}` : ''}`)
+
+export const getAnalyticsKPIs = (year = 2026) =>
+  apiFetch<AnalyticsKPIs>(`/analytics/kpis?year=${year}`)
+
+// ── Audit Trail ───────────────────────────────────────────────────────────────
+
+export const listAuditLogs = (params: {
+  action?: string
+  resource_type?: string
+  user_email?: string
+  status?: string
+  from_date?: string
+  to_date?: string
+  limit?: number
+  offset?: number
+} = {}) => {
+  const q = new URLSearchParams()
+  if (params.action)        q.set('action', params.action)
+  if (params.resource_type) q.set('resource_type', params.resource_type)
+  if (params.user_email)    q.set('user_email', params.user_email)
+  if (params.status)        q.set('status', params.status)
+  if (params.from_date)     q.set('from_date', params.from_date)
+  if (params.to_date)       q.set('to_date', params.to_date)
+  if (params.limit != null) q.set('limit', String(params.limit))
+  if (params.offset != null) q.set('offset', String(params.offset))
+  const qs = q.toString()
+  return apiFetch<AuditLog[]>(`/audit/logs${qs ? '?' + qs : ''}`)
+}
+
+export const getResourceHistory = (resourceType: string, resourceId: string) =>
+  apiFetch<AuditLog[]>(`/audit/logs/${resourceType}/${resourceId}`)
 
 // ── Health ────────────────────────────────────────────────────────────────────
 

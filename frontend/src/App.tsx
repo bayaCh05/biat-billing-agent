@@ -21,6 +21,8 @@ import ChangerMotDePassePage from './pages/ChangerMotDePassePage'
 import RoadmapPage from './pages/RoadmapPage'
 import InscriptionPage from './pages/admin/InscriptionPage'
 import HabilitationsPage from './pages/admin/HabilitationsPage'
+import BCTExport from './pages/BCTExport'
+import AuditPage from './pages/AuditPage'
 import { useAuth, ROLE_PATHS, roleHome } from './context/AuthContext'
 
 function HomeRedirect() {
@@ -84,6 +86,8 @@ export default function App() {
                 <Route path="/projects/:id"   element={<ProjetDetail />} />
                 <Route path="/projets-it/:id" element={<ProjetDetailIT />} />
                 <Route path="/roadmap"        element={<RoadmapPage />} />
+                <Route path="/bct-export"    element={<BCTExport />} />
+                <Route path="/audit"         element={<AuditPage />} />
                 <Route path="/admin/inscription"   element={<InscriptionPage />} />
                 <Route path="/admin/habilitations" element={<HabilitationsPage />} />
               </Route>

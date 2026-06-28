@@ -8,23 +8,67 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+import logging
 
 from api.auth import get_current_user
+from api.limiter import limiter
+
+_log = logging.getLogger(__name__)
 from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications, projects
 from api.routers import auth as auth_router
-from api.routers import admin, users, roadmap, projet_budget, livrables
+from api.routers import admin, users, roadmap, projet_budget, livrables, bct_export, audit
 
 _PROTECTED = [Depends(get_current_user)]
+
+_TAGS: list[dict] = [
+    {"name": "auth",           "description": "Authentification et gestion des sessions JWT"},
+    {"name": "invoices",       "description": "Factures fournisseurs — pipeline OCR+LLM, révision humaine"},
+    {"name": "journal",        "description": "Journal comptable PCE tunisien — écritures en partie double"},
+    {"name": "assets",         "description": "Immobilisations CAPEX — registre et plan d'amortissement"},
+    {"name": "client-invoices","description": "Facturation client intra-groupe — génération et suivi"},
+    {"name": "projects",       "description": "Chartes de projet, phases et livrables"},
+    {"name": "budget",         "description": "Lignes budgétaires par projet — prévu vs consommé"},
+    {"name": "roadmap",        "description": "Feuille de route IT 2026 — jalons et priorités"},
+    {"name": "admin",          "description": "Gestion des utilisateurs et habilitations — ADMIN uniquement"},
+    {"name": "analytics",      "description": "Tableaux de bord, KPIs, suivi de trésorerie, requêtes NL"},
+    {"name": "notifications",  "description": "Notifications persistantes — alertes factures et budget"},
+    {"name": "bct-export",     "description": "Conformité BCT — Circulaire 2025-13 : suivi rapatriement exports, rapport signé SHA-256"},
+]
 
 app = FastAPI(
     title="BIAT IT Billing Agent API",
     version="1.0.0",
-    description="Local-only REST API for invoice processing. All LLM inference via Ollama.",
+    description=(
+        "Système de facturation intelligent pour BIAT IT. "
+        "Automatisation OCR+LLM des factures fournisseurs, "
+        "génération d'écritures PCE tunisiennes, gestion CAPEX. "
+        "Toute l'inférence IA est locale via Ollama — aucune donnée n'est transmise au cloud."
+    ),
+    contact={"name": "BIAT IT", "email": "it@biat.com.tn"},
+    openapi_tags=_TAGS,
 )
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Trop de tentatives. Réessayez dans 60 secondes."},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,6 +77,49 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Startup migration check ───────────────────────────────────────────────────
+@app.on_event("startup")
+def _check_migrations() -> None:
+    """Warn if the database is not at the latest Alembic revision.
+
+    Migrations are NOT run automatically — banking compliance requires a
+    deliberate `alembic upgrade head` before deploying schema changes.
+    """
+    db_url = os.getenv("DATABASE_URL", "sqlite:///./data/invoices.db")
+    if ":memory:" in db_url:
+        return  # in-memory DBs are test-only; Alembic not applicable
+
+    try:
+        from alembic.config import Config
+        from alembic.runtime.environment import EnvironmentContext
+        from alembic.script import ScriptDirectory
+        from sqlalchemy import create_engine, text
+
+        alembic_cfg = Config("alembic.ini")
+        alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+        script = ScriptDirectory.from_config(alembic_cfg)
+        head_rev = script.get_current_head()
+
+        engine = create_engine(db_url)
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT version_num FROM alembic_version LIMIT 1")
+            ).scalar_one_or_none()
+        engine.dispose()
+
+        if result != head_rev:
+            _log.warning(
+                "⚠️  Base de données en retard sur les migrations Alembic. "
+                "Révision actuelle : %s — Head : %s. "
+                "Exécuter : alembic upgrade head",
+                result, head_rev,
+            )
+        else:
+            _log.info("✓ Base de données à jour (révision %s).", result)
+    except Exception as exc:
+        _log.warning("Impossible de vérifier les migrations Alembic : %s", exc)
+
 
 # Auth endpoints — no token required
 app.include_router(auth_router.router, prefix="/api")
@@ -54,6 +141,9 @@ app.include_router(users.router,           prefix="/api", dependencies=_PROTECTE
 app.include_router(roadmap.router,         prefix="/api", dependencies=_PROTECTED)
 app.include_router(projet_budget.router,   prefix="/api", dependencies=_PROTECTED)
 app.include_router(livrables.router,       prefix="/api", dependencies=_PROTECTED)
+app.include_router(bct_export.router,      prefix="/api", dependencies=_PROTECTED)
+app.include_router(audit.router,           prefix="/api", dependencies=_PROTECTED)
+app.include_router(kpi.analytics_router,   prefix="/api", dependencies=_PROTECTED)
 
 
 @app.get("/api/health")

@@ -123,6 +123,7 @@ export interface Asset {
   id: string
   designation: string
   compte_immobilisation: string
+  compte_amortissement: string | null
   acquisition_date: string
   acquisition_cost_ht: number
   useful_life_years: number
@@ -166,6 +167,40 @@ export interface ClientInvoice {
   status: ClientInvoiceStatus
   sent_at: string | null
   paid_at: string | null
+  // BCT export compliance
+  currency: string
+  is_export: boolean
+  domiciliation_bank: string | null
+  domiciliation_number: string | null
+  shipment_date: string | null
+  repatriation_deadline: string | null
+  repatriation_date: string | null
+  payment_guarantee_type: string | null
+  foreign_currency_amount: number | null
+  exchange_rate: number | null
+}
+
+// ── BCT Export Compliance ────────────────────────────────────────────────────
+
+export type BCTStatus = 'OK' | 'WARNING' | 'OVERDUE' | 'REPATRIATED' | 'PENDING'
+
+export interface BCTAgingItem {
+  invoice_number: string
+  client_name: string
+  currency: string
+  amount_tnd: number
+  shipment_date: string | null
+  repatriation_deadline: string | null
+  days_remaining_or_overdue: number | null
+  status: BCTStatus
+  payment_guarantee_type: string | null
+}
+
+export interface BCTComplianceSummary {
+  total: number
+  ok: number
+  warning: number
+  overdue: number
 }
 
 // ── Projects ─────────────────────────────────────────────────────────────────
@@ -240,6 +275,17 @@ export interface AdminUser {
   is_first_login: boolean
   is_active: boolean
   created_at: string
+  is_demo?: boolean
+}
+
+export interface NotificationItem {
+  id: string
+  type: string
+  title: string
+  body: string
+  is_read: boolean
+  created_at: string
+  invoice_id: string | null
 }
 
 // ── Budget projet ─────────────────────────────────────────────────────────────
@@ -301,4 +347,57 @@ export interface NLQueryResult {
   rows: (string | number | null)[][]
   row_count: number
   error: string | null
+}
+
+// ── Analytics Direction ───────────────────────────────────────────────────────
+
+export interface MonthlySpendItem {
+  month: string        // "2026-01"
+  total_ht: number
+  total_ttc: number
+  invoice_count: number
+  opex: number
+  capex: number
+}
+
+export interface SupplierSpendItem {
+  supplier: string
+  total_ttc: number
+  total_ht: number
+  count: number
+}
+
+export interface AccountSpendItem {
+  compte: string
+  label: string
+  total_ht: number
+  pct: number
+}
+
+export interface AnalyticsKPIs {
+  avg_processing_days: number
+  rejection_rate: number
+  human_review_rate: number
+  total_capex_ytd: number
+  total_opex_ytd: number
+  pending_count: number
+}
+
+// ── Audit Trail ───────────────────────────────────────────────────────────────
+
+export interface AuditLog {
+  id: string
+  created_at: string
+  user_id: string | null
+  user_email: string | null
+  user_role: string | null
+  action: string
+  resource_type: string | null
+  resource_id: string | null
+  before_value: Record<string, unknown> | null
+  after_value: Record<string, unknown> | null
+  ip_address: string | null
+  user_agent: string | null
+  status: 'SUCCESS' | 'FAILURE'
+  detail: string | null
 }

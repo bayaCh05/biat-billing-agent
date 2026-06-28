@@ -3,7 +3,7 @@ import {
   Home, ClipboardList, Files,
   Activity, BookOpen, BookMarked, CreditCard, BarChart2,
   Building2, TrendingUp, Gauge, MessageSquare, FolderKanban,
-  LogOut, Map, ShieldCheck, Users,
+  LogOut, Map, ShieldCheck, Users, Landmark, History,
 } from 'lucide-react'
 import { useAuth, ROLE_PATHS } from '../../context/AuthContext'
 
@@ -26,6 +26,8 @@ const ALL_NAV = [
   { path: '/direction',   icon: TrendingUp,      label: 'Direction',      roles: ['Direction'] },
   { path: '/roadmap',     icon: Map,             label: 'Feuille de Route', roles: ['Comptable', 'Chef de Projet', 'Direction'] },
   { path: '/requetes',    icon: MessageSquare,   label: 'Requêtes',       roles: ['Comptable', 'Direction'] },
+  { path: '/bct-export',  icon: Landmark,        label: 'Conformité BCT', roles: ['Comptable', 'Direction'] },
+  { path: '/audit',       icon: History,         label: 'Piste d\'Audit', roles: ['Admin', 'Direction'] },
 ]
 
 export default function Sidebar() {
