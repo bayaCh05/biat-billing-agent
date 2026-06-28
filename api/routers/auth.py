@@ -1,6 +1,8 @@
 """Authentication endpoints."""
 from __future__ import annotations
 
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -95,7 +97,7 @@ def login(request: Request, body: LoginRequest, session: Session = Depends(get_s
 
     # Fall back to hardcoded demo users
     demo = USERS.get(email)
-    if demo and demo["password"] == body.password:
+    if demo and secrets.compare_digest(demo["password"], body.password):
         log_action(session, AuditLogCreate(
             user_email=email, user_role=demo["role"],
             action="LOGIN", resource_type="User", status="SUCCESS",

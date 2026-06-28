@@ -1,7 +1,7 @@
 """Integration test: full project billing flow end-to-end.
 
 Strategy:
-  - Real SQLite on-disk DB (tmp_path)
+  - In-memory SQLite (init_db creates all tables via create_all for :memory: URLs)
   - Real ProjectRepository, ClientInvoiceRepository, InvoiceNumberer
   - Real MonthlyInvoiceBuilder (no mocks)
   - No LLM, no PDF, no Ollama required
@@ -11,7 +11,6 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from src.billing.client_invoice_store import ClientInvoiceRepository
@@ -26,14 +25,17 @@ from src.models.project import (
     Phase,
     PhaseStatus,
 )
-from src.storage.db import Base, init_db
+from src.storage.db import build_engine, init_db
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
-def db_session(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path}/test_billing.db")
+def db_session():
+    # build_engine("sqlite:///:memory:") enables StaticPool so all sessions
+    # share the same connection — required for in-memory SQLite.
+    # init_db() detects :memory: and calls Base.metadata.create_all().
+    engine = build_engine("sqlite:///:memory:")
     init_db(engine)
     s = Session(engine)
     yield s

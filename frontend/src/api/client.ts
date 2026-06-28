@@ -41,6 +41,27 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return res.json() as Promise<T>
 }
 
+/** Fetch a binary response (e.g. ZIP download) and trigger a browser download. */
+export async function apiBlobFetch(path: string, filename: string, init?: RequestInit): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: authHeaders(),
+    ...init,
+  })
+  if (res.status === 401) return handle401()
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(`API ${res.status}: ${text}`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** POST a FormData and return JSON — used for file upload endpoints. */
 export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',

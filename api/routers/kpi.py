@@ -9,18 +9,16 @@ from sqlalchemy.orm import Session
 from api.auth import require_role
 from api.deps import get_session
 from api.schemas import KpiOut
-from src.models.enums import InvoiceStatus
 from src.storage.repository import InvoiceRepository
 
 router = APIRouter(prefix="/kpi", tags=["analytics"])
 analytics_router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-_TERMINAL = [InvoiceStatus.EXPORTED, InvoiceStatus.JOURNALED, InvoiceStatus.PAID, InvoiceStatus.COLLECTED]
 _TERMINAL_STR = {"EXPORTED", "JOURNALED", "PAID", "COLLECTED"}
 _DIRECTION_COMPTABLE = Depends(require_role("Admin", "Direction", "Comptable"))
 
 
-# ── Existing KPI endpoint (no role change — already protected by global middleware) ──
+# ── Main KPI endpoint — pure SQL aggregation, no full table scan ──────────────
 
 @router.get(
     "",
@@ -34,30 +32,52 @@ _DIRECTION_COMPTABLE = Depends(require_role("Admin", "Direction", "Comptable"))
     response_description="Compteurs et taux agrégés sur l'ensemble des factures",
 )
 def get_kpi(session: Session = Depends(get_session)):
+    from src.storage.orm_models import InvoiceORM
+
+    # Single aggregation query: totals + FLAGGED + pending review counts
+    agg = session.execute(
+        select(
+            func.count(InvoiceORM.id).label("total"),
+            func.sum(
+                case((InvoiceORM.status.in_(_TERMINAL_STR), InvoiceORM.amount_ttc), else_=0)
+            ).label("total_ttc"),
+            func.sum(
+                case((InvoiceORM.status == "FLAGGED", 1), else_=0)
+            ).label("flagged"),
+            func.sum(
+                case(
+                    (
+                        (InvoiceORM.human_review_required == True)  # noqa: E712
+                        & (InvoiceORM.status != "FLAGGED"),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("pending"),
+        )
+    ).first()
+
+    # Count breakdown by status
+    status_rows = session.execute(
+        select(InvoiceORM.status, func.count(InvoiceORM.id).label("cnt"))
+        .group_by(InvoiceORM.status)
+    ).all()
+    by_status: dict[str, int] = {row.status: row.cnt for row in status_rows}
+
+    # Auto-approved count: processed invoices that never required human review
     repo = InvoiceRepository(session)
-    invoices = repo.list_all()
-
-    terminal_set = set(_TERMINAL)
-    processed = [inv for inv in invoices if inv.status in terminal_set]
-
-    total_amount = sum(inv.amount_ttc.value for inv in processed if inv.amount_ttc.value)
-    flagged = [inv for inv in invoices if inv.status == InvoiceStatus.FLAGGED]
-    pending = [inv for inv in invoices if inv.human_review_required and inv.status != InvoiceStatus.FLAGGED]
-
+    from src.models.enums import InvoiceStatus
+    _TERMINAL = [InvoiceStatus.EXPORTED, InvoiceStatus.JOURNALED, InvoiceStatus.PAID, InvoiceStatus.COLLECTED]
     total_processed, auto_approved = repo.count_auto_approved(statuses=_TERMINAL)
 
-    by_status: dict[str, int] = {}
-    for inv in invoices:
-        key = inv.status.value
-        by_status[key] = by_status.get(key, 0) + 1
-
+    total = int(agg.total or 0)
     return KpiOut(
-        total_invoices=len(invoices),
-        total_amount_ttc=total_amount,
+        total_invoices=total,
+        total_amount_ttc=round(float(agg.total_ttc or 0), 3),
         auto_approved=auto_approved,
         auto_approval_rate=round(auto_approved / max(total_processed, 1) * 100, 1),
-        flagged=len(flagged),
-        pending_review=len(pending),
+        flagged=int(agg.flagged or 0),
+        pending_review=int(agg.pending or 0),
         by_status=by_status,
     )
 

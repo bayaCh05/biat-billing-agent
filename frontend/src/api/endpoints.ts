@@ -1,4 +1,5 @@
-import { apiFetch, apiUpload } from './client'
+import { apiFetch, apiBlobFetch, apiUpload } from './client'
+
 import type {
   Invoice, InvoiceSummary, JournalEntry, BudgetSummary,
   Asset, KpiData, ClientTemplate, ClientInvoice, NLQueryResult, SuiviSnapshot,
@@ -193,39 +194,17 @@ export const markRepatriated = (invoiceId: string, repat_date?: string) =>
     { method: 'PATCH', body: JSON.stringify({ repatriation_date: repat_date ?? null }) },
   )
 
-export async function downloadBctReport(from: string, to: string): Promise<void> {
-  const BASE = import.meta.env.VITE_API_URL
-    ? `${import.meta.env.VITE_API_URL}/api`
-    : '/api'
-  const token = localStorage.getItem('biat_token')
-  const res = await fetch(`${BASE}/export/bct-report?from_=${from}&to=${to}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`)
-  const blob = await res.blob()
-  const url  = URL.createObjectURL(blob)
-  const a    = document.createElement('a')
-  a.href     = url
-  a.download = `bct_report_${from}_${to}.zip`
-  a.click()
-  URL.revokeObjectURL(url)
-}
+export const downloadBctReport = (from: string, to: string): Promise<void> =>
+  apiBlobFetch(
+    `/export/bct-report?from_=${from}&to=${to}`,
+    `bct_report_${from}_${to}.zip`,
+  )
 
-export async function verifyBctReport(csvFile: File, sigFile: File): Promise<{ valid: boolean; message: string }> {
-  const BASE = import.meta.env.VITE_API_URL
-    ? `${import.meta.env.VITE_API_URL}/api`
-    : '/api'
-  const token = localStorage.getItem('biat_token')
+export const verifyBctReport = (csvFile: File, sigFile: File): Promise<{ valid: boolean; message: string }> => {
   const fd = new FormData()
   fd.append('report_file', csvFile)
   fd.append('signature_file', sigFile)
-  const res = await fetch(`${BASE}/export/bct-report/verify`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: fd,
-  })
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`)
-  return res.json()
+  return apiUpload<{ valid: boolean; message: string }>('/export/bct-report/verify', fd)
 }
 
 // ── Project (single) ──────────────────────────────────────────────────────────

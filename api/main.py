@@ -5,23 +5,23 @@ Start with:
 """
 from __future__ import annotations
 
+import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-import logging
-
-from api.auth import get_current_user
+from api.auth import SECRET, get_current_user
 from api.limiter import limiter
 
 _log = logging.getLogger(__name__)
+
 from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications, projects
 from api.routers import auth as auth_router
 from api.routers import admin, users, roadmap, projet_budget, livrables, bct_export, audit
@@ -43,56 +43,29 @@ _TAGS: list[dict] = [
     {"name": "bct-export",     "description": "Conformité BCT — Circulaire 2025-13 : suivi rapatriement exports, rapport signé SHA-256"},
 ]
 
-app = FastAPI(
-    title="BIAT IT Billing Agent API",
-    version="1.0.0",
-    description=(
-        "Système de facturation intelligent pour BIAT IT. "
-        "Automatisation OCR+LLM des factures fournisseurs, "
-        "génération d'écritures PCE tunisiennes, gestion CAPEX. "
-        "Toute l'inférence IA est locale via Ollama — aucune donnée n'est transmise au cloud."
-    ),
-    contact={"name": "BIAT IT", "email": "it@biat.com.tn"},
-    openapi_tags=_TAGS,
-)
 
-# ── Rate limiting ─────────────────────────────────────────────────────────────
-app.state.limiter = limiter
-app.add_middleware(SlowAPIMiddleware)
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    _startup()
+    yield
 
 
-async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
-    return JSONResponse(
-        status_code=429,
-        content={"detail": "Trop de tentatives. Réessayez dans 60 secondes."},
-    )
+def _startup() -> None:
+    # Warn if JWT secret is below recommended minimum length for HMAC-SHA256
+    if len(SECRET) < 32:
+        _log.warning(
+            "⚠️  JWT_SECRET est trop court (%d octets — minimum recommandé : 32). "
+            "Définir JWT_SECRET dans les variables d'environnement avant la mise en production.",
+            len(SECRET),
+        )
 
-
-app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ── Startup migration check ───────────────────────────────────────────────────
-@app.on_event("startup")
-def _check_migrations() -> None:
-    """Warn if the database is not at the latest Alembic revision.
-
-    Migrations are NOT run automatically — banking compliance requires a
-    deliberate `alembic upgrade head` before deploying schema changes.
-    """
+    # Warn if DB is not at the latest Alembic revision
     db_url = os.getenv("DATABASE_URL", "sqlite:///./data/invoices.db")
     if ":memory:" in db_url:
-        return  # in-memory DBs are test-only; Alembic not applicable
+        return
 
     try:
         from alembic.config import Config
-        from alembic.runtime.environment import EnvironmentContext
         from alembic.script import ScriptDirectory
         from sqlalchemy import create_engine, text
 
@@ -119,6 +92,50 @@ def _check_migrations() -> None:
             _log.info("✓ Base de données à jour (révision %s).", result)
     except Exception as exc:
         _log.warning("Impossible de vérifier les migrations Alembic : %s", exc)
+
+
+app = FastAPI(
+    title="BIAT IT Billing Agent API",
+    version="1.0.0",
+    description=(
+        "Système de facturation intelligent pour BIAT IT. "
+        "Automatisation OCR+LLM des factures fournisseurs, "
+        "génération d'écritures PCE tunisiennes, gestion CAPEX. "
+        "Toute l'inférence IA est locale via Ollama — aucune donnée n'est transmise au cloud."
+    ),
+    contact={"name": "BIAT IT", "email": "it@biat.com.tn"},
+    openapi_tags=_TAGS,
+    lifespan=_lifespan,
+)
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Trop de tentatives. Réessayez dans 60 secondes."},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+
+# CORS: allow Vite dev server origins only; in Docker the SPA is served
+# from the same origin so the wildcard is never needed in production.
+_CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://localhost:5174,http://localhost:4173",
+).split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # Auth endpoints — no token required
