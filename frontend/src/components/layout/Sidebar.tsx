@@ -3,7 +3,7 @@ import {
   Home, ClipboardList, Files,
   Activity, BookOpen, BookMarked, CreditCard, BarChart2,
   Building2, TrendingUp, Gauge, MessageSquare, FolderKanban,
-  LogOut, Map, ShieldCheck, Users, Landmark, History, Bell,
+  LogOut, Map, ShieldCheck, Users, Landmark, History,
 } from 'lucide-react'
 import { useAuth, ROLE_PATHS } from '../../context/AuthContext'
 
@@ -28,12 +28,11 @@ const ALL_NAV = [
   { path: '/requetes',    icon: MessageSquare,   label: 'Requêtes',       roles: ['Comptable', 'Direction'] },
   { path: '/bct-export',  icon: Landmark,        label: 'Conformité BCT', roles: ['Comptable', 'Direction'] },
   { path: '/audit',          icon: History,  label: 'Piste d\'Audit',  roles: ['Admin', 'Direction'] },
-  { path: '/notifications',  icon: Bell,     label: 'Notifications',   roles: ['Admin', 'Comptable', 'Chef de Projet', 'Direction'] },
 ]
 
 export default function Sidebar() {
   const navigate = useNavigate()
-  const { name, initials, role, logout, notifCount } = useAuth()
+  const { name, initials, role, logout } = useAuth()
 
   const visibleNav = ALL_NAV.filter(item => {
     const allowed = ROLE_PATHS[role]
@@ -81,15 +80,7 @@ export default function Sidebar() {
             }
           >
             <Icon size={14} />
-            <span className="flex-1">{label}</span>
-            {path === '/notifications' && notifCount > 0 && (
-              <span
-                className="flex items-center justify-center rounded-full text-white font-bold"
-                style={{ background: '#C0391B', fontSize: 9, minWidth: 16, height: 16, padding: '0 4px' }}
-              >
-                {notifCount > 99 ? '99+' : notifCount}
-              </span>
-            )}
+            {label}
           </NavLink>
         ))}
       </nav>
