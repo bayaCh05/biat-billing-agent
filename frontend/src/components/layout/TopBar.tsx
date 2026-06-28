@@ -27,7 +27,7 @@ function timeAgo(iso: string) {
 }
 
 export default function TopBar({ title, badge }: Props) {
-  const { initials, notifCount, setNotifCount } = useAuth()
+  const { notifCount, setNotifCount } = useAuth()
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<NotificationItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -207,13 +207,6 @@ export default function TopBar({ title, badge }: Props) {
         )}
       </div>
 
-      {/* Avatar */}
-      <div
-        className="flex items-center justify-center rounded-full text-white text-xs font-bold shrink-0"
-        style={{ width: 32, height: 32, background: '#1A3A5C' }}
-      >
-        {initials}
-      </div>
     </header>
   )
 }
