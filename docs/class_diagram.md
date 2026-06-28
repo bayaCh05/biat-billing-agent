@@ -229,6 +229,16 @@ class ClientInvoice {
     +str source_template_id
     +datetime sent_at
     +datetime paid_at
+    +str currency
+    +bool is_export
+    +str domiciliation_bank
+    +str domiciliation_number
+    +date shipment_date
+    +date repatriation_deadline
+    +date repatriation_date
+    +str payment_guarantee_type
+    +float foreign_currency_amount
+    +float exchange_rate
 }
 
 %% ══════════════════════════════════════════════
@@ -263,6 +273,93 @@ class AssetProjectLink {
     +str asset_id
     +str project_id
     +float allocation_pct
+}
+
+%% ══════════════════════════════════════════════
+%%  UTILISATEURS & SÉCURITÉ
+%% ══════════════════════════════════════════════
+
+class User {
+    +UUID id
+    +str nom
+    +str prenom
+    +str email
+    +str hashed_password
+    +str role
+    +str departement
+    +bool is_first_login
+    +bool is_active
+    +bool is_demo
+    +datetime created_at
+}
+
+class AuditLog {
+    +UUID id
+    +datetime created_at
+    +str user_id
+    +str user_email
+    +str user_role
+    +str action
+    +str resource_type
+    +str resource_id
+    +JSON before_value
+    +JSON after_value
+    +str ip_address
+    +str user_agent
+    +str status
+}
+
+%% ══════════════════════════════════════════════
+%%  NOTIFICATIONS
+%% ══════════════════════════════════════════════
+
+class Notification {
+    +UUID id
+    +str type
+    +str title
+    +str body
+    +bool is_read
+    +datetime created_at
+    +UUID invoice_id
+}
+
+%% ══════════════════════════════════════════════
+%%  PROJETS — LIVRABLES & BUDGET
+%% ══════════════════════════════════════════════
+
+class Livrable {
+    +UUID id
+    +str phase_id
+    +str titre
+    +str description
+    +date date_livraison_prevue
+    +date date_livraison_reelle
+    +str statut
+    +str created_by
+    +datetime created_at
+}
+
+class LigneBudget {
+    +UUID id
+    +str projet_id
+    +str categorie
+    +float montant_prevu
+    +float montant_consomme
+    +str devise
+    +datetime created_at
+}
+
+class FeuilleDeRoute {
+    +UUID id
+    +str titre
+    +str description
+    +date date_debut
+    +date date_fin
+    +str statut
+    +str priorite
+    +int annee
+    +str responsable
+    +datetime created_at
 }
 
 %% ══════════════════════════════════════════════
@@ -302,6 +399,12 @@ ClientInvoice --> CharteProjet : référence projet
 
 %% Projets
 CharteProjet "1" *-- "1..*" Phase : décomposée en
+Phase "1" *-- "0..*" Livrable : contient
+CharteProjet "1" o-- "0..*" LigneBudget : budget par catégorie
+
+%% Sécurité & audit
+AuditLog --> User : tracé par
+Notification --> InvoiceRecord : déclenché par
 ```
 
 ## Légende
@@ -324,4 +427,9 @@ CharteProjet "1" *-- "1..*" Phase : décomposée en
 | **Comptabilité** | `JournalEntry`, `JournalLine` | Génère les écritures en partie double (PCE Tunisien) |
 | **CAPEX** | `Asset`, `AssetProjectLink` | Registre des immobilisations et plan d'amortissement |
 | **Facturation** | `ClientInvoice`, `ClientLineItem` | Factures émises aux entités du groupe BIAT |
-| **Projets** | `CharteProjet`, `Phase` | Suivi des projets IT par jalons et jours/homme |
+| **Projets** | `CharteProjet`, `Phase`, `Livrable`, `LigneBudget` | Suivi des projets IT : phases, livrables, budget par catégorie |
+| **Feuille de route** | `FeuilleDeRoute` | Jalons stratégiques 2026 avec statut et priorité |
+| **Utilisateurs** | `User` | Comptes avec rôles, profil modifiable, premier login |
+| **Audit** | `AuditLog` | Piste d'audit BCT : chaque action enregistrée avec before/after |
+| **Notifications** | `Notification` | Alertes automatiques sur factures bloquées ou budgets dépassés |
+| **BCT Compliance** | `ClientInvoice` | Champs export : devise, domiciliation, délai de rapatriement |
