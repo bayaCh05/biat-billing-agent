@@ -24,17 +24,17 @@ export default function Layout() {
           className="shrink-0 flex items-center justify-end px-5 gap-3"
           style={{ height: 44, background: '#F0F4F9', borderBottom: '1px solid #E2EBF3' }}
         >
-          {notifCount > 0 && (
-            <NavLink to="/review" className="relative text-gray-400 hover:text-gray-600 transition-colors">
-              <Bell size={16} />
+          <NavLink to="/notifications" className="relative text-gray-400 hover:text-gray-600 transition-colors" title="Notifications">
+            <Bell size={16} />
+            {notifCount > 0 && (
               <span
                 className="absolute -top-1.5 -right-1.5 flex items-center justify-center rounded-full bg-red-500 text-white font-bold"
                 style={{ width: 15, height: 15, fontSize: 9 }}
               >
                 {notifCount > 9 ? '9+' : notifCount}
               </span>
-            </NavLink>
-          )}
+            )}
+          </NavLink>
           <NavLink
             to="/profile"
             className="flex items-center justify-center rounded-full text-white text-xs font-bold transition-all hover:opacity-80 hover:ring-2 hover:ring-offset-1"
