@@ -74,6 +74,13 @@ Règles SQL importantes:
 - Si la question ne peut pas être répondue avec ces tables, retourne:
   {"sql": null, "explanation": "raison pour laquelle la question ne peut pas être répondue"}
 
+Agrégats — règle OBLIGATOIRE pour éviter NULL:
+- Pour tout SUM(): COALESCE(SUM(colonne), 0)  — SUM sur 0 lignes retourne NULL en SQLite
+- Pour tout COUNT(): COALESCE(COUNT(*), 0)    — COUNT ne retourne jamais NULL mais COALESCE est recommandé par cohérence
+- Pour tout AVG(): COALESCE(AVG(colonne), 0)
+- Exemple correct: SELECT COALESCE(SUM(amount_ttc), 0) AS total_ttc FROM invoices WHERE ...
+- Exemple correct: SELECT COALESCE(COUNT(*), 0) AS nb_factures FROM invoices WHERE ...
+
 Pièges à éviter:
 - cost_catalog_id est une colonne texte directe dans la table invoices (ex: 'telecommunications', 'formation_personnel'). Il n'existe PAS de table cost_catalog séparée.
 - "En attente de validation" ou "à valider" signifie status = 'FLAGGED' (factures bloquées pour revue humaine).

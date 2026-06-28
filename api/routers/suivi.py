@@ -11,7 +11,7 @@ from api.deps import get_session
 from api.schemas import InvoiceSummary
 from src.storage.repository import InvoiceRepository
 
-router = APIRouter(prefix="/suivi", tags=["suivi"])
+router = APIRouter(prefix="/suivi", tags=["analytics"])
 
 
 class AgeingBucketOut(BaseModel):
@@ -66,7 +66,18 @@ def _build_ageing(invoices, today: date) -> AgeingBucketOut:
     return bucket
 
 
-@router.get("/snapshot", response_model=SuiviSnapshotOut)
+@router.get(
+    "/snapshot",
+    response_model=SuiviSnapshotOut,
+    summary="Snapshot de trésorerie",
+    description=(
+        "Retourne un instantané du suivi de trésorerie : "
+        "total des payables fournisseurs et receivables clients, "
+        "ageing en tranches (courant, 1–30, 31–60, 61–90, >90 jours), "
+        "listes détaillées des factures en attente de paiement, de recouvrement et en retard."
+    ),
+    response_description="Snapshot complet avec buckets d'ageing et listes de factures",
+)
 def get_snapshot(session: Session = Depends(get_session)):
     repo = InvoiceRepository(session)
     today = datetime.now(tz=timezone.utc).date()

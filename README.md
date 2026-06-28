@@ -49,15 +49,41 @@ ollama pull qwen2.5:3b
 # ollama serve must be running on http://localhost:11434
 ```
 
-### 3. Database — init + seed
+### 3. Database — migrations + seed
+
+Schema is managed by **Alembic**. Run migrations before starting the server.
 
 ```bash
-# Initialise schema
-python -c "from src.storage.db import build_engine, init_db; init_db(build_engine('sqlite:///./data/invoices.db'))"
+# Apply all pending migrations (creates full schema on a fresh DB)
+alembic upgrade head
 
 # Seed with realistic demo data
 python scripts/seed_demo.py
 ```
+
+#### Migration commands reference
+
+```bash
+# Check current DB revision
+alembic current
+
+# Show full migration history
+alembic history
+
+# Roll back one migration
+alembic downgrade -1
+
+# Create a new migration after changing an ORM model
+alembic revision --autogenerate -m "short description of change"
+
+# Stamp an existing DB at head without running migrations
+# (used when adopting Alembic on an already-initialised DB)
+alembic stamp head
+```
+
+> **Important:** Never run `alembic upgrade head` automatically on startup in
+> production. Schema changes in a banking system require a deliberate, reviewed
+> deployment step. The API server will log a warning if the DB is behind.
 
 Seed options:
 ```bash

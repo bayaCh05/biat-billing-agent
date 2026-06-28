@@ -13,7 +13,18 @@ from src.accounting.journal_store import JournalRepository
 router = APIRouter(prefix="/journal", tags=["journal"])
 
 
-@router.get("", response_model=list[JournalEntryOut])
+@router.get(
+    "",
+    response_model=list[JournalEntryOut],
+    summary="Lister les écritures comptables",
+    description=(
+        "Retourne les écritures du journal PCE tunisien. "
+        "Filtre par plage de dates (`start` et `end`) ou les `limit` dernières entrées (défaut 200). "
+        "Chaque écriture respecte l'équilibre débit = crédit (double entrée). "
+        "Comptes : 401 Fournisseurs, 4366 TVA déductible, 6xxx Charges, 2xxx Immobilisations."
+    ),
+    response_description="Liste d'écritures avec leurs lignes débit/crédit",
+)
 def list_entries(
     start: date | None = None,
     end: date | None = None,

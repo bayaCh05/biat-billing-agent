@@ -1,28 +1,117 @@
-"""Notification count endpoint — used by the frontend topbar badge."""
+"""Notification endpoints — DB-persisted notifications with mark-as-read support."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.deps import get_session
-from src.models.enums import InvoiceStatus
-from src.storage.repository import InvoiceRepository
+from src.storage.orm_models_notifications import NotificationORM
+from src.notifications.notification_service import sync_flagged_invoices
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
+
+
+class NotificationOut(BaseModel):
+    id: str
+    type: str
+    title: str
+    body: str
+    is_read: bool
+    created_at: str
+    invoice_id: str | None
 
 
 class NotificationCountOut(BaseModel):
     count: int
 
 
-@router.get("/count", response_model=NotificationCountOut)
-def get_count(session: Session = Depends(get_session)):
-    repo = InvoiceRepository(session)
-    invoices = repo.list_all()
-    count = sum(
-        1 for inv in invoices
-        if inv.human_review_required
-        and inv.status not in (InvoiceStatus.REJECTED, InvoiceStatus.ERROR)
+def _to_out(n: NotificationORM) -> NotificationOut:
+    return NotificationOut(
+        id=str(n.id),
+        type=n.type,
+        title=n.title,
+        body=n.body,
+        is_read=n.is_read,
+        created_at=n.created_at.isoformat(),
+        invoice_id=str(n.invoice_id) if n.invoice_id else None,
     )
-    return NotificationCountOut(count=count)
+
+
+@router.get(
+    "/count",
+    response_model=NotificationCountOut,
+    summary="Nombre de notifications non lues",
+    description=(
+        "Retourne le compteur de notifications non lues. "
+        "Appelé par la cloche de notification dans la barre supérieure. "
+        "Déclenche aussi la synchronisation des factures FLAGGED en attente."
+    ),
+    response_description="Compteur de notifications non lues",
+)
+def get_count(session: Session = Depends(get_session)):
+    sync_flagged_invoices(session)
+    count = session.execute(
+        select(NotificationORM).where(NotificationORM.is_read == False)  # noqa: E712
+    ).scalars().all()
+    return NotificationCountOut(count=len(count))
+
+
+@router.get(
+    "/list",
+    response_model=list[NotificationOut],
+    summary="Lister les notifications",
+    description=(
+        "Retourne toutes les notifications persistées en base de données. "
+        "Les non-lues apparaissent en premier, puis par date décroissante. "
+        "Types : INVOICE_FLAGGED, INVOICE_ESCALATED, PAYMENT_OVERDUE, BUDGET_EXCEEDED."
+    ),
+    response_description="Liste de notifications avec statut de lecture",
+)
+def list_notifications(session: Session = Depends(get_session)):
+    sync_flagged_invoices(session)
+    rows = session.execute(
+        select(NotificationORM).order_by(
+            NotificationORM.is_read.asc(),
+            NotificationORM.created_at.desc(),
+        )
+    ).scalars().all()
+    return [_to_out(n) for n in rows]
+
+
+@router.patch(
+    "/{notif_id}/read",
+    response_model=NotificationOut,
+    summary="Marquer une notification comme lue",
+    description="Passe `is_read=true` sur une notification spécifique.",
+    response_description="Notification mise à jour avec is_read=true",
+    responses={404: {"description": "Notification non trouvée"}},
+)
+def mark_read(notif_id: str, session: Session = Depends(get_session)):
+    notif = session.get(NotificationORM, UUID(notif_id))
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found.")
+    notif.is_read = True
+    session.commit()
+    session.refresh(notif)
+    return _to_out(notif)
+
+
+@router.post(
+    "/read-all",
+    response_model=NotificationCountOut,
+    summary="Tout marquer comme lu",
+    description="Marque toutes les notifications non lues comme lues en une seule opération.",
+    response_description="Compteur remis à zéro (count=0)",
+)
+def mark_all_read(session: Session = Depends(get_session)):
+    unread = session.execute(
+        select(NotificationORM).where(NotificationORM.is_read == False)  # noqa: E712
+    ).scalars().all()
+    for n in unread:
+        n.is_read = True
+    session.commit()
+    return NotificationCountOut(count=0)

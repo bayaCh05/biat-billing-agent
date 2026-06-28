@@ -13,10 +13,19 @@ from src.billing.invoice_builder import InvoiceBuilder
 from src.billing.invoice_numbering import InvoiceNumberer
 from src.billing.client_invoice_store import ClientInvoiceRepository
 
-router = APIRouter(prefix="/billing", tags=["billing"])
+router = APIRouter(prefix="/billing", tags=["client-invoices"])
 
 
-@router.get("/templates", response_model=list[ClientTemplateOut])
+@router.get(
+    "/templates",
+    response_model=list[ClientTemplateOut],
+    summary="Lister les modèles de facturation",
+    description=(
+        "Retourne les modèles de facturation intra-groupe définis dans `client_templates.yaml`. "
+        "Chaque modèle contient le client cible, la description du service et le prix unitaire HT."
+    ),
+    response_description="Liste des modèles disponibles pour la génération de factures",
+)
 def list_templates(cfg: dict = Depends(get_config)):
     loader = TemplateLoader(cfg["billing"]["templates_file"])
     result = []
@@ -39,7 +48,17 @@ def list_templates(cfg: dict = Depends(get_config)):
     return result
 
 
-@router.get("/invoices", response_model=list[ClientInvoiceOut])
+@router.get(
+    "/invoices",
+    response_model=list[ClientInvoiceOut],
+    summary="Lister les factures émises",
+    description=(
+        "Retourne toutes les factures client émises par BIAT IT, "
+        "triées par date d'émission décroissante. "
+        "Statuts : DRAFT, SENT, PAID."
+    ),
+    response_description="Liste des factures client avec montants HT, TVA, TTC et dates",
+)
 def list_client_invoices(session: Session = Depends(get_session)):
     repo = ClientInvoiceRepository(session)
     invoices = repo.list_all()
@@ -55,12 +74,33 @@ def list_client_invoices(session: Session = Depends(get_session)):
             status=inv.status.value if hasattr(inv.status, "value") else str(inv.status),
             sent_at=inv.sent_at.isoformat() if inv.sent_at else None,
             paid_at=inv.paid_at.isoformat() if inv.paid_at else None,
+            currency=inv.currency,
+            is_export=inv.is_export,
+            domiciliation_bank=inv.domiciliation_bank,
+            domiciliation_number=inv.domiciliation_number,
+            shipment_date=inv.shipment_date.isoformat() if inv.shipment_date else None,
+            repatriation_deadline=inv.repatriation_deadline.isoformat() if inv.repatriation_deadline else None,
+            repatriation_date=inv.repatriation_date.isoformat() if inv.repatriation_date else None,
+            payment_guarantee_type=inv.payment_guarantee_type,
+            foreign_currency_amount=inv.foreign_currency_amount,
+            exchange_rate=inv.exchange_rate,
         )
         for inv in invoices
     ]
 
 
-@router.post("/generate", response_model=GeneratedInvoiceOut)
+@router.post(
+    "/generate",
+    response_model=GeneratedInvoiceOut,
+    summary="Générer une facture client",
+    description=(
+        "Génère une facture client à partir d'un modèle intra-groupe. "
+        "Le numéro est attribué automatiquement au format FAC-IT-YYYY-NNNN. "
+        "La facture est persistée en base avec le statut DRAFT."
+    ),
+    response_description="Facture générée avec son numéro et montants",
+    responses={404: {"description": "Modèle de facturation non trouvé"}},
+)
 def generate_invoice(
     body: GenerateInvoiceRequest,
     session: Session = Depends(get_session),
@@ -80,6 +120,19 @@ def generate_invoice(
         template_id=body.template_id,
         invoice_date=invoice_date,
     )
+    # Merge BCT export fields if provided
+    if body.is_export:
+        from datetime import timedelta
+        invoice = invoice.model_copy(update={
+            "is_export":               True,
+            "currency":                body.currency,
+            "foreign_currency_amount": body.foreign_currency_amount,
+            "exchange_rate":           body.exchange_rate,
+            "shipment_date":           body.shipment_date,
+            "domiciliation_bank":      body.domiciliation_bank,
+            "domiciliation_number":    body.domiciliation_number,
+            "repatriation_deadline":   (body.shipment_date + timedelta(days=120)) if body.shipment_date else None,
+        })
     repo.save(invoice)
 
     return GeneratedInvoiceOut(

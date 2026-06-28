@@ -34,12 +34,29 @@ def build_session_factory(engine):
 
 
 def init_db(engine) -> None:
-    """Create all tables. In production, use Alembic migrations instead."""
+    """Register all ORM models with Base.metadata.
+
+    For **in-memory SQLite** (tests): creates all tables via create_all() so
+    that unit/integration tests can run without Alembic.
+
+    For **file-based / production** databases: schema must be applied with
+        alembic upgrade head
+    create_all() is intentionally NOT called for production databases to
+    prevent silent schema drift — Alembic is the single source of truth.
+    """
     import src.storage.orm_models               # noqa: F401
-    import src.accounting.journal_store         # noqa: F401  registers journal tables
-    import src.billing.client_invoice_store     # noqa: F401  registers billing tables
-    import src.capex.asset_repository           # noqa: F401  registers assets table
-    import src.storage.orm_models_projects      # noqa: F401  registers project tables
-    import src.storage.orm_models_users         # noqa: F401  registers users table
-    import src.storage.orm_models_extra         # noqa: F401  registers budget/roadmap/livrables tables
-    Base.metadata.create_all(engine)
+    import src.accounting.journal_store         # noqa: F401
+    import src.billing.client_invoice_store     # noqa: F401
+    import src.capex.asset_repository           # noqa: F401
+    import src.storage.orm_models_projects      # noqa: F401
+    import src.storage.orm_models_users         # noqa: F401
+    import src.storage.orm_models_extra         # noqa: F401
+    import src.storage.orm_models_notifications # noqa: F401
+    import src.storage.orm_models_audit         # noqa: F401
+
+    db_url = str(engine.url)
+    if ":memory:" in db_url:
+        # Tests only: create_all() on in-memory SQLite avoids Alembic overhead.
+        # Alembic migrations do not support in-memory connections.
+        Base.metadata.create_all(engine)
+    # File-based and remote DBs: schema is managed by Alembic migrations only.

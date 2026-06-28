@@ -64,10 +64,26 @@ class ClientInvoice(BaseModel):
     sent_at:    datetime | None = None
     paid_at:    datetime | None = None
 
+    # ── BCT export compliance (Banque Centrale de Tunisie — Circulaire 2025-13) ─
+    currency:                str   = "TND"   # TND | EUR | USD | GBP
+    is_export:               bool  = False
+    domiciliation_bank:      str | None   = None
+    domiciliation_number:    str | None   = None
+    shipment_date:           date | None  = None
+    repatriation_deadline:   date | None  = None   # auto = shipment_date + 120 j
+    repatriation_date:       date | None  = None
+    payment_guarantee_type:  str | None   = None   # STANDARD | CREDOC_IRREVOCABLE | BCT_AUTHORIZATION
+    foreign_currency_amount: float | None = None
+    exchange_rate:           float | None = None   # rate at payment date
+
     @model_validator(mode="after")
     def _compute_totals(self) -> "ClientInvoice":
         if self.line_items:
             self.amount_ht  = round(sum(li.line_total  for li in self.line_items), 3)
             self.tva_amount = round(sum(li.tva_amount  for li in self.line_items), 3)
             self.amount_ttc = round(self.amount_ht + self.tva_amount, 3)
+        # Auto-compute BCT repatriation deadline (120 days from shipment)
+        if self.is_export and self.shipment_date and self.repatriation_deadline is None:
+            from datetime import timedelta
+            self.repatriation_deadline = self.shipment_date + timedelta(days=120)
         return self

@@ -152,13 +152,21 @@ export default function GrandLivre() {
             <>
               <div className="grid grid-cols-3 gap-4">
                 {[
-                  { label: 'Total Débit',  value: formatTND(totalDebit),  color: '#1D9E76' },
-                  { label: 'Total Crédit', value: formatTND(totalCredit), color: '#F0A600' },
-                  { label: 'Solde',        value: `${solde >= 0 ? '+' : ''}${formatTND(Math.abs(solde))}`, color: solde >= 0 ? '#1A3A5C' : '#C0391B' },
+                  { label: 'Total Débit',  value: formatTND(totalDebit),  color: '#1D9E76', sub: null },
+                  { label: 'Total Crédit', value: formatTND(totalCredit), color: '#F0A600', sub: null },
+                  {
+                    label: 'Solde',
+                    value: solde === 0
+                      ? formatTND(0)
+                      : `${solde > 0 ? '+' : '−'} ${formatTND(Math.abs(solde))}`,
+                    color: solde > 0 ? '#1A3A5C' : solde < 0 ? '#C0391B' : '#5D6D7E',
+                    sub: solde > 0 ? 'Solde débiteur' : solde < 0 ? 'Solde créditeur' : 'Compte soldé',
+                  },
                 ].map(s => (
                   <div key={s.label} className="bg-white rounded-xl border p-4" style={{ borderColor: '#D5E8F5' }}>
                     <p className="text-xs font-medium mb-1" style={{ color: '#5D6D7E' }}>{s.label}</p>
                     <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
+                    {s.sub && <p className="text-xs mt-1 font-medium" style={{ color: s.color }}>{s.sub}</p>}
                   </div>
                 ))}
               </div>

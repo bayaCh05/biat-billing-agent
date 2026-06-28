@@ -6,7 +6,7 @@ from datetime import date
 from uuid import uuid4
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from src.models.project import (
     AvanceProgrammee,
@@ -137,7 +137,15 @@ class ProjectRepository:
         return self._fiche_to_pydantic(orm)
 
     def list_fiches(self, year: int, month: int | None = None) -> list[FicheMensuelle]:
-        stmt = select(FicheMensuelleORM).where(FicheMensuelleORM.period_year == year)
+        # PERF: eager loading to avoid N+1 queries
+        stmt = (
+            select(FicheMensuelleORM)
+            .options(
+                selectinload(FicheMensuelleORM.phase_links),
+                selectinload(FicheMensuelleORM.avances),
+            )
+            .where(FicheMensuelleORM.period_year == year)
+        )
         if month is not None:
             stmt = stmt.where(FicheMensuelleORM.period_month == month)
         stmt = stmt.order_by(FicheMensuelleORM.period_month)

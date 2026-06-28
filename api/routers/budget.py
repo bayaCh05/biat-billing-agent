@@ -13,7 +13,17 @@ from src.budget.budget_tracker import BudgetPlan, BudgetTracker
 router = APIRouter(prefix="/budget", tags=["budget"])
 
 
-@router.get("/summary", response_model=BudgetSummaryOut)
+@router.get(
+    "/summary",
+    response_model=BudgetSummaryOut,
+    summary="Synthèse budgétaire annuelle",
+    description=(
+        "Retourne le suivi budget vs réel pour l'année en cours ou une année spécifiée. "
+        "Le calcul est cumulatif jusqu'au mois `month` (YTD — Year to Date). "
+        "Inclut la variance en pourcentage et le détail par ligne de catalogue PCE."
+    ),
+    response_description="Synthèse avec totaux YTD, variance et liste des lignes en dépassement",
+)
 def budget_summary(
     year: int = date.today().year,
     month: int = date.today().month,

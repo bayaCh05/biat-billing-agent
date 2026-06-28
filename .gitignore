@@ -33,6 +33,11 @@ logs/
 *.joblib
 migration_baseline.db
 
+# Alembic — migration scripts MUST be committed (do not add alembic/ here)
+# Only the compiled cache is excluded
+alembic/__pycache__/
+alembic/versions/__pycache__/
+
 # Streamlit secrets (never commit)
 .streamlit/secrets.toml
 

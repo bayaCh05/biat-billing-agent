@@ -66,16 +66,10 @@ jobs:
       - name: Install Python dependencies
         run: pip install -e ".[dev]"
 
-      - name: Initialize test database
+      - name: Apply database migrations
         env:
           DATABASE_URL: sqlite:///${{ runner.temp }}/invoices.db
-        run: |
-          python -c "
-          import os
-          from src.storage.db import build_engine, init_db
-          engine = build_engine(os.environ['DATABASE_URL'])
-          init_db(engine)
-          "
+        run: alembic upgrade head
 
       - name: Run tests
         run: pytest --tb=short -q --junitxml=test-results.xml

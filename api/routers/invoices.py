@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from api.deps import get_session, get_components
@@ -15,17 +15,32 @@ from src.models.enums import InvoiceStatus
 from src.models.invoice import InvoiceRecord
 from src.storage.repository import InvoiceRepository
 from src.utils.file_utils import sha256
+from api.limiter import limiter, limit
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
 
-@router.post("/upload", response_model=InvoiceOut)
+@router.post(
+    "/upload",
+    response_model=InvoiceOut,
+    summary="Soumettre une facture fournisseur",
+    description=(
+        "Upload un fichier PDF ou image d'une facture fournisseur et déclenche le pipeline complet : "
+        "extraction OCR+LLM → classification catalogue PCE → validation (montants, TVA, doublons) → export. "
+        "Chaque champ extrait est accompagné d'un score de confiance (0–1). "
+        "En mode `live=false`, un mock LLM est utilisé (tests et démo uniquement). "
+        "Limité à 10 uploads par minute."
+    ),
+    response_description="InvoiceRecord complet avec statut final du pipeline et scores de confiance",
+    responses={429: {"description": "Trop de tentatives — réessayer dans 60 secondes"}},
+)
+@limiter.limit(limit("10/minute"))
 async def upload_invoice(
+    request: Request,
     file: UploadFile = File(...),
     live: bool = Form(True),
     session: Session = Depends(get_session),
 ):
-    """Upload a PDF/image invoice and run the full pipeline."""
     suffix = Path(file.filename or "invoice.pdf").suffix or ".pdf"
     content = await file.read()
 
@@ -98,13 +113,22 @@ async def upload_invoice(
     return InvoiceOut.from_record(invoice)
 
 
-@router.get("", response_model=list[InvoiceSummary])
+@router.get(
+    "",
+    response_model=list[InvoiceSummary],
+    summary="Lister les factures",
+    description=(
+        "Retourne la liste des factures fournisseurs, triées par date de réception décroissante. "
+        "Filtrage optionnel par statut (RECEIVED, EXTRACTED, CLASSIFIED, VALIDATED, FLAGGED, EXPORTED, PAID, etc.). "
+        "Limité à `limit` entrées (défaut 100)."
+    ),
+    response_description="Liste de résumés de factures avec statut et montants",
+)
 def list_invoices(
     status: str | None = None,
     limit: int = 100,
     session: Session = Depends(get_session),
 ):
-    """List all invoices, optionally filtered by status."""
     repo = InvoiceRepository(session)
     invoices = repo.list_all(limit=limit)
     if status:
@@ -116,7 +140,17 @@ def list_invoices(
     return [InvoiceSummary.from_record(inv) for inv in invoices]
 
 
-@router.get("/{invoice_id}", response_model=InvoiceOut)
+@router.get(
+    "/{invoice_id}",
+    response_model=InvoiceOut,
+    summary="Détails d'une facture",
+    description=(
+        "Retourne tous les champs d'une facture : données extraites avec scores de confiance, "
+        "lignes de détail, flags de validation (erreurs, avertissements), historique de statuts."
+    ),
+    response_description="InvoiceRecord complet avec champs ConfidenceField et flags",
+    responses={404: {"description": "Facture non trouvée"}},
+)
 def get_invoice(
     invoice_id: str,
     session: Session = Depends(get_session),
@@ -132,7 +166,17 @@ def get_invoice(
     return InvoiceOut.from_record(inv)
 
 
-@router.patch("/{invoice_id}/status", response_model=ActionResultOut)
+@router.patch(
+    "/{invoice_id}/status",
+    response_model=ActionResultOut,
+    summary="Mettre à jour le statut",
+    description="Force manuellement le statut d'une facture. Utilisé par la file de révision et les scripts de correction.",
+    response_description="ID de la facture, action effectuée et nouveau statut",
+    responses={
+        400: {"description": "Statut invalide"},
+        404: {"description": "Facture non trouvée"},
+    },
+)
 def update_status(
     invoice_id: str,
     new_status: str,

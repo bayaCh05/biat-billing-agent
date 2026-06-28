@@ -183,10 +183,14 @@ export default function InscriptionPage() {
                   {users.map(u => {
                     const badge = ROLE_BADGE[u.role] ?? { bg: '#F0F4F9', color: '#5D6D7E' }
                     return (
-                      <tr key={u.id} style={{ borderBottom: '1px solid #F0F4F9' }}>
+                      <tr key={u.id} style={{ borderBottom: '1px solid #F0F4F9', opacity: u.is_demo ? 0.75 : 1 }}>
                         <td className="py-3 pr-4 font-medium" style={{ color: '#1A1A2E' }}>
                           {u.prenom} {u.nom}
-                          {u.is_first_login && (
+                          {u.is_demo ? (
+                            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: '#F0F4F9', color: '#5D6D7E' }}>
+                              démo
+                            </span>
+                          ) : u.is_first_login && (
                             <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: '#FFF8E8', color: '#B07800' }}>
                               1ère connexion
                             </span>
@@ -207,24 +211,28 @@ export default function InscriptionPage() {
                         </td>
                         <td className="py-3 pr-4 text-xs" style={{ color: '#5D6D7E' }}>{fmtDate(u.created_at)}</td>
                         <td className="py-3">
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => handleReset(u)}
-                              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors hover:bg-gray-100"
-                              style={{ color: '#1A3A5C' }}
-                              title="Réinitialiser le mot de passe"
-                            >
-                              <RefreshCw size={12} /> Réinitialiser
-                            </button>
-                            <button
-                              onClick={() => handleToggleActive(u)}
-                              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors hover:bg-gray-100"
-                              style={{ color: u.is_active ? '#C0391B' : '#1D9E76' }}
-                              title={u.is_active ? 'Désactiver' : 'Réactiver'}
-                            >
-                              <Ban size={12} /> {u.is_active ? 'Désactiver' : 'Réactiver'}
-                            </button>
-                          </div>
+                          {u.is_demo ? (
+                            <span className="text-xs" style={{ color: '#9BAFBF' }}>Compte système</span>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleReset(u)}
+                                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors hover:bg-gray-100"
+                                style={{ color: '#1A3A5C' }}
+                                title="Réinitialiser le mot de passe"
+                              >
+                                <RefreshCw size={12} /> Réinitialiser
+                              </button>
+                              <button
+                                onClick={() => handleToggleActive(u)}
+                                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors hover:bg-gray-100"
+                                style={{ color: u.is_active ? '#C0391B' : '#1D9E76' }}
+                                title={u.is_active ? 'Désactiver' : 'Réactiver'}
+                              >
+                                <Ban size={12} /> {u.is_active ? 'Désactiver' : 'Réactiver'}
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )

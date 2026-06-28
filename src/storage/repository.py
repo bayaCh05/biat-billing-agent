@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import and_, func, select, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from src.models.enums import ChargeNature, ChargeType, InvoiceStatus
 from src.models.invoice import ConfidenceField, InvoiceRecord, LineItem, ValidationFlag
@@ -76,6 +76,14 @@ class InvoiceRepository:
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _eager(q):
+        # PERF: eager loading to avoid N+1 queries
+        return q.options(
+            selectinload(InvoiceORM.flags),
+            selectinload(InvoiceORM.line_items),
+        )
+
     def get_by_id(self, invoice_id: UUID) -> InvoiceRecord | None:
         orm = self.session.get(InvoiceORM, invoice_id)
         return self._to_pydantic(orm) if orm else None
@@ -88,7 +96,7 @@ class InvoiceRepository:
 
     def get_by_status(self, status: InvoiceStatus) -> list[InvoiceRecord]:
         orms = self.session.execute(
-            select(InvoiceORM).where(InvoiceORM.status == status.value)
+            self._eager(select(InvoiceORM).where(InvoiceORM.status == status.value))
         ).scalars().all()
         return [self._to_pydantic(o) for o in orms]
 
@@ -101,12 +109,12 @@ class InvoiceRepository:
             InvoiceStatus.JOURNALING,
         ]
         orms = self.session.execute(
-            select(InvoiceORM).where(
+            self._eager(select(InvoiceORM).where(
                 and_(
                     InvoiceORM.status.in_([s.value for s in transition_statuses]),
                     InvoiceORM.updated_at < cutoff,
                 )
-            )
+            ))
         ).scalars().all()
         return [self._to_pydantic(o) for o in orms]
 
@@ -144,7 +152,7 @@ class InvoiceRepository:
         return total, auto
 
     def list_all(self, limit: int | None = None) -> list[InvoiceRecord]:
-        q = select(InvoiceORM).order_by(InvoiceORM.received_at.desc())
+        q = self._eager(select(InvoiceORM).order_by(InvoiceORM.received_at.desc()))
         if limit is not None:
             q = q.limit(limit)
         orms = self.session.execute(q).scalars().all()
@@ -152,9 +160,11 @@ class InvoiceRepository:
 
     def get_flagged(self) -> list[InvoiceRecord]:
         orms = self.session.execute(
-            select(InvoiceORM)
-            .where(InvoiceORM.status == InvoiceStatus.FLAGGED.value)
-            .order_by(InvoiceORM.received_at.asc())
+            self._eager(
+                select(InvoiceORM)
+                .where(InvoiceORM.status == InvoiceStatus.FLAGGED.value)
+                .order_by(InvoiceORM.received_at.asc())
+            )
         ).scalars().all()
         return [self._to_pydantic(o) for o in orms]
 
@@ -176,7 +186,7 @@ class InvoiceRepository:
         if exclude_id is not None:
             conditions.append(InvoiceORM.id != exclude_id)
         orms = self.session.execute(
-            select(InvoiceORM).where(and_(*conditions))
+            self._eager(select(InvoiceORM).where(and_(*conditions)))
         ).scalars().all()
         return [self._to_pydantic(o) for o in orms]
 
@@ -200,7 +210,7 @@ class InvoiceRepository:
         if exclude_id is not None:
             conditions.append(InvoiceORM.id != exclude_id)
         orms = self.session.execute(
-            select(InvoiceORM).where(and_(*conditions))
+            self._eager(select(InvoiceORM).where(and_(*conditions)))
         ).scalars().all()
         return [self._to_pydantic(o) for o in orms]
 
@@ -220,39 +230,39 @@ class InvoiceRepository:
     def get_pending_payment(self) -> list[InvoiceRecord]:
         from src.models.enums import InvoiceDirection
         orms = self.session.execute(
-            select(InvoiceORM).where(
+            self._eager(select(InvoiceORM).where(
                 and_(
                     InvoiceORM.direction == InvoiceDirection.SUPPLIER.value,
                     InvoiceORM.status == InvoiceStatus.EXPORTED.value,
                     InvoiceORM.paid_at.is_(None),
                 )
-            )
+            ))
         ).scalars().all()
         return [self._to_pydantic(o) for o in orms]
 
     def get_pending_collection(self) -> list[InvoiceRecord]:
         from src.models.enums import InvoiceDirection
         orms = self.session.execute(
-            select(InvoiceORM).where(
+            self._eager(select(InvoiceORM).where(
                 and_(
                     InvoiceORM.direction == InvoiceDirection.CLIENT.value,
                     InvoiceORM.status == InvoiceStatus.EXPORTED.value,
                     InvoiceORM.collected_at.is_(None),
                 )
-            )
+            ))
         ).scalars().all()
         return [self._to_pydantic(o) for o in orms]
 
     def get_overdue(self) -> list[InvoiceRecord]:
         today = datetime.now(tz=timezone.utc).date()
         orms = self.session.execute(
-            select(InvoiceORM).where(
+            self._eager(select(InvoiceORM).where(
                 and_(
                     InvoiceORM.due_date < today,
                     InvoiceORM.paid_at.is_(None),
                     InvoiceORM.status == InvoiceStatus.EXPORTED.value,
                 )
-            )
+            ))
         ).scalars().all()
         return [self._to_pydantic(o) for o in orms]
 

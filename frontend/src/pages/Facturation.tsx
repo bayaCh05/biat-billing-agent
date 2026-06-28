@@ -101,6 +101,14 @@ export default function Facturation() {
   const [generating, setGenerating] = useState(false)
   const [generated, setGenerated] = useState<{ invoice_number: string; amount_ttc: number } | null>(null)
   const [generateError, setGenerateError] = useState('')
+  // BCT export state
+  const [isExport, setIsExport] = useState(false)
+  const [exportCurrency, setExportCurrency] = useState('EUR')
+  const [foreignAmount, setForeignAmount] = useState('')
+  const [exchangeRate, setExchangeRate] = useState('')
+  const [shipmentDate, setShipmentDate] = useState('')
+  const [domicilBank, setDomicilBank] = useState('')
+  const [domicilNumber, setDomicilNumber] = useState('')
 
   useEffect(() => {
     Promise.all([listProjects(), listClientInvoices()])
@@ -148,7 +156,16 @@ export default function Facturation() {
     setGenerating(true)
     setGenerateError('')
     try {
-      const result = await generateInvoice(selectedTemplate, invoiceYear, invoiceMonth)
+      const bct = isExport ? {
+        is_export: true,
+        currency: exportCurrency,
+        foreign_currency_amount: foreignAmount ? parseFloat(foreignAmount) : null,
+        exchange_rate: exchangeRate ? parseFloat(exchangeRate) : null,
+        shipment_date: shipmentDate || null,
+        domiciliation_bank: domicilBank || null,
+        domiciliation_number: domicilNumber || null,
+      } : undefined
+      const result = await generateInvoice(selectedTemplate, invoiceYear, invoiceMonth, bct)
       setGenerated(result)
     } catch {
       setGenerateError("Erreur lors de la génération — vérifiez que l'API est démarrée.")
@@ -596,6 +613,97 @@ export default function Facturation() {
                       />
                     </div>
                   </div>
+
+                  {/* BCT export toggle */}
+                  <div style={{ borderTop: '1px solid #EFF4FA', paddingTop: 12 }}>
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isExport}
+                        onChange={e => setIsExport(e.target.checked)}
+                        style={{ width: 16, height: 16, accentColor: '#1A3A5C' }}
+                      />
+                      <span className="text-xs font-semibold" style={{ color: '#1A3A5C' }}>
+                        Facture export (conformité BCT — Circulaire 2025-13)
+                      </span>
+                    </label>
+                  </div>
+
+                  {isExport && (
+                    <div className="flex flex-col gap-3 p-4 rounded-xl" style={{ background: '#F0F4F9' }}>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs font-medium" style={{ color: '#374151' }}>Devise</label>
+                          <select
+                            value={exportCurrency}
+                            onChange={e => setExportCurrency(e.target.value)}
+                            className="rounded-lg border px-3 py-2 text-sm outline-none"
+                            style={{ borderColor: '#D5E8F5' }}
+                          >
+                            {['EUR', 'USD', 'GBP', 'TND'].map(c => <option key={c}>{c}</option>)}
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs font-medium" style={{ color: '#374151' }}>Montant devise</label>
+                          <input
+                            type="number"
+                            placeholder="0.000"
+                            value={foreignAmount}
+                            onChange={e => setForeignAmount(e.target.value)}
+                            className="rounded-lg border px-3 py-2 text-sm outline-none"
+                            style={{ borderColor: '#D5E8F5' }}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs font-medium" style={{ color: '#374151' }}>Taux de change</label>
+                          <input
+                            type="number"
+                            placeholder="3.300"
+                            value={exchangeRate}
+                            onChange={e => setExchangeRate(e.target.value)}
+                            className="rounded-lg border px-3 py-2 text-sm outline-none"
+                            style={{ borderColor: '#D5E8F5' }}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs font-medium" style={{ color: '#374151' }}>Date d'envoi</label>
+                          <input
+                            type="date"
+                            value={shipmentDate}
+                            onChange={e => setShipmentDate(e.target.value)}
+                            className="rounded-lg border px-3 py-2 text-sm outline-none"
+                            style={{ borderColor: '#D5E8F5' }}
+                          />
+                        </div>
+                      </div>
+                      {shipmentDate && (
+                        <div className="text-xs px-3 py-2 rounded-lg" style={{ background: '#E8F5F0', color: '#1D9E76' }}>
+                          Échéance rapatriement BCT (120 j) :{' '}
+                          <strong>
+                            {new Date(new Date(shipmentDate).getTime() + 120 * 86400000).toLocaleDateString('fr-FR')}
+                          </strong>
+                        </div>
+                      )}
+                      <input
+                        type="text"
+                        placeholder="Banque domiciliataire (ex : BIAT Siège Tunis)"
+                        value={domicilBank}
+                        onChange={e => setDomicilBank(e.target.value)}
+                        className="rounded-lg border px-3 py-2 text-sm outline-none"
+                        style={{ borderColor: '#D5E8F5' }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="N° de domiciliation"
+                        value={domicilNumber}
+                        onChange={e => setDomicilNumber(e.target.value)}
+                        className="rounded-lg border px-3 py-2 text-sm outline-none"
+                        style={{ borderColor: '#D5E8F5' }}
+                      />
+                    </div>
+                  )}
 
                   {generateError && (
                     <p className="text-xs py-2" style={{ color: '#C0391B' }}>{generateError}</p>

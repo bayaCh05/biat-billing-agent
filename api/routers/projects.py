@@ -18,7 +18,17 @@ def _phase_status(status: str, consumed_jh: float) -> str:
     return "IN_PROGRESS" if consumed_jh > 0 else "OPEN"
 
 
-@router.get("", response_model=list[ProjectOut])
+@router.get(
+    "",
+    response_model=list[ProjectOut],
+    summary="Lister les projets IT",
+    description=(
+        "Retourne tous les projets IT avec leur charte : budget en jours-hommes, "
+        "consommation réelle, taux journalier et montants TND. "
+        "Triés par date de démarrage décroissante."
+    ),
+    response_description="Liste de projets avec budgets JH et TND, consommation et statut",
+)
 def list_projects(session: Session = Depends(get_session)):
     chartes = session.execute(
         select(CharteProjetORM).order_by(CharteProjetORM.valid_from.desc())
@@ -46,7 +56,14 @@ def list_projects(session: Session = Depends(get_session)):
     return result
 
 
-@router.get("/{project_id}", response_model=ProjectOut)
+@router.get(
+    "/{project_id}",
+    response_model=ProjectOut,
+    summary="Détails d'un projet",
+    description="Retourne la charte et les indicateurs d'avancement d'un projet spécifique.",
+    response_description="Projet avec budget JH, consommation et montants TND",
+    responses={404: {"description": "Projet non trouvé"}},
+)
 def get_project(project_id: str, session: Session = Depends(get_session)):
     charte = session.execute(
         select(CharteProjetORM).where(CharteProjetORM.project_id == project_id)
@@ -68,7 +85,16 @@ def get_project(project_id: str, session: Session = Depends(get_session)):
     )
 
 
-@router.get("/{project_id}/phases", response_model=list[ProjectPhaseOut])
+@router.get(
+    "/{project_id}/phases",
+    response_model=list[ProjectPhaseOut],
+    summary="Phases d'un projet",
+    description=(
+        "Liste toutes les phases d'un projet avec les jours-hommes planifiés "
+        "vs consommés et le statut (OPEN, IN_PROGRESS, CLOSED)."
+    ),
+    response_description="Liste des phases avec avancement JH",
+)
 def list_phases(project_id: str, session: Session = Depends(get_session)):
     phases = session.execute(
         select(PhaseORM)

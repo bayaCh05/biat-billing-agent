@@ -61,7 +61,18 @@ def _to_out(r) -> RoadmapItemOut:
     )
 
 
-@router.get("", response_model=list[RoadmapItemOut])
+@router.get(
+    "",
+    response_model=list[RoadmapItemOut],
+    summary="Lister la feuille de route",
+    description=(
+        "Retourne les jalons de la feuille de route filtrés par année, "
+        "triés par date de début. "
+        "Statuts : PLANIFIE, EN_COURS, TERMINE, ANNULE. "
+        "Priorités : HAUTE, MOYENNE, BASSE."
+    ),
+    response_description="Liste des jalons de la roadmap pour l'année demandée",
+)
 def list_roadmap(
     annee: int = Query(2026),
     session: Session = Depends(get_session),
@@ -76,7 +87,18 @@ def list_roadmap(
     return [_to_out(i) for i in items]
 
 
-@router.post("", response_model=RoadmapItemOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=RoadmapItemOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Créer un jalon",
+    description=(
+        "Ajoute un nouveau jalon à la feuille de route. "
+        "Accès réservé aux rôles Chef de Projet et Admin."
+    ),
+    response_description="Jalon créé avec son identifiant UUID",
+    responses={403: {"description": "Rôle Chef de Projet ou Admin requis"}},
+)
 def create_roadmap_item(
     body: RoadmapCreateRequest,
     _: dict = _EDIT,
@@ -96,7 +118,17 @@ def create_roadmap_item(
     return _to_out(item)
 
 
-@router.patch("/{item_id}", response_model=RoadmapItemOut)
+@router.patch(
+    "/{item_id}",
+    response_model=RoadmapItemOut,
+    summary="Mettre à jour un jalon",
+    description="Modifie le titre, les dates, le statut ou la priorité d'un jalon existant.",
+    response_description="Jalon mis à jour",
+    responses={
+        403: {"description": "Rôle Chef de Projet ou Admin requis"},
+        404: {"description": "Jalon non trouvé"},
+    },
+)
 def update_roadmap_item(
     item_id: str,
     body: RoadmapUpdateRequest,
@@ -120,7 +152,16 @@ def update_roadmap_item(
     return _to_out(item)
 
 
-@router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{item_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Supprimer un jalon",
+    description="Supprime définitivement un jalon de la feuille de route.",
+    responses={
+        403: {"description": "Rôle Chef de Projet ou Admin requis"},
+        404: {"description": "Jalon non trouvé"},
+    },
+)
 def delete_roadmap_item(
     item_id: str,
     _: dict = _EDIT,

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from api.auth import require_role
 from api.deps import get_session
 
-router = APIRouter(tags=["projet-budget"])
+router = APIRouter(tags=["budget"])
 
 _EDIT = Depends(require_role("Comptable", "Chef de Projet", "Admin"))
 
@@ -55,7 +55,16 @@ def _to_out(lb) -> LigneBudgetOut:
     )
 
 
-@router.get("/projets/{projet_id}/budget", response_model=list[LigneBudgetOut])
+@router.get(
+    "/projets/{projet_id}/budget",
+    response_model=list[LigneBudgetOut],
+    summary="Lignes budgétaires d'un projet",
+    description=(
+        "Retourne toutes les lignes budgétaires d'un projet IT : "
+        "montant prévu, montant consommé, écart et taux de consommation en pourcentage."
+    ),
+    response_description="Liste des lignes avec indicateurs d'avancement budgétaire",
+)
 def list_budget(projet_id: str, session: Session = Depends(get_session)):
     from src.storage.orm_models_extra import LigneBudgetORM
 
@@ -66,7 +75,18 @@ def list_budget(projet_id: str, session: Session = Depends(get_session)):
     return [_to_out(l) for l in lignes]
 
 
-@router.post("/projets/{projet_id}/budget", response_model=LigneBudgetOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/projets/{projet_id}/budget",
+    response_model=LigneBudgetOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Ajouter une ligne budgétaire",
+    description=(
+        "Crée une nouvelle ligne budgétaire pour un projet. "
+        "Rôles autorisés : Comptable, Chef de Projet, Admin."
+    ),
+    response_description="Ligne budgétaire créée",
+    responses={403: {"description": "Permissions insuffisantes"}},
+)
 def create_budget_line(
     projet_id: str,
     body: LigneBudgetCreateRequest,
@@ -87,7 +107,17 @@ def create_budget_line(
     return _to_out(lb)
 
 
-@router.patch("/projet-budget/{ligne_id}", response_model=LigneBudgetOut)
+@router.patch(
+    "/projet-budget/{ligne_id}",
+    response_model=LigneBudgetOut,
+    summary="Modifier une ligne budgétaire",
+    description="Met à jour la catégorie ou le montant prévu d'une ligne budgétaire.",
+    response_description="Ligne budgétaire mise à jour",
+    responses={
+        403: {"description": "Permissions insuffisantes"},
+        404: {"description": "Ligne budgétaire non trouvée"},
+    },
+)
 def update_budget_line(
     ligne_id: str,
     body: LigneBudgetUpdateRequest,
@@ -106,7 +136,16 @@ def update_budget_line(
     return _to_out(lb)
 
 
-@router.delete("/projet-budget/{ligne_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/projet-budget/{ligne_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Supprimer une ligne budgétaire",
+    description="Supprime définitivement une ligne budgétaire d'un projet.",
+    responses={
+        403: {"description": "Permissions insuffisantes"},
+        404: {"description": "Ligne budgétaire non trouvée"},
+    },
+)
 def delete_budget_line(
     ligne_id: str,
     _: dict = _EDIT,
@@ -121,7 +160,16 @@ def delete_budget_line(
     session.commit()
 
 
-@router.get("/projets/{projet_id}/budget/synthese", response_model=BudgetSyntheseOut)
+@router.get(
+    "/projets/{projet_id}/budget/synthese",
+    response_model=BudgetSyntheseOut,
+    summary="Synthèse budgétaire d'un projet",
+    description=(
+        "Retourne les totaux consolidés du budget d'un projet : "
+        "montant total prévu, total consommé, écart absolu et taux de consommation global."
+    ),
+    response_description="Synthèse avec totaux et taux de consommation",
+)
 def budget_synthese(projet_id: str, session: Session = Depends(get_session)):
     from src.storage.orm_models_extra import LigneBudgetORM
 

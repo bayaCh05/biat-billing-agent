@@ -56,6 +56,8 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "python-multipart>=0.0.9",
     "pyjwt>=2.8",
+    "slowapi>=0.1.9",
+    "limits>=3.6",
 
     # Configuration & environment
     "pyyaml>=6.0",

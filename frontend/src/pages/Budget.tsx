@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Info } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import type { BudgetSummary, BudgetLine } from '../types'
-import { getBudgetSummary } from '../api/endpoints'
+import { getBudgetSummary, listProjects } from '../api/endpoints'
 import { formatTND, formatVariance } from '../utils/formatters'
 import PageSpinner from '../components/ui/PageSpinner'
+import { useAuth } from '../context/AuthContext'
+import type { Project } from '../types'
 
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc']
 
@@ -18,17 +21,23 @@ function periodLabel(month: number) {
 }
 
 export default function Budget() {
+  const { role } = useAuth()
+  const navigate = useNavigate()
   const [year, setYear] = useState(2026)
   const [month, setMonth] = useState(6)
   const [budget, setBudget] = useState<BudgetSummary>(EMPTY)
+  const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+  const showProjectBanner = role === 'Chef de Projet' || role === 'Comptable'
 
   useEffect(() => {
     setLoading(true)
     setError(false)
-    getBudgetSummary(year, month)
-      .then(data => setBudget(data))
+    const calls: Promise<unknown>[] = [getBudgetSummary(year, month)]
+    if (showProjectBanner) calls.push(listProjects().then(setProjects).catch(() => {}))
+    calls[0]
+      .then(data => setBudget(data as BudgetSummary))
       .catch(() => setError(true))
       .finally(() => setLoading(false))
   }, [year, month])
@@ -51,8 +60,8 @@ export default function Budget() {
         style={{ background: '#fff', borderColor: '#D5E8F5' }}
       >
         <h1 className="flex-1 text-lg font-bold" style={{ color: '#1A1A2E' }}>📊 Suivi Budgétaire</h1>
-        <span className="px-3 py-1 rounded-full text-xs font-semibold" style={{ background: '#FFF3DC', color: '#A0700A' }}>
-          ● Direction
+        <span className="px-3 py-1 rounded-full text-xs font-semibold" style={{ background: '#EFF4FA', color: '#1A3A5C' }}>
+          ● Vue analytique
         </span>
         <div className="flex items-center gap-1">
           <button onClick={() => setYear(y => y - 1)} className="p-1.5 rounded hover:bg-gray-100 transition-colors">
@@ -110,6 +119,39 @@ export default function Budget() {
           </div>
         ))}
       </div>
+
+      {/* Banner for Chef de Projet / Comptable: link to project budget lines */}
+      {showProjectBanner && (
+        <div
+          className="mx-6 mb-2 rounded-xl border px-4 py-3 flex items-start gap-3"
+          style={{ background: '#EFF4FA', borderColor: '#D5E8F5' }}
+        >
+          <Info size={15} className="mt-0.5 shrink-0" style={{ color: '#1A3A5C' }} />
+          <div className="flex-1">
+            <p className="text-xs font-semibold mb-0.5" style={{ color: '#1A3A5C' }}>
+              Vue analytique globale — lecture seule
+            </p>
+            <p className="text-xs" style={{ color: '#5D6D7E' }}>
+              Cette page affiche le budget opérationnel défini dans le plan annuel.
+              Pour ajouter ou modifier des <strong>lignes budget par projet</strong>, accédez au détail d'un projet IT.
+            </p>
+            {projects.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {projects.slice(0, 5).map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => navigate(`/projets-it/${p.id}`)}
+                    className="text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors hover:bg-white"
+                    style={{ borderColor: '#5BA3C9', color: '#1A3A5C' }}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Two-column body */}
       <div className="grid gap-6 px-6 pb-6" style={{ gridTemplateColumns: '2fr 1fr' }}>

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from api.auth import get_current_user
 from api.deps import get_session
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/users", tags=["admin"])
 
 
 class UserMeOut(BaseModel):
@@ -28,7 +28,16 @@ class UserMeUpdateRequest(BaseModel):
     departement: str | None = None
 
 
-@router.get("/me", response_model=UserMeOut)
+@router.get(
+    "/me",
+    response_model=UserMeOut,
+    summary="Profil de l'utilisateur connecté",
+    description=(
+        "Retourne les informations du compte actuellement connecté d'après le token JWT. "
+        "Pour les comptes démo, les données sont synthétisées depuis les claims du token."
+    ),
+    response_description="Profil utilisateur avec nom, rôle et département",
+)
 def get_me(
     current_user: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
@@ -62,7 +71,17 @@ def get_me(
     )
 
 
-@router.patch("/me", response_model=UserMeOut)
+@router.patch(
+    "/me",
+    response_model=UserMeOut,
+    summary="Modifier son profil",
+    description=(
+        "Met à jour le nom, le prénom ou le département du compte connecté. "
+        "Non disponible pour les comptes démo système."
+    ),
+    response_description="Profil mis à jour",
+    responses={400: {"description": "Non disponible pour les comptes démo"}},
+)
 def update_me(
     body: UserMeUpdateRequest,
     current_user: dict = Depends(get_current_user),

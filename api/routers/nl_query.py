@@ -6,16 +6,26 @@ from fastapi import APIRouter, Depends
 from api.deps import get_engine, get_config
 from api.schemas import NLQueryRequest, NLQueryResult
 
-router = APIRouter(prefix="/nl-query", tags=["nl-query"])
+router = APIRouter(prefix="/nl-query", tags=["analytics"])
 
 
-@router.post("", response_model=NLQueryResult)
+@router.post(
+    "",
+    response_model=NLQueryResult,
+    summary="Requête en langage naturel",
+    description=(
+        "Convertit une question en français en SQL et l'exécute localement sur la base de données. "
+        "Le modèle Ollama (qwen2.5:3b) génère le SQL — aucune donnée n'est envoyée vers le cloud. "
+        "Exemple : `Factures Ooredoo du mois de juin` → "
+        "`SELECT COALESCE(SUM(amount_ttc), 0) FROM invoices WHERE issuer_name LIKE '%Ooredoo%'`."
+    ),
+    response_description="SQL généré, colonnes, lignes de résultat et éventuel message d'erreur",
+)
 def nl_query(
     body: NLQueryRequest,
     engine=Depends(get_engine),
     cfg: dict = Depends(get_config),
 ):
-    """Convert a natural-language question to SQL and execute it locally."""
     from src.query.nl_query_engine import NLQueryEngine
 
     model = cfg.get("extraction", {}).get("llm_model", "qwen2.5:3b")

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from api.auth import get_current_user, require_role
 from api.deps import get_session
 
-router = APIRouter(tags=["livrables"])
+router = APIRouter(tags=["projects"])
 
 _EDIT = Depends(require_role("Chef de Projet", "Admin"))
 
@@ -52,7 +52,17 @@ def _to_out(lv) -> LivrableOut:
     )
 
 
-@router.get("/phases/{phase_id}/livrables", response_model=list[LivrableOut])
+@router.get(
+    "/phases/{phase_id}/livrables",
+    response_model=list[LivrableOut],
+    summary="Livrables d'une phase",
+    description=(
+        "Liste tous les livrables d'une phase de projet, "
+        "triés par date de livraison prévue. "
+        "Statuts possibles : EN_ATTENTE, EN_COURS, LIVRE, VALIDE."
+    ),
+    response_description="Liste des livrables avec dates et statuts",
+)
 def list_livrables(phase_id: str, session: Session = Depends(get_session)):
     from src.storage.orm_models_extra import LivrableORM
 
@@ -63,7 +73,22 @@ def list_livrables(phase_id: str, session: Session = Depends(get_session)):
     return [_to_out(i) for i in items]
 
 
-@router.post("/phases/{phase_id}/livrables", response_model=LivrableOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/phases/{phase_id}/livrables",
+    response_model=LivrableOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Créer un livrable",
+    description=(
+        "Ajoute un livrable à une phase de projet. "
+        "Rôle Chef de Projet ou Admin requis. "
+        "L'auteur est enregistré automatiquement depuis le token JWT."
+    ),
+    response_description="Livrable créé avec son identifiant",
+    responses={
+        403: {"description": "Rôle Chef de Projet ou Admin requis"},
+        404: {"description": "Phase non trouvée"},
+    },
+)
 def create_livrable(
     phase_id: str,
     body: LivrableCreateRequest,
@@ -89,7 +114,17 @@ def create_livrable(
     return _to_out(lv)
 
 
-@router.patch("/livrables/{livrable_id}", response_model=LivrableOut)
+@router.patch(
+    "/livrables/{livrable_id}",
+    response_model=LivrableOut,
+    summary="Mettre à jour un livrable",
+    description="Modifie le titre, la description, le statut ou la date de livraison réelle d'un livrable.",
+    response_description="Livrable mis à jour",
+    responses={
+        403: {"description": "Rôle Chef de Projet ou Admin requis"},
+        404: {"description": "Livrable non trouvé"},
+    },
+)
 def update_livrable(
     livrable_id: str,
     body: LivrableUpdateRequest,
@@ -110,7 +145,20 @@ def update_livrable(
     return _to_out(lv)
 
 
-@router.post("/phases/{phase_id}/valider")
+@router.post(
+    "/phases/{phase_id}/valider",
+    summary="Valider une phase",
+    description=(
+        "Clôture une phase si et seulement si tous ses livrables sont au statut LIVRE ou VALIDE. "
+        "En cas de livrables non terminés, retourne HTTP 400 avec le nombre de bloquants."
+    ),
+    response_description="Message de confirmation avec nouveau statut VALIDEE",
+    responses={
+        400: {"description": "Livrables non terminés — liste des bloquants"},
+        403: {"description": "Rôle Chef de Projet ou Admin requis"},
+        404: {"description": "Phase non trouvée"},
+    },
+)
 def valider_phase(
     phase_id: str,
     _: dict = _EDIT,
