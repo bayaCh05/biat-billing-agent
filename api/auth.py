@@ -1,6 +1,8 @@
 """JWT authentication utilities + role guard for BIAT IT Billing API."""
 from __future__ import annotations
 
+import os
+
 import bcrypt
 import secrets
 import string
@@ -10,16 +12,30 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
-SECRET = "biat_local_only_secret_2026"
+SECRET = os.getenv("JWT_SECRET", "biat_local_only_secret_2026")
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 8
 
-# Hardcoded demo users — checked when no DB user matches the email
+# Demo fallback users — active when no DB user matches the email.
+# Passwords are read from env vars so they are not hardcoded in source.
+# For production, seed all users into the DB with: python scripts/seed_users.py
 USERS: dict[str, dict[str, str]] = {
-    "comptable@biat-it.tn":  {"password": "biat2026",  "role": "Comptable"},
-    "chef@biat-it.tn":       {"password": "biat2026",  "role": "Chef de Projet"},
-    "directeur@biat-it.tn":  {"password": "biat2026",  "role": "Direction"},
-    "admin@biat-it.tn":      {"password": "admin2026", "role": "Admin"},
+    "comptable@biat-it.tn":  {
+        "password": os.getenv("DEMO_COMPTABLE_PASSWORD", "biat2026"),
+        "role":     "Comptable",
+    },
+    "chef@biat-it.tn": {
+        "password": os.getenv("DEMO_CHEF_PASSWORD", "biat2026"),
+        "role":     "Chef de Projet",
+    },
+    "directeur@biat-it.tn": {
+        "password": os.getenv("DEMO_DIRECTION_PASSWORD", "biat2026"),
+        "role":     "Direction",
+    },
+    "admin@biat-it.tn": {
+        "password": os.getenv("DEMO_ADMIN_PASSWORD", "admin2026"),
+        "role":     "Admin",
+    },
 }
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
