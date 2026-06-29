@@ -117,6 +117,15 @@ export interface BudgetSummary {
   lines: BudgetLine[]
 }
 
+export interface BudgetPlanEntry {
+  catalog_id: string
+  year: number
+  label: string
+  monthly: number[]       // 12 values
+  note: string | null
+  annual_total: number
+}
+
 // ── CAPEX ─────────────────────────────────────────────────────────────────────
 
 export interface Asset {

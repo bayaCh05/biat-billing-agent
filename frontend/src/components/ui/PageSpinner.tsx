@@ -17,10 +17,17 @@ export default function PageSpinner({ loading, error, empty, emptyMsg = 'Aucune 
     </div>
   )
   if (error) return (
-    <div className="flex items-center justify-center py-16">
+    <div className="flex flex-col items-center justify-center py-16 gap-3">
       <p className="text-sm" style={{ color: '#C0391B' }}>
         ⚠ Impossible de joindre l'API — vérifiez qu'uvicorn est démarré.
       </p>
+      <button
+        onClick={() => { localStorage.clear(); window.location.replace('/login') }}
+        className="text-xs px-3 py-1.5 rounded-lg border"
+        style={{ borderColor: '#C0391B', color: '#C0391B' }}
+      >
+        Reconnecter (vider la session)
+      </button>
     </div>
   )
   if (empty) return (

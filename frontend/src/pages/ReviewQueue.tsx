@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { CheckCircle, XCircle, Wrench, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
 import { getReviewQueue, approveInvoice, rejectInvoice } from '../api/endpoints'
 import type { InvoiceSummary, InvoiceFlag } from '../types'
@@ -167,9 +167,8 @@ export default function ReviewQueue() {
             </thead>
             <tbody>
               {filtered.map((item, idx) => (
-                <>
+                <React.Fragment key={item.id}>
                   <tr
-                    key={item.id}
                     className="cursor-pointer transition-colors"
                     style={{
                       borderBottom: '1px solid #F0F4F9',
@@ -262,7 +261,7 @@ export default function ReviewQueue() {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               ))}
               {filtered.length === 0 && (
                 <tr>

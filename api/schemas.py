@@ -205,6 +205,30 @@ class BudgetSummaryOut(BaseModel):
     lines: list[BudgetLineOut]
 
 
+# ── Budget plan (editable) ────────────────────────────────────────────────────
+
+class BudgetPlanEntryOut(BaseModel):
+    catalog_id: str
+    year: int
+    label: str
+    monthly: list[float]          # 12 values, index 0 = January
+    note: str | None = None
+    annual_total: float
+
+
+class BudgetPlanEntryIn(BaseModel):
+    catalog_id: str
+    label: str
+    monthly: list[float]          # must have exactly 12 values
+    note: str | None = None
+
+
+class BudgetPlanUpdateIn(BaseModel):
+    label: str | None = None
+    monthly: list[float] | None = None   # must have exactly 12 values if provided
+    note: str | None = None
+
+
 # ── CAPEX ─────────────────────────────────────────────────────────────────────
 
 class AssetOut(BaseModel):

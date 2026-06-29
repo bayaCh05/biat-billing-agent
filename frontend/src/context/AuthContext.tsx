@@ -4,13 +4,6 @@ import { getToken, saveToken, clearToken } from '../api/client'
 
 export type UserRole = 'Comptable' | 'Chef de Projet' | 'Direction' | 'Admin'
 
-export const ROLE_PATHS: Record<UserRole, string[]> = {
-  'Admin':          ['/admin', '/kpi', '/audit', '/notifications'],
-  'Comptable':      ['/upload', '/kpi', '/review', '/invoices', '/suivi', '/journal', '/grand-livre', '/billing', '/projects', '/projets-it', '/budget', '/capex', '/requetes', '/roadmap', '/bct-export', '/notifications'],
-  'Chef de Projet': ['/upload', '/kpi', '/invoices', '/suivi', '/billing', '/projects', '/projets-it', '/budget', '/roadmap', '/notifications'],
-  'Direction':      ['/direction', '/kpi', '/budget', '/capex', '/requetes', '/roadmap', '/bct-export', '/audit', '/notifications'],
-}
-
 export function roleHome(role: UserRole): string {
   if (role === 'Direction')      return '/direction'
   if (role === 'Chef de Projet') return '/projects'

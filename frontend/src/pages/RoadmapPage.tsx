@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, X, ChevronDown } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
@@ -43,7 +43,7 @@ function barPos(debut: string, fin: string) {
 
 const canEdit = (role: string) => ['Chef de Projet', 'Admin'].includes(role)
 
-const EMPTY = { titre: '', description: '', date_debut: '2026-01-01', date_fin: '2026-03-31', statut: 'PLANIFIE', priorite: 'MOYENNE', annee: 2026, projet_id: null as string | null }
+const EMPTY = { titre: '', description: '', date_debut: '2026-01-01', date_fin: '2026-03-31', statut: 'PLANIFIE' as RoadmapItem['statut'], priorite: 'MOYENNE' as RoadmapItem['priorite'], annee: 2026, projet_id: null as string | null }
 
 export default function RoadmapPage() {
   const { role } = useAuth()
@@ -81,7 +81,7 @@ export default function RoadmapPage() {
     setSaving(false)
   }
 
-  async function handleUpdateStatut(item: RoadmapItem, statut: string) {
+  async function handleUpdateStatut(item: RoadmapItem, statut: RoadmapItem['statut']) {
     try {
       const updated = await updateRoadmapItem(item.id, { statut })
       setItems(prev => prev.map(i => i.id === item.id ? updated : i))
@@ -161,7 +161,7 @@ export default function RoadmapPage() {
               {/* Quarter grid lines */}
               <div className="relative">
                 <div className="absolute inset-y-0 left-44 right-0 flex pointer-events-none">
-                  {QUARTERS.map((q, i) => (
+                  {QUARTERS.map((_q, i) => (
                     <div key={i} className="flex-1" style={{ borderLeft: '1px dashed #E2EBF3' }} />
                   ))}
                   <div style={{ borderRight: '1px dashed #E2EBF3', width: 0 }} />
@@ -203,7 +203,7 @@ export default function RoadmapPage() {
                               className="border rounded text-xs px-1 py-0.5"
                               style={{ borderColor: '#D5E8F5' }}
                               value={item.statut}
-                              onChange={e => handleUpdateStatut(item, e.target.value)}
+                              onChange={e => handleUpdateStatut(item, e.target.value as RoadmapItem['statut'])}
                             >
                               {Object.keys(STATUT_MAP).map(k => <option key={k} value={k}>{k}</option>)}
                             </select>
@@ -251,7 +251,7 @@ export default function RoadmapPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium mb-1" style={{ color: '#374151' }}>Priorité</label>
-                    <select className={inp} value={form.priorite} onChange={e => setForm(f => ({ ...f, priorite: e.target.value }))} style={{ borderColor: '#D5E8F5' }}>
+                    <select className={inp} value={form.priorite} onChange={e => setForm(f => ({ ...f, priorite: e.target.value as RoadmapItem['priorite'] }))} style={{ borderColor: '#D5E8F5' }}>
                       <option value="HAUTE">Haute</option>
                       <option value="MOYENNE">Moyenne</option>
                       <option value="BASSE">Basse</option>
@@ -259,7 +259,7 @@ export default function RoadmapPage() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1" style={{ color: '#374151' }}>Statut</label>
-                    <select className={inp} value={form.statut} onChange={e => setForm(f => ({ ...f, statut: e.target.value }))} style={{ borderColor: '#D5E8F5' }}>
+                    <select className={inp} value={form.statut} onChange={e => setForm(f => ({ ...f, statut: e.target.value as RoadmapItem['statut'] }))} style={{ borderColor: '#D5E8F5' }}>
                       {Object.entries(STATUT_MAP).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                     </select>
                   </div>

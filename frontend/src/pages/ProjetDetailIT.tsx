@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Plus, ChevronDown, ChevronRight, CheckCircle, X, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Plus, ChevronDown, ChevronRight, CheckCircle, X } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
@@ -237,7 +237,7 @@ export default function ProjetDetailIT() {
                     <div className="shrink-0 text-xs" style={{ color: '#5D6D7E' }}>
                       {phase.consumed_jh}/{phase.planned_jh} JH
                     </div>
-                    {canEdit && phase.status !== 'CLOSED' && phase.status !== 'VALIDEE' && (
+                    {canEdit && phase.status !== 'CLOSED' && (phase.status as string) !== 'VALIDEE' && (
                       <button
                         onClick={() => { setLivModal({ phaseId: phase.id, phaseName: phase.name }); setLivForm({ titre: '', description: '', date_livraison_prevue: '', statut: 'EN_ATTENTE' }) }}
                         className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded transition-colors hover:bg-blue-50"
@@ -246,7 +246,7 @@ export default function ProjetDetailIT() {
                         <Plus size={12} /> Livrable
                       </button>
                     )}
-                    {canEdit && allDone && phase.status !== 'VALIDEE' && (
+                    {canEdit && allDone && (phase.status as string) !== 'VALIDEE' && (
                       <button
                         disabled={validating === phase.id}
                         onClick={() => handleValiderPhase(phase)}

@@ -6,27 +6,6 @@ vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({ role: 'Comptable', initials: 'BC', name: 'Baya C.' }),
 }))
 
-const TEST_INVOICE = {
-  id: 'inv-001',
-  status: 'FLAGGED',
-  direction: 'SUPPLIER',
-  issuer_name: 'OOREDOO TUNISIE',
-  invoice_number: 'OOR-2026-001',
-  invoice_date: '2026-06-01',
-  amount_ht: 8000,
-  tva_rate: 19,
-  tva_amount: 1520,
-  amount_ttc: 9520,
-  currency: 'TND',
-  accounting_compte: '6260',
-  accounting_label: 'Télécoms',
-  extraction_method: 'LLM',
-  flags: [{ flag_type: 'TOTAL_MISMATCH', severity: 'ERROR', field_name: 'amount_ttc', message: 'Écart détecté', resolved: false }],
-  human_review_required: true,
-  has_errors: true,
-  received_at: new Date().toISOString(),
-}
-
 const mockApprove = vi.fn()
 const mockReject  = vi.fn()
 

@@ -24,7 +24,8 @@ import HabilitationsPage from './pages/admin/HabilitationsPage'
 import BCTExport from './pages/BCTExport'
 import AuditPage from './pages/AuditPage'
 import NotificationsPage from './pages/NotificationsPage'
-import { useAuth, ROLE_PATHS, roleHome } from './context/AuthContext'
+import { useAuth, roleHome } from './context/AuthContext'
+import { ROLE_PATHS } from './config/roles'
 
 function HomeRedirect() {
   const { role } = useAuth()
@@ -60,7 +61,7 @@ function RoleGuard() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/changer-mot-de-passe" element={<ChangerMotDePassePage />} />

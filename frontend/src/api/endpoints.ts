@@ -13,6 +13,7 @@ import type {
   AuditLog,
   MonthlySpendItem,
   SupplierSpendItem,
+  BudgetPlanEntry,
   AccountSpendItem,
   AnalyticsKPIs,
 } from '../types'
@@ -68,6 +69,18 @@ export const getBudgetSummary = (year?: number, month?: number) => {
   const q = params.toString()
   return apiFetch<BudgetSummary>(`/budget/summary${q ? `?${q}` : ''}`)
 }
+
+export const getBudgetPlan = (year: number) =>
+  apiFetch<BudgetPlanEntry[]>(`/budget/plan?year=${year}`)
+
+export const updateBudgetPlanEntry = (catalogId: string, year: number, body: { label?: string; monthly?: number[]; note?: string }) =>
+  apiFetch<BudgetPlanEntry>(`/budget/plan/${catalogId}?year=${year}`, { method: 'PUT', body: JSON.stringify(body) })
+
+export const createBudgetPlanEntry = (year: number, body: { catalog_id: string; label: string; monthly: number[]; note?: string }) =>
+  apiFetch<BudgetPlanEntry>(`/budget/plan?year=${year}`, { method: 'POST', body: JSON.stringify(body) })
+
+export const deleteBudgetPlanEntry = (catalogId: string, year: number) =>
+  apiFetch<void>(`/budget/plan/${catalogId}?year=${year}`, { method: 'DELETE' })
 
 // ── CAPEX ─────────────────────────────────────────────────────────────────────
 

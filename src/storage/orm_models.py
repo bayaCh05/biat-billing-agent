@@ -176,6 +176,18 @@ class StatusHistoryORM(Base):
     invoice: Mapped[InvoiceORM] = relationship("InvoiceORM", back_populates="history")
 
 
+class BudgetPlanORM(Base):
+    """Editable annual budget plan — one row per catalog_id per year."""
+    __tablename__ = "budget_plan_entries"
+
+    catalog_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    year: Mapped[int] = mapped_column(Integer, primary_key=True)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    monthly: Mapped[list] = mapped_column(JSON, nullable=False)  # 12 floats
+    note: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+
 class PaymentORM(Base):
     __tablename__ = "payments"
 

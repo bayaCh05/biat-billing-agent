@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import {
   AreaChart, Area, BarChart, Bar,
   PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer,
 } from 'recharts'
 import type {
@@ -287,7 +287,7 @@ export default function Direction() {
                 <YAxis type="category" dataKey="name" width={148}
                   tick={{ fontSize: 10, fill: '#374151' }} axisLine={false} tickLine={false} />
                 <Tooltip
-                  formatter={(v: number) => [formatTND(v), 'Total TTC']}
+                  formatter={(v) => [formatTND(v as number), 'Total TTC']}
                   contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #E5E7EB' }}
                 />
                 <Bar dataKey="Montant TTC" fill="#2E86C1" radius={[0, 4, 4, 0]} maxBarSize={20} />
@@ -316,8 +316,8 @@ export default function Direction() {
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(v: number, _name: string, props: { payload?: { pct?: number } }) => [
-                      `${formatTND(v)} (${props.payload?.pct ?? 0}%)`,
+                    formatter={(v, _name, props) => [
+                      `${formatTND(v as number)} (${(props as { payload?: { pct?: number } }).payload?.pct ?? 0}%)`,
                       'HT',
                     ]}
                     contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #E5E7EB' }}

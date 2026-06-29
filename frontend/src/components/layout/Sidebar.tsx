@@ -5,7 +5,8 @@ import {
   Building2, TrendingUp, Gauge, MessageSquare, FolderKanban,
   LogOut, Map, ShieldCheck, Users, Landmark, History,
 } from 'lucide-react'
-import { useAuth, ROLE_PATHS } from '../../context/AuthContext'
+import { useAuth } from '../../context/AuthContext'
+import { ROLE_PATHS } from '../../config/roles'
 
 const ALL_NAV = [
   // Admin
