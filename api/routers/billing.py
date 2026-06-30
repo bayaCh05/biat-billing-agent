@@ -30,7 +30,6 @@ def list_templates(cfg: dict = Depends(get_config)):
     loader = TemplateLoader(cfg["billing"]["templates_file"])
     result = []
     for tpl in loader.list_templates():
-        # Look up the client this template is for
         client_id = tpl.default_client_id
         try:
             client = loader.get_client(client_id) if client_id else None
@@ -74,16 +73,6 @@ def list_client_invoices(session: Session = Depends(get_session)):
             status=inv.status.value if hasattr(inv.status, "value") else str(inv.status),
             sent_at=inv.sent_at.isoformat() if inv.sent_at else None,
             paid_at=inv.paid_at.isoformat() if inv.paid_at else None,
-            currency=inv.currency,
-            is_export=inv.is_export,
-            domiciliation_bank=inv.domiciliation_bank,
-            domiciliation_number=inv.domiciliation_number,
-            shipment_date=inv.shipment_date.isoformat() if inv.shipment_date else None,
-            repatriation_deadline=inv.repatriation_deadline.isoformat() if inv.repatriation_deadline else None,
-            repatriation_date=inv.repatriation_date.isoformat() if inv.repatriation_date else None,
-            payment_guarantee_type=inv.payment_guarantee_type,
-            foreign_currency_amount=inv.foreign_currency_amount,
-            exchange_rate=inv.exchange_rate,
         )
         for inv in invoices
     ]
@@ -120,19 +109,6 @@ def generate_invoice(
         template_id=body.template_id,
         invoice_date=invoice_date,
     )
-    # Merge BCT export fields if provided
-    if body.is_export:
-        from datetime import timedelta
-        invoice = invoice.model_copy(update={
-            "is_export":               True,
-            "currency":                body.currency,
-            "foreign_currency_amount": body.foreign_currency_amount,
-            "exchange_rate":           body.exchange_rate,
-            "shipment_date":           body.shipment_date,
-            "domiciliation_bank":      body.domiciliation_bank,
-            "domiciliation_number":    body.domiciliation_number,
-            "repatriation_deadline":   (body.shipment_date + timedelta(days=120)) if body.shipment_date else None,
-        })
     repo.save(invoice)
 
     return GeneratedInvoiceOut(

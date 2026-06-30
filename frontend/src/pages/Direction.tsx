@@ -6,12 +6,12 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import type {
-  KpiData, BudgetSummary, Asset, BCTAgingItem,
+  KpiData, BudgetSummary, Asset,
   MonthlySpendItem, SupplierSpendItem, AccountSpendItem, AnalyticsKPIs,
 } from '../types'
 import { formatTND } from '../utils/formatters'
 import {
-  getKpi, getBudgetSummary, listAssets, getBctAging,
+  getKpi, getBudgetSummary, listAssets,
   getMonthlySpend, getBySupplier, getByAccount, getAnalyticsKPIs,
 } from '../api/endpoints'
 import { RefreshCw } from 'lucide-react'
@@ -94,7 +94,6 @@ export default function Direction() {
   const [kpi, setKpi]         = useState<KpiData | null>(null)
   const [budget, setBudget]   = useState<BudgetSummary | null>(null)
   const [assets, setAssets]   = useState<Asset[]>([])
-  const [bct, setBct]         = useState<BCTAgingItem[]>([])
   const [overviewLoading, setOverviewLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(now)
 
@@ -119,16 +118,14 @@ export default function Direction() {
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true)
     try {
-      const [k, b, a, bc] = await Promise.all([
+      const [k, b, a] = await Promise.all([
         getKpi(),
         getBudgetSummary(),
         listAssets(),
-        getBctAging().catch(() => [] as BCTAgingItem[]),
       ])
       setKpi(k)
       setBudget(b)
       setAssets(a)
-      setBct(bc)
     } finally {
       setOverviewLoading(false)
     }
@@ -393,19 +390,18 @@ export default function Direction() {
           )}
         </div>
 
-        {/* BCT summary */}
+        {/* Asset summary */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-          <h2 className="text-sm font-semibold text-gray-800 mb-4">Conformité BCT</h2>
+          <h2 className="text-sm font-semibold text-gray-800 mb-4">Immobilisations CAPEX</h2>
           {overviewLoading ? <div className="flex flex-col gap-3"><Skeleton h="h-16" /><Skeleton h="h-16" /></div> : (
             <div className="flex flex-col gap-2">
               {[
-                { label: 'Conformes', count: bct.filter(i => i.status === 'OK').length, bg: '#E8F5F0', color: '#1D9E76', icon: '✅' },
-                { label: 'À surveiller', count: bct.filter(i => i.status === 'WARNING').length, bg: '#FFF8E8', color: '#F0A500', icon: '⚠️' },
-                { label: 'En retard', count: bct.filter(i => i.status === 'OVERDUE').length, bg: '#FDECEA', color: '#C0391B', icon: '🔴' },
+                { label: 'Actifs en service', count: assets.filter(a => !a.fully_depreciated).length, bg: '#E8F5F0', color: '#1D9E76' },
+                { label: 'Entièrement amortis', count: assets.filter(a => a.fully_depreciated).length, bg: '#EFF4FA', color: '#5BA3C9' },
+                { label: 'Total actifs', count: assets.length, bg: '#F0F4F9', color: '#1A3A5C' },
               ].map(s => (
-                <div key={s.label} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: s.bg }}>
-                  <span className="text-base">{s.icon}</span>
-                  <span className="text-xs font-medium flex-1" style={{ color: s.color }}>{s.label}</span>
+                <div key={s.label} className="flex items-center justify-between rounded-lg px-3 py-2" style={{ background: s.bg }}>
+                  <span className="text-xs font-medium" style={{ color: s.color }}>{s.label}</span>
                   <span className="text-lg font-bold" style={{ color: s.color }}>{s.count}</span>
                 </div>
               ))}

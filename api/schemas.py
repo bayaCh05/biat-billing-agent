@@ -280,14 +280,6 @@ class GenerateInvoiceRequest(BaseModel):
     template_id: str
     year: int
     month: int
-    # BCT export compliance (optional — only set for export invoices)
-    is_export:               bool  = False
-    currency:                str   = "TND"
-    foreign_currency_amount: float | None = None
-    exchange_rate:           float | None = None
-    shipment_date:           date | None  = None
-    domiciliation_bank:      str | None   = None
-    domiciliation_number:    str | None   = None
 
 
 class GeneratedInvoiceOut(BaseModel):
@@ -310,17 +302,6 @@ class ClientInvoiceOut(BaseModel):
     status: str
     sent_at: str | None
     paid_at: str | None
-    # BCT export compliance fields
-    currency:                str   = "TND"
-    is_export:               bool  = False
-    domiciliation_bank:      str | None = None
-    domiciliation_number:    str | None = None
-    shipment_date:           str | None = None
-    repatriation_deadline:   str | None = None
-    repatriation_date:       str | None = None
-    payment_guarantee_type:  str | None = None
-    foreign_currency_amount: float | None = None
-    exchange_rate:           float | None = None
 
 
 class ActionResultOut(BaseModel):

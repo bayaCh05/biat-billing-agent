@@ -304,20 +304,16 @@ class TestProjects:
         assert isinstance(r.json(), list)
 
 
-# ── Billing / BCT export compliance ──────────────────────────────────────────
+# ── Billing ───────────────────────────────────────────────────────────────────
 
-class TestBillingBCT:
-    def test_list_client_invoices_returns_bct_fields(self):
+class TestBilling:
+    def test_list_client_invoices_returns_list(self):
         token = _login("comptable@biat-it.tn", "biat2026")
         r = client.get("/api/billing/invoices", headers=_auth(token))
         assert r.status_code == 200
-        invoices = r.json()
-        assert isinstance(invoices, list)
-        for inv in invoices:
-            assert "currency" in inv
-            assert "is_export" in inv
+        assert isinstance(r.json(), list)
 
-    def test_generate_domestic_invoice(self):
+    def test_generate_invoice(self):
         token = _login("comptable@biat-it.tn", "biat2026")
         r = client.post("/api/billing/generate", headers=_auth(token), json={
             "template_id": "biat_maintenance",
@@ -330,22 +326,6 @@ class TestBillingBCT:
             body = r.json()
             assert "invoice_number" in body
             assert "amount_ttc" in body
-
-    def test_generate_export_invoice_with_bct_fields(self):
-        token = _login("comptable@biat-it.tn", "biat2026")
-        r = client.post("/api/billing/generate", headers=_auth(token), json={
-            "template_id": "biat_maintenance",
-            "year": 2026,
-            "month": 7,
-            "is_export": True,
-            "currency": "EUR",
-            "foreign_currency_amount": 8500.0,
-            "exchange_rate": 3.32,
-            "shipment_date": "2026-07-01",
-            "domiciliation_bank": "BIAT Siège Tunis",
-            "domiciliation_number": "DOM-2026-0099",
-        })
-        assert r.status_code in (200, 404)
 
     def test_templates_list_returns_list(self):
         token = _login("comptable@biat-it.tn", "biat2026")

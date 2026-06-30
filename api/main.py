@@ -24,7 +24,7 @@ _log = logging.getLogger(__name__)
 
 from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications, projects
 from api.routers import auth as auth_router
-from api.routers import admin, users, roadmap, projet_budget, livrables, bct_export, audit
+from api.routers import admin, users, roadmap, projet_budget, livrables, audit
 
 _PROTECTED = [Depends(get_current_user)]
 
@@ -40,7 +40,6 @@ _TAGS: list[dict] = [
     {"name": "admin",          "description": "Gestion des utilisateurs et habilitations — ADMIN uniquement"},
     {"name": "analytics",      "description": "Tableaux de bord, KPIs, suivi de trésorerie, requêtes NL"},
     {"name": "notifications",  "description": "Notifications persistantes — alertes factures et budget"},
-    {"name": "bct-export",     "description": "Conformité BCT — Circulaire 2025-13 : suivi rapatriement exports, rapport signé SHA-256"},
 ]
 
 
@@ -158,7 +157,6 @@ app.include_router(users.router,           prefix="/api", dependencies=_PROTECTE
 app.include_router(roadmap.router,         prefix="/api", dependencies=_PROTECTED)
 app.include_router(projet_budget.router,   prefix="/api", dependencies=_PROTECTED)
 app.include_router(livrables.router,       prefix="/api", dependencies=_PROTECTED)
-app.include_router(bct_export.router,      prefix="/api", dependencies=_PROTECTED)
 app.include_router(audit.router,           prefix="/api", dependencies=_PROTECTED)
 app.include_router(kpi.analytics_router,   prefix="/api", dependencies=_PROTECTED)
 

@@ -176,40 +176,6 @@ export interface ClientInvoice {
   status: ClientInvoiceStatus
   sent_at: string | null
   paid_at: string | null
-  // BCT export compliance
-  currency: string
-  is_export: boolean
-  domiciliation_bank: string | null
-  domiciliation_number: string | null
-  shipment_date: string | null
-  repatriation_deadline: string | null
-  repatriation_date: string | null
-  payment_guarantee_type: string | null
-  foreign_currency_amount: number | null
-  exchange_rate: number | null
-}
-
-// ── BCT Export Compliance ────────────────────────────────────────────────────
-
-export type BCTStatus = 'OK' | 'WARNING' | 'OVERDUE' | 'REPATRIATED' | 'PENDING'
-
-export interface BCTAgingItem {
-  invoice_number: string
-  client_name: string
-  currency: string
-  amount_tnd: number
-  shipment_date: string | null
-  repatriation_deadline: string | null
-  days_remaining_or_overdue: number | null
-  status: BCTStatus
-  payment_guarantee_type: string | null
-}
-
-export interface BCTComplianceSummary {
-  total: number
-  ok: number
-  warning: number
-  overdue: number
 }
 
 // ── Projects ─────────────────────────────────────────────────────────────────

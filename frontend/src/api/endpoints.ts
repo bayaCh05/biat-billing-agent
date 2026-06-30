@@ -1,4 +1,4 @@
-import { apiFetch, apiBlobFetch, apiUpload } from './client'
+import { apiFetch, apiUpload } from './client'
 
 import type {
   Invoice, InvoiceSummary, JournalEntry, BudgetSummary,
@@ -9,7 +9,6 @@ import type {
   RoadmapItem,
   Livrable,
   NotificationItem,
-  BCTAgingItem,
   AuditLog,
   MonthlySpendItem,
   SupplierSpendItem,
@@ -111,23 +110,10 @@ export const listTemplates = () =>
 export const listClientInvoices = () =>
   apiFetch<ClientInvoice[]>('/billing/invoices')
 
-export const generateInvoice = (
-  template_id: string,
-  year: number,
-  month: number,
-  bct?: {
-    is_export: boolean
-    currency: string
-    foreign_currency_amount?: number | null
-    exchange_rate?: number | null
-    shipment_date?: string | null
-    domiciliation_bank?: string | null
-    domiciliation_number?: string | null
-  },
-) =>
+export const generateInvoice = (template_id: string, year: number, month: number) =>
   apiFetch<{ invoice_number: string; amount_ttc: number }>('/billing/generate', {
     method: 'POST',
-    body: JSON.stringify({ template_id, year, month, ...(bct ?? {}) }),
+    body: JSON.stringify({ template_id, year, month }),
   })
 
 // ── NL Query ─────────────────────────────────────────────────────────────────
@@ -195,30 +181,6 @@ export const updateAdminUser = (id: string, body: { role?: string; is_active?: b
 
 export const resetAdminUserPassword = (id: string) =>
   apiFetch<{ temp_password: string }>(`/admin/users/${id}/reset-password`, { method: 'POST' })
-
-// ── BCT Export Compliance ─────────────────────────────────────────────────────
-
-export const getBctAging = () =>
-  apiFetch<BCTAgingItem[]>('/export/bct-aging')
-
-export const markRepatriated = (invoiceId: string, repat_date?: string) =>
-  apiFetch<{ invoice_id: string; repatriation_date: string; message: string }>(
-    `/export/client-invoices/${invoiceId}/mark-repatriated`,
-    { method: 'PATCH', body: JSON.stringify({ repatriation_date: repat_date ?? null }) },
-  )
-
-export const downloadBctReport = (from: string, to: string): Promise<void> =>
-  apiBlobFetch(
-    `/export/bct-report?from_=${from}&to=${to}`,
-    `bct_report_${from}_${to}.zip`,
-  )
-
-export const verifyBctReport = (csvFile: File, sigFile: File): Promise<{ valid: boolean; message: string }> => {
-  const fd = new FormData()
-  fd.append('report_file', csvFile)
-  fd.append('signature_file', sigFile)
-  return apiUpload<{ valid: boolean; message: string }>('/export/bct-report/verify', fd)
-}
 
 // ── Project (single) ──────────────────────────────────────────────────────────
 

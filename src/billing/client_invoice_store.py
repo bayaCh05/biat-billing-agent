@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, select
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, select
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from src.models.client_invoice import ClientInvoice, ClientInvoiceStatus, ClientLineItem
@@ -56,18 +56,6 @@ class ClientInvoiceORM(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at:    Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     paid_at:    Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    # ── BCT export compliance ─────────────────────────────────────────────────
-    currency:                Mapped[str]         = mapped_column(String(8),  nullable=False, default="TND")
-    is_export:               Mapped[bool]        = mapped_column(Boolean,    nullable=False, default=False)
-    domiciliation_bank:      Mapped[str | None]  = mapped_column(Text,       nullable=True)
-    domiciliation_number:    Mapped[str | None]  = mapped_column(String(64), nullable=True)
-    shipment_date:           Mapped[object | None] = mapped_column(Date,     nullable=True)
-    repatriation_deadline:   Mapped[object | None] = mapped_column(Date,     nullable=True)
-    repatriation_date:       Mapped[object | None] = mapped_column(Date,     nullable=True)
-    payment_guarantee_type:  Mapped[str | None]  = mapped_column(String(32), nullable=True)
-    foreign_currency_amount: Mapped[float | None] = mapped_column(Float,     nullable=True)
-    exchange_rate:           Mapped[float | None] = mapped_column(Float,     nullable=True)
 
     line_items: Mapped[list[ClientLineItemORM]] = relationship(
         "ClientLineItemORM",
@@ -139,33 +127,6 @@ class ClientInvoiceRepository:
         ).scalars().all()
         return [self._to_pydantic(o) for o in orms]
 
-    def list_exports(self, period_start, period_end) -> list[ClientInvoice]:
-        """Return export invoices (is_export=True) within the given date range."""
-        from datetime import date as date_type
-        orms = self.session.execute(
-            select(ClientInvoiceORM)
-            .where(
-                ClientInvoiceORM.is_export == True,  # noqa: E712
-                ClientInvoiceORM.invoice_date >= period_start,
-                ClientInvoiceORM.invoice_date <= period_end,
-            )
-            .order_by(ClientInvoiceORM.invoice_date.asc())
-        ).scalars().all()
-        return [self._to_pydantic(o) for o in orms]
-
-    def list_exports_warning_overdue(self) -> list[ClientInvoice]:
-        """Return export invoices not yet repatriated (for aging/alert widget)."""
-        orms = self.session.execute(
-            select(ClientInvoiceORM)
-            .where(
-                ClientInvoiceORM.is_export == True,  # noqa: E712
-                ClientInvoiceORM.repatriation_date.is_(None),
-                ClientInvoiceORM.shipment_date.is_not(None),
-            )
-            .order_by(ClientInvoiceORM.shipment_date.asc())
-        ).scalars().all()
-        return [self._to_pydantic(o) for o in orms]
-
     def get_max_sequence(self, year: int) -> int:
         """Return the highest sequence number used for the given year (0 if none)."""
         from src.billing.invoice_numbering import InvoiceNumberer
@@ -215,19 +176,9 @@ class ClientInvoiceRepository:
             "source_template_id": inv.source_template_id,
             "notes":              inv.notes,
             "pdf_path":           inv.pdf_path,
-            "created_at":              inv.created_at,
-            "sent_at":                 inv.sent_at,
-            "paid_at":                 inv.paid_at,
-            "currency":                inv.currency,
-            "is_export":               inv.is_export,
-            "domiciliation_bank":      inv.domiciliation_bank,
-            "domiciliation_number":    inv.domiciliation_number,
-            "shipment_date":           inv.shipment_date,
-            "repatriation_deadline":   inv.repatriation_deadline,
-            "repatriation_date":       inv.repatriation_date,
-            "payment_guarantee_type":  inv.payment_guarantee_type,
-            "foreign_currency_amount": inv.foreign_currency_amount,
-            "exchange_rate":           inv.exchange_rate,
+            "created_at":         inv.created_at,
+            "sent_at":            inv.sent_at,
+            "paid_at":            inv.paid_at,
         }
 
     @staticmethod
@@ -276,17 +227,7 @@ class ClientInvoiceRepository:
             source_template_id = orm.source_template_id,
             notes              = orm.notes,
             pdf_path           = orm.pdf_path,
-            created_at               = orm.created_at or datetime.now(timezone.utc),
-            sent_at                  = orm.sent_at,
-            paid_at                  = orm.paid_at,
-            currency                 = getattr(orm, "currency", "TND") or "TND",
-            is_export                = getattr(orm, "is_export", False) or False,
-            domiciliation_bank       = getattr(orm, "domiciliation_bank", None),
-            domiciliation_number     = getattr(orm, "domiciliation_number", None),
-            shipment_date            = getattr(orm, "shipment_date", None),
-            repatriation_deadline    = getattr(orm, "repatriation_deadline", None),
-            repatriation_date        = getattr(orm, "repatriation_date", None),
-            payment_guarantee_type   = getattr(orm, "payment_guarantee_type", None),
-            foreign_currency_amount  = getattr(orm, "foreign_currency_amount", None),
-            exchange_rate            = getattr(orm, "exchange_rate", None),
+            created_at         = orm.created_at or datetime.now(timezone.utc),
+            sent_at            = orm.sent_at,
+            paid_at            = orm.paid_at,
         )
