@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from api.deps import get_session, get_components
 from api.schemas import InvoiceOut, InvoiceSummary, ActionResultOut
-from src.agent.pipeline import extract, classify, validate, export_file, post_journal
 from src.models.enums import InvoiceStatus
 from src.models.invoice import InvoiceRecord
 from src.storage.repository import InvoiceRepository
@@ -41,12 +40,33 @@ async def upload_invoice(
     live: bool = Form(True),
     session: Session = Depends(get_session),
 ):
-    suffix = Path(file.filename or "invoice.pdf").suffix or ".pdf"
     content = await file.read()
 
+    # Validate file before processing
+    from api.security.file_validator import validate as validate_file
+    from src.models.audit import AuditLogCreate
+    from src.services.audit_service import log_action, _ip, _ua
+    try:
+        file_info = validate_file(file.filename or "invoice.pdf", content)
+    except Exception as validation_err:
+        log_action(session, AuditLogCreate(
+            action="FILE_REJECTED", resource_type="InvoiceRecord", status="FAILURE",
+            detail=str(validation_err),
+            ip_address=request.client.host if request.client else None,
+        ))
+        session.commit()
+        raise
+
+    suffix = Path(file.filename or "invoice.pdf").suffix or ".pdf"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
+
+    log_action(session, AuditLogCreate(
+        action="FILE_UPLOADED", resource_type="InvoiceRecord", status="SUCCESS",
+        detail=f"type={file_info['detected_type']} size={file_info['file_size_bytes']}B",
+        ip_address=request.client.host if request.client else None,
+    ))
 
     repo = InvoiceRepository(session)
 
@@ -98,14 +118,13 @@ async def upload_invoice(
             )
             repo.save(invoice)
 
-        invoice = extract(invoice, components)
-        if invoice.status not in {InvoiceStatus.EXTRACTION_FAILED, InvoiceStatus.ERROR}:
-            invoice = classify(invoice, components)
-            invoice = validate(invoice, components)
-            if invoice.status == InvoiceStatus.VALIDATED:
-                invoice = export_file(invoice, components)
-            if invoice.status == InvoiceStatus.EXPORTED:
-                invoice = post_journal(invoice, components)
+        # Run through AI orchestrator (extraction → classification → anomaly → accounting)
+        from src.ai_agents.orchestrator import AIOrchestrator
+        orchestrator = AIOrchestrator(components, session)
+        orchestrator.process_invoice(invoice)
+
+        # Re-fetch invoice from DB to get final persisted state
+        invoice = repo.get_by_id(invoice.id) or invoice
     finally:
         Path(tmp_path).unlink(missing_ok=True)
         components.close()
@@ -194,3 +213,121 @@ def update_status(
     inv.status = status
     repo.save(inv)
     return ActionResultOut(id=invoice_id, action="status_updated", new_status=new_status)
+
+
+@router.get(
+    "/{invoice_id}/pipeline-status",
+    summary="Statut temps réel du pipeline IA",
+    description=(
+        "Retourne l'état actuel de chaque étape du pipeline IA pour une facture : "
+        "extraction, classification, anomalies, comptabilité. "
+        "Utilisé par le tracker temps réel dans l'interface."
+    ),
+)
+def get_pipeline_status(
+    invoice_id: str,
+    session: Session = Depends(get_session),
+):
+    repo = InvoiceRepository(session)
+    try:
+        uid = UUID(invoice_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid UUID")
+    inv = repo.get_by_id(uid)
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+
+    status = inv.status.value
+
+    def _step(num, name, done_statuses, running_statuses):
+        if status in done_statuses:
+            return {"step": num, "name": name, "status": "done"}
+        if status in running_statuses:
+            return {"step": num, "name": name, "status": "running"}
+        if status in ("EXTRACTION_FAILED", "ERROR"):
+            return {"step": num, "name": name, "status": "failed"}
+        return {"step": num, "name": name, "status": "waiting"}
+
+    extracted = ["EXTRACTED", "CLASSIFYING", "CLASSIFIED", "VALIDATING",
+                 "VALIDATED", "FLAGGED", "JOURNALED", "EXPORTED", "PAID"]
+    classified = ["CLASSIFIED", "VALIDATING", "VALIDATED", "FLAGGED", "JOURNALED", "EXPORTED", "PAID"]
+    validated = ["VALIDATED", "FLAGGED", "JOURNALED", "EXPORTED", "PAID"]
+    journaled = ["JOURNALED", "EXPORTED", "PAID"]
+
+    steps = [
+        _step(1, "Extraction PDF", extracted, ["EXTRACTING", "RECEIVED"]),
+        _step(2, "Classification PCE", classified, ["CLASSIFYING"]),
+        _step(3, "Détection anomalies", validated + ["FLAGGED"], ["VALIDATING"]),
+        _step(4, "Écriture comptable", journaled, ["EXPORTING"]),
+    ]
+
+    # Add summaries from AI fields
+    steps[0]["summary"] = inv.extraction_method.value if inv.extraction_method else None
+    steps[1]["summary"] = (
+        f"Compte {inv.accounting_compte} via {inv.classification_pass}"
+        if inv.accounting_compte else None
+    )
+    steps[1]["reason"] = inv.classification_reason
+
+    # Step 3: anomaly count
+    flag_count = len(inv.flags) if inv.flags else 0
+    error_count = sum(1 for f in (inv.flags or []) if getattr(f, "severity", None) and f.severity.value == "ERROR")
+    if steps[2]["status"] in ("done", "running"):
+        steps[2]["summary"] = (
+            f"{flag_count} anomalie(s) dont {error_count} erreur(s)" if flag_count
+            else "Aucune anomalie détectée"
+        )
+
+    # Step 4: fetch journal entry lines
+    journal_entry = None
+    if status in ("JOURNALED", "EXPORTED", "PAID"):
+        from sqlalchemy import text as sql_text
+        rows = session.execute(
+            sql_text(
+                "SELECT je.id, je.reference, je.date_ecriture, je.description, "
+                "je.accounting_explanation, "
+                "jl.compte, jl.libelle, jl.debit, jl.credit "
+                "FROM journal_entries je "
+                "JOIN journal_lines jl ON jl.entry_id = je.id "
+                "WHERE je.source_invoice_id = :iid "
+                "ORDER BY jl.debit DESC"
+            ),
+            {"iid": invoice_id},
+        ).fetchall()
+
+        if rows:
+            total_debit = sum(float(r[7] or 0) for r in rows)
+            total_credit = sum(float(r[8] or 0) for r in rows)
+            is_balanced = abs(total_debit - total_credit) < 0.005
+            journal_entry = {
+                "id": str(rows[0][0]),
+                "reference": rows[0][1],
+                "date_ecriture": str(rows[0][2]),
+                "description": rows[0][3],
+                "accounting_explanation": rows[0][4],
+                "is_balanced": is_balanced,
+                "lines": [
+                    {
+                        "compte": r[5] or "",
+                        "libelle": r[6] or "",
+                        "debit": float(r[7] or 0),
+                        "credit": float(r[8] or 0),
+                    }
+                    for r in rows
+                ],
+            }
+            steps[3]["summary"] = (
+                f"Écriture {rows[0][1]} — {'équilibrée ✓' if is_balanced else 'DÉSÉQUILIBRÉE ⚠'}"
+            )
+
+    from src.ai_agents.ollama_client import OllamaClient
+    degraded = not OllamaClient.get().is_available()
+
+    return {
+        "invoice_id": invoice_id,
+        "final_status": status,
+        "steps": steps,
+        "degraded_mode": degraded,
+        "human_review_required": inv.human_review_required,
+        "journal_entry": journal_entry,
+    }

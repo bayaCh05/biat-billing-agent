@@ -52,13 +52,19 @@ function highlightSQL(sql: string): string {
   return out
 }
 
-const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
-  EXPORTED:  { bg: '#E8F5F0', color: '#1D9E76' },
-  PAID:      { bg: '#E8F0FA', color: '#1A3A5C' },
-  COLLECTED: { bg: '#E8F0FA', color: '#1A3A5C' },
-  FLAGGED:   { bg: '#FEF0EE', color: '#C0391B' },
-  VALIDATED: { bg: '#E3F0F9', color: '#5BA3C9' },
-  ERROR:     { bg: '#FEF0EE', color: '#C0391B' },
+const STATUS_BADGE: Record<string, { bg: string; color: string; label: string }> = {
+  EXPORTED:          { bg: '#E8F5F0', color: '#1D9E76', label: 'Exportée' },
+  JOURNALED:         { bg: '#E8F5F0', color: '#0D6E52', label: 'Journalisée' },
+  PAID:              { bg: '#E8F0FA', color: '#1A3A5C', label: 'Payée' },
+  COLLECTED:         { bg: '#E8F0FA', color: '#1A3A5C', label: 'Encaissée' },
+  FLAGGED:           { bg: '#FEF0EE', color: '#C0391B', label: 'Signalée' },
+  VALIDATED:         { bg: '#E3F0F9', color: '#5BA3C9', label: 'Validée' },
+  REJECTED:          { bg: '#FDECEA', color: '#C0391B', label: 'Rejetée' },
+  ERROR:             { bg: '#FEF0EE', color: '#C0391B', label: 'Erreur' },
+  RECEIVED:          { bg: '#E3F0F9', color: '#1A3A5C', label: 'Reçue' },
+  EXTRACTED:         { bg: '#E3F0F9', color: '#1A3A5C', label: 'Extraite' },
+  CLASSIFIED:        { bg: '#E3F0F9', color: '#1A3A5C', label: 'Classifiée' },
+  EXTRACTION_FAILED: { bg: '#FDECEA', color: '#C0391B', label: 'OCR échoué' },
 }
 
 export default function Requetes() {
@@ -115,7 +121,7 @@ export default function Requetes() {
     if ((col.toLowerCase().includes('status') || col.toLowerCase() === 'statut') && badge) {
       return (
         <span style={{ background: badge.bg, color: badge.color, padding: '3px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600 }}>
-          {s}
+          {badge.label}
         </span>
       )
     }

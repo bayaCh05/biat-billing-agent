@@ -20,7 +20,9 @@ class Asset(BaseModel):
     acquisition_cost_ht: float               # valeur d'entrée HT en TND
     useful_life_years: int                   # durée d'amortissement en années
     depreciation_method: str = "linear"      # "linear" | "degressive"
-    supplier_invoice_id: UUID | None = None  # facture d'acquisition
+    supplier_invoice_id: UUID | str | None = None  # facture d'acquisition
+    amortization_source: str | None = None   # "AI" | "DEFAULT" | "MANUAL"
+    amortization_suggestion_raw: str | None = None
     notes: str = ""
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
@@ -35,12 +37,7 @@ class Asset(BaseModel):
         return round(self.annual_depreciation / 12, 3)
 
     def book_value_at(self, ref_date: date) -> float:
-        """Valeur nette comptable à une date donnée.
-
-        Delegates to DepreciationCalculator for degressive assets so the
-        correct switch-to-linear rule is applied.  Linear assets use the
-        fast analytic formula (no schedule build required).
-        """
+        """Valeur nette comptable à une date donnée."""
         if self.depreciation_method == "degressive":
             from src.capex.depreciation_calculator import DepreciationCalculator
             return DepreciationCalculator().book_value_at(
@@ -50,10 +47,13 @@ class Asset(BaseModel):
                 ref_date=ref_date,
                 method="degressive",
             )
-        # Linear: fast analytic path
         months_elapsed = (
             (ref_date.year - self.acquisition_date.year) * 12
             + (ref_date.month - self.acquisition_date.month)
         )
         depreciated = self.monthly_depreciation * max(0, months_elapsed)
         return max(0.0, round(self.acquisition_cost_ht - depreciated, 3))
+
+
+# Alias used by the AI accounting agent
+CapexAsset = Asset

@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { LogOut, KeyRound, CheckCircle, Eye, EyeOff } from 'lucide-react'
+import { LogOut, KeyRound, CheckCircle, Eye, EyeOff, Monitor, RefreshCw } from 'lucide-react'
+import { getSessions, revokeSession, logoutApi, type ActiveSession } from '../api/endpoints'
 
 const ROLE_EMAILS: Record<string, string> = {
   'Comptable':      'baya.chaabene@biat.com.tn',
@@ -33,8 +34,33 @@ export default function Profile() {
   const [pwSuccess, setPwSuccess]     = useState(false)
   const [pwError, setPwError]         = useState('')
 
+  const [sessions, setSessions]         = useState<ActiveSession[]>([])
+  const [loadingSessions, setLoadingSessions] = useState(false)
+  const [revokingJti, setRevokingJti]   = useState<string | null>(null)
+
   const avatarBg = ROLE_COLOR[role]     ?? '#1A3A5C'
   const email    = ROLE_EMAILS[role]    ?? 'user@biat.com.tn'
+
+  useEffect(() => {
+    setLoadingSessions(true)
+    getSessions().then(d => setSessions(d.sessions)).catch(() => {}).finally(() => setLoadingSessions(false))
+  }, [])
+
+  const handleRevokeSession = async (jti: string) => {
+    setRevokingJti(jti)
+    try {
+      await revokeSession(jti)
+      setSessions(prev => prev.filter(s => s.jti !== jti))
+    } catch { /* ignore */ } finally {
+      setRevokingJti(null)
+    }
+  }
+
+  const handleLogout = async () => {
+    try { await logoutApi() } catch { /* ignore */ }
+    logout()
+    navigate('/login')
+  }
   const badgeCls = ROLE_BADGE_CLASS[role] ?? 'bg-blue-100 text-blue-700'
 
   function handleChangePassword(e: React.FormEvent) {
@@ -173,9 +199,56 @@ export default function Profile() {
         </form>
       </div>
 
+      {/* Active sessions */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Monitor size={16} className="text-blue-500" />
+            <span className="text-sm font-semibold text-gray-800">Sessions actives</span>
+          </div>
+          <button
+            onClick={() => { setLoadingSessions(true); getSessions().then(d => setSessions(d.sessions)).catch(() => {}).finally(() => setLoadingSessions(false)) }}
+            disabled={loadingSessions}
+            className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+          >
+            <RefreshCw size={10} className={loadingSessions ? 'animate-spin' : ''} />
+            Actualiser
+          </button>
+        </div>
+        {sessions.length === 0 && !loadingSessions && (
+          <p className="text-xs text-gray-500">Aucune session active trouvée (fonctionnalité disponible avec comptes DB uniquement).</p>
+        )}
+        <div className="space-y-2">
+          {sessions.map(s => (
+            <div
+              key={s.jti}
+              className="flex items-center justify-between p-2.5 rounded-lg text-xs"
+              style={{ background: s.is_current ? '#E8F5F0' : '#F8FAFC' }}
+            >
+              <div>
+                <span className="font-mono text-gray-700">{s.jti}…</span>
+                {s.is_current && <span className="ml-2 text-green-700 font-semibold">● Session actuelle</span>}
+                <p className="text-gray-400 mt-0.5">
+                  {s.ip_address ?? 'IP inconnue'} · expire {new Date(s.expires_at).toLocaleString('fr-TN')}
+                </p>
+              </div>
+              {!s.is_current && (
+                <button
+                  onClick={() => handleRevokeSession(s.jti)}
+                  disabled={revokingJti === s.jti}
+                  className="px-2 py-1 rounded-lg text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50"
+                >
+                  {revokingJti === s.jti ? '…' : 'Déconnecter'}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Logout */}
       <button
-        onClick={() => { logout(); navigate('/login') }}
+        onClick={handleLogout}
         className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-red-200 text-red-600 text-sm font-medium hover:bg-red-50 transition-colors"
       >
         <LogOut size={14} />

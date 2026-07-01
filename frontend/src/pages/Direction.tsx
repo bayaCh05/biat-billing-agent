@@ -8,13 +8,28 @@ import {
 import type {
   KpiData, BudgetSummary, Asset,
   MonthlySpendItem, SupplierSpendItem, AccountSpendItem, AnalyticsKPIs,
+  RiskSummary, NiveauCriticite,
 } from '../types'
 import { formatTND } from '../utils/formatters'
 import {
   getKpi, getBudgetSummary, listAssets,
   getMonthlySpend, getBySupplier, getByAccount, getAnalyticsKPIs,
+  getRiskSummary, getAIHealthSummary,
 } from '../api/endpoints'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, ShieldAlert } from 'lucide-react'
+
+const CRITICITE_COLOR: Record<NiveauCriticite, string> = {
+  FAIBLE:   '#1D9E76',
+  MOYENNE:  '#F0A500',
+  ELEVEE:   '#E67E22',
+  CRITIQUE: '#C0391B',
+}
+const CRITICITE_BG: Record<NiveauCriticite, string> = {
+  FAIBLE:   '#E6F9F3',
+  MOYENNE:  '#FEF9E7',
+  ELEVEE:   '#FDF2E9',
+  CRITIQUE: '#FDEDEC',
+}
 
 const MONTH_SHORT = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
 
@@ -91,11 +106,14 @@ export default function Direction() {
   const [analyticsLoading, setAnalyticsLoading] = useState(true)
 
   // Existing overview data
-  const [kpi, setKpi]         = useState<KpiData | null>(null)
-  const [budget, setBudget]   = useState<BudgetSummary | null>(null)
-  const [assets, setAssets]   = useState<Asset[]>([])
+  const [kpi, setKpi]             = useState<KpiData | null>(null)
+  const [budget, setBudget]       = useState<BudgetSummary | null>(null)
+  const [assets, setAssets]       = useState<Asset[]>([])
+  const [riskSummary, setRiskSummary] = useState<RiskSummary | null>(null)
   const [overviewLoading, setOverviewLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(now)
+  const [healthSummary, setHealthSummary] = useState<{ summary: string; status_label: string; generated_at: string; ollama_available: boolean } | null>(null)
+  const [healthLoading, setHealthLoading] = useState(false)
 
   const loadAnalytics = useCallback(async () => {
     setAnalyticsLoading(true)
@@ -118,16 +136,30 @@ export default function Direction() {
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true)
     try {
-      const [k, b, a] = await Promise.all([
+      const [k, b, a, rs] = await Promise.all([
         getKpi(),
         getBudgetSummary(),
         listAssets(),
+        getRiskSummary().catch(() => null),
       ])
       setKpi(k)
       setBudget(b)
       setAssets(a)
+      setRiskSummary(rs)
     } finally {
       setOverviewLoading(false)
+    }
+  }, [])
+
+  const loadHealthSummary = useCallback(async () => {
+    setHealthLoading(true)
+    try {
+      const result = await getAIHealthSummary()
+      setHealthSummary(result)
+    } catch {
+      // non-blocking
+    } finally {
+      setHealthLoading(false)
     }
   }, [])
 
@@ -140,7 +172,8 @@ export default function Direction() {
   useEffect(() => {
     loadAnalytics()
     loadOverview()
-  }, [loadAnalytics, loadOverview])
+    loadHealthSummary()
+  }, [loadAnalytics, loadOverview, loadHealthSummary])
 
   // Derived
   const consumedPct = (budget?.total_budget_ytd ?? 0) > 0
@@ -378,7 +411,7 @@ export default function Direction() {
               {[
                 { label: 'Factures traitées', value: String(kpi?.total_invoices ?? 0), color: '#2E86C1' },
                 { label: 'Taux auto-approbation', value: `${kpi?.auto_approval_rate ?? 0}%`, color: '#1D9E76' },
-                { label: 'Signalées (FLAGGED)', value: String(kpi?.flagged ?? 0), color: '#F0A500' },
+                { label: 'Factures signalées', value: String(kpi?.flagged ?? 0), color: '#F0A500' },
                 { label: 'Actifs CAPEX actifs', value: String(activeAssets.length), color: '#804CD7' },
               ].map(row => (
                 <div key={row.label} className="flex items-center justify-between">
@@ -387,6 +420,40 @@ export default function Direction() {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+
+        {/* AI Health Summary */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-800">Résumé IA</h2>
+            <button
+              onClick={loadHealthSummary}
+              className="text-[10px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50"
+            >
+              Actualiser
+            </button>
+          </div>
+          {healthLoading ? (
+            <div className="flex flex-col gap-2"><Skeleton h="h-3" /><Skeleton h="h-3" /><Skeleton h="h-3" w="w-3/4" /></div>
+          ) : healthSummary ? (
+            <div className="flex flex-col gap-2">
+              <div className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full w-fit ${
+                healthSummary.status_label === 'Satisfaisant' ? 'bg-green-50 text-green-700' :
+                healthSummary.status_label === 'Critique' ? 'bg-red-50 text-red-700' :
+                'bg-amber-50 text-amber-700'
+              }`}>
+                {healthSummary.status_label === 'Satisfaisant' ? '✅' : healthSummary.status_label === 'Critique' ? '🔴' : '⚠️'}
+                {' '}{healthSummary.status_label}
+              </div>
+              <p className="text-xs text-gray-600 leading-relaxed">{healthSummary.summary}</p>
+              <p className="text-[10px] text-gray-400">
+                🤖 Résumé généré par IA · {new Date(healthSummary.generated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                {!healthSummary.ollama_available && <span className="ml-1 text-amber-500">(mode dégradé)</span>}
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400">Cliquez sur Actualiser pour générer le résumé.</p>
           )}
         </div>
 
@@ -409,6 +476,46 @@ export default function Direction() {
           )}
         </div>
       </div>
+
+      {/* ── Risk Summary ─────────────────────────────────────────────────────── */}
+      {riskSummary && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <ShieldAlert size={16} className="text-gray-600" />
+            <h2 className="text-sm font-semibold text-gray-800">Risques actifs</h2>
+            <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: '#FDEDEC', color: '#C0391B' }}>
+              {riskSummary.overdue.length > 0 ? `${riskSummary.overdue.length} en retard` : `${riskSummary.total_active} total`}
+            </span>
+          </div>
+          <div className="grid grid-cols-4 gap-3 mb-4">
+            {(['FAIBLE', 'MOYENNE', 'ELEVEE', 'CRITIQUE'] as NiveauCriticite[]).map(c => (
+              <div key={c} className="rounded-lg p-3 text-center" style={{ background: CRITICITE_BG[c] }}>
+                <p className="text-xs font-semibold" style={{ color: CRITICITE_COLOR[c] }}>{c}</p>
+                <p className="text-2xl font-bold" style={{ color: CRITICITE_COLOR[c] }}>{riskSummary.by_criticite[c] ?? 0}</p>
+              </div>
+            ))}
+          </div>
+          {riskSummary.overdue.length > 0 && (
+            <div className="rounded-lg p-3 mb-3" style={{ background: '#FDEDEC' }}>
+              <p className="text-xs font-semibold mb-1" style={{ color: '#C0391B' }}>Échéances dépassées</p>
+              {riskSummary.overdue.slice(0, 3).map(o => (
+                <p key={o.id} className="text-xs" style={{ color: '#922B21' }}>• {o.titre} — {o.date_echeance_mitigation}</p>
+              ))}
+            </div>
+          )}
+          {riskSummary.top_critical.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold mb-1 text-gray-500">Top risques CRITIQUES</p>
+              {riskSummary.top_critical.map(r => (
+                <div key={r.id} className="flex items-center justify-between py-1">
+                  <span className="text-xs text-gray-700 truncate flex-1">{r.titre}</span>
+                  <span className="text-xs ml-2" style={{ color: '#5D6D7E' }}>{r.statut}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

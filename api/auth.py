@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import secrets
+import string
 from pathlib import Path
 
 import bcrypt
@@ -14,37 +16,39 @@ if _env_path.exists():
         if _line and not _line.startswith("#") and "=" in _line:
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip())
-import secrets
-import string
-from datetime import datetime, timedelta, timezone
 
-import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
 
-SECRET = os.getenv("JWT_SECRET", "biat_local_only_secret_2026")
-ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = 8
+from api.security.jwt_handler import (
+    SECRET,
+    create_access_token,
+    create_refresh_token,
+    create_token,        # legacy shim
+    decode_any,
+    verify_access_token,
+)
 
-# Demo fallback users — active when no DB user matches the email.
-# Passwords are read from env vars so they are not hardcoded in source.
-# For production, seed all users into the DB with: python scripts/seed_users.py
+# ── Demo fallback users ────────────────────────────────────────────────────────
+# Passwords MUST be set via env vars — no hardcoded defaults.
+# Use DISABLE_DEMO_USERS=true to skip entirely in production.
 USERS: dict[str, dict[str, str]] = {
-    "comptable@biat-it.tn":  {
-        "password": os.getenv("DEMO_COMPTABLE_PASSWORD", "biat2026"),
-        "role":     "Comptable",
+    "comptable@biat-it.tn": {
+        "password": os.getenv("DEMO_COMPTABLE_PASSWORD", ""),
+        "role": "Comptable",
     },
     "chef@biat-it.tn": {
-        "password": os.getenv("DEMO_CHEF_PASSWORD", "biat2026"),
-        "role":     "Chef de Projet",
+        "password": os.getenv("DEMO_CHEF_PASSWORD", ""),
+        "role": "Chef de Projet",
     },
     "directeur@biat-it.tn": {
-        "password": os.getenv("DEMO_DIRECTION_PASSWORD", "biat2026"),
-        "role":     "Direction",
+        "password": os.getenv("DEMO_DIRECTION_PASSWORD", ""),
+        "role": "Direction",
     },
     "admin@biat-it.tn": {
-        "password": os.getenv("DEMO_ADMIN_PASSWORD", "admin2026"),
-        "role":     "Admin",
+        "password": os.getenv("DEMO_ADMIN_PASSWORD", ""),
+        "role": "Admin",
     },
 }
 
@@ -66,28 +70,11 @@ def generate_temp_password(length: int = 12) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
-# ── JWT helpers ───────────────────────────────────────────────────────────────
-
-def create_token(role: str, extra: dict | None = None) -> str:
-    exp = datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)
-    payload: dict = {"role": role, "exp": exp}
-    if extra:
-        payload.update(extra)
-    return jwt.encode(payload, SECRET, algorithm=ALGORITHM)
-
-
-def _decode(token: str) -> dict:
-    try:
-        return jwt.decode(token, SECRET, algorithms=[ALGORITHM])
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expiré — reconnectez-vous.")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token invalide.")
-
+# ── FastAPI dependencies ───────────────────────────────────────────────────────
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     """FastAPI dependency — returns the full JWT payload dict."""
-    return _decode(token)
+    return decode_any(token)
 
 
 def require_role(*roles: str):
@@ -97,3 +84,39 @@ def require_role(*roles: str):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
         return user
     return checker
+
+
+def validate_demo_users() -> None:
+    """Called at startup — warns/raises if demo env vars are missing."""
+    disable = os.getenv("DISABLE_DEMO_USERS", "false").lower() == "true"
+    if disable:
+        return
+
+    missing = []
+    weak = []
+    env_map = {
+        "DEMO_COMPTABLE_PASSWORD": USERS["comptable@biat-it.tn"]["password"],
+        "DEMO_CHEF_PASSWORD": USERS["chef@biat-it.tn"]["password"],
+        "DEMO_DIRECTION_PASSWORD": USERS["directeur@biat-it.tn"]["password"],
+        "DEMO_ADMIN_PASSWORD": USERS["admin@biat-it.tn"]["password"],
+    }
+    for var, val in env_map.items():
+        if not val:
+            missing.append(var)
+        elif len(val) < 8:
+            weak.append(var)
+
+    if missing:
+        import logging
+        logging.getLogger(__name__).warning(
+            "⚠️  Variables d'environnement demo manquantes: %s. "
+            "Définissez-les dans .env ou mettez DISABLE_DEMO_USERS=true.",
+            ", ".join(missing),
+        )
+
+    if weak:
+        import logging
+        logging.getLogger(__name__).warning(
+            "⚠️  Mots de passe faibles pour les comptes démo: %s (minimum 8 caractères recommandé).",
+            ", ".join(weak),
+        )

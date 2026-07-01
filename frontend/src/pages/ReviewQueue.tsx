@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { CheckCircle, XCircle, Wrench, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
+import { CheckCircle, XCircle, Wrench, ChevronDown, ChevronUp } from 'lucide-react'
 import { getReviewQueue, approveInvoice, rejectInvoice } from '../api/endpoints'
 import type { InvoiceSummary, InvoiceFlag } from '../types'
 import PageSpinner from '../components/ui/PageSpinner'
@@ -7,18 +7,19 @@ import { formatTND } from '../utils/formatters'
 import { useAuth } from '../context/AuthContext'
 
 const FLAG_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-  TOTAL_MISMATCH:  { bg: '#FDECEA', color: '#C0391B', label: 'TOTAL MISMATCH' },
-  LOW_CONFIDENCE:  { bg: '#FFF3E0', color: '#E65100', label: 'LOW CONFID.' },
-  DUPLICATE:       { bg: '#FFF8E8', color: '#F0A600', label: 'DUPLICATE' },
-  NEAR_DUPLICATE:  { bg: '#FFF0DC', color: '#E67E22', label: 'NEAR DUPLICATE' },
-  HIGH_VALUE:      { bg: '#FFF8E8', color: '#B07800', label: 'HIGH VALUE' },
-  CATALOG_NO_MATCH:{ bg: '#F3E5F5', color: '#804CD7', label: 'NO CATALOG' },
-  LINEITEMS_SUM_MISMATCH: { bg: '#FDECEA', color: '#C0391B', label: 'ITEMS MISMATCH' },
-  MISSING_FIELD:   { bg: '#FFF3E0', color: '#E65100', label: 'MISSING FIELD' },
-  INVALID_TAX_ID:  { bg: '#FDECEA', color: '#C0391B', label: 'INVALID TAX ID' },
-  SUSPECTED_DUPLICATE: { bg: '#FFF0DC', color: '#E67E22', label: 'SUSP. DUPLICATE' },
-  UNKNOWN_DIRECTION: { bg: '#F3E5F5', color: '#804CD7', label: 'UNKNOWN DIR.' },
-  SUSPICIOUS_AMOUNT: { bg: '#FDECEA', color: '#C0391B', label: 'SUSPICIOUS AMT' },
+  TOTAL_MISMATCH:         { bg: '#FDECEA', color: '#C0391B', label: 'Écart total' },
+  LOW_CONFIDENCE:         { bg: '#FFF3E0', color: '#E65100', label: 'Faible confiance' },
+  DUPLICATE:              { bg: '#FFF8E8', color: '#F0A600', label: 'Doublon' },
+  NEAR_DUPLICATE:         { bg: '#FFF0DC', color: '#E67E22', label: 'Quasi-doublon' },
+  HIGH_VALUE:             { bg: '#FFF8E8', color: '#B07800', label: 'Montant élevé' },
+  CATALOG_NO_MATCH:       { bg: '#F3E5F5', color: '#804CD7', label: 'Sans catalogue' },
+  LINEITEMS_SUM_MISMATCH: { bg: '#FDECEA', color: '#C0391B', label: 'Écart lignes' },
+  MISSING_FIELD:          { bg: '#FFF3E0', color: '#E65100', label: 'Champ manquant' },
+  INVALID_TAX_ID:         { bg: '#FDECEA', color: '#C0391B', label: 'MF invalide' },
+  SUSPECTED_DUPLICATE:    { bg: '#FFF0DC', color: '#E67E22', label: 'Doublon suspect' },
+  UNKNOWN_DIRECTION:      { bg: '#F3E5F5', color: '#804CD7', label: 'Direction inconnue' },
+  SUSPICIOUS_AMOUNT:      { bg: '#FDECEA', color: '#C0391B', label: 'Montant suspect' },
+  TVA_MISMATCH:           { bg: '#FDECEA', color: '#C0391B', label: 'Écart TVA' },
 }
 
 function FlagBadge({ flag }: { flag: InvoiceFlag }) {
@@ -133,14 +134,11 @@ export default function ReviewQueue() {
             className="px-3 py-1.5 text-sm rounded-lg border outline-none"
             style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
           >
-            {['Tous', 'FLAGGED', 'VALIDATED', 'REJECTED'].map(s => (
-              <option key={s}>{s === 'Tous' ? 'Statut : Tous' : s}</option>
-            ))}
+            <option value="Tous">Statut : Tous</option>
+            <option value="FLAGGED">Signalées</option>
+            <option value="VALIDATED">Validées</option>
+            <option value="REJECTED">Rejetées</option>
           </select>
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm" style={{ borderColor: '#D5E8F5', color: '#5D6D7E' }}>
-            <Calendar size={13} />
-            <span>01/01 — 18/06/2026</span>
-          </div>
           <div className="ml-auto">
             <span className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: '#FFF8E8', color: '#B07800', border: '1px solid #F0A600' }}>
               ⚠ {filtered.length} facture{filtered.length !== 1 ? 's' : ''} à réviser
@@ -148,19 +146,12 @@ export default function ReviewQueue() {
           </div>
         </div>
 
-        {/* Rejection banner */}
-        <div className="mx-6 mt-4 flex items-center gap-3 px-4 py-2.5 rounded-lg border-l-4 text-sm" style={{ background: '#FDECEA', borderColor: '#C0391B', color: '#9A2415' }}>
-          <XCircle size={15} />
-          <span>1 fichier rejeté — document non reconnu comme facture (photo_bureau.jpg)</span>
-          <button className="ml-2 underline text-xs" style={{ color: '#C0391B' }}>→ Voir le fichier</button>
-        </div>
-
         {/* Table */}
         <div className="mx-6 mt-4 bg-white rounded-xl border overflow-hidden" style={{ borderColor: '#D5E8F5' }}>
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #D5E8F5' }}>
-                {['#', 'Fournisseur', 'N° Facture', 'Date', 'Montant TTC', 'Catégorie', 'Flags', 'Actions'].map(h => (
+                {['#', 'Fournisseur', 'N° Facture', 'Date', 'Montant TTC', 'Catégorie', 'Raison IA', 'Flags', 'Actions'].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold uppercase" style={{ color: '#5D6D7E' }}>{h}</th>
                 ))}
               </tr>
@@ -185,6 +176,18 @@ export default function ReviewQueue() {
                       {item.amount_ttc != null ? formatTND(item.amount_ttc) : '—'}
                     </td>
                     <td className="px-4 py-3" style={{ color: '#5D6D7E' }}>{item.accounting_label ?? '—'}</td>
+                    <td className="px-4 py-3" style={{ maxWidth: 180 }}>
+                      {item.classification_reason ? (
+                        <span
+                          className="text-[10px] text-purple-700 line-clamp-2 cursor-help"
+                          title={item.classification_reason}
+                        >
+                          🤖 {item.classification_reason}
+                        </span>
+                      ) : (
+                        <span className="text-[10px]" style={{ color: '#C8D8E8' }}>—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-0.5">
                         {(item.flags ?? []).filter(f => !f.resolved).map((f, fi) => (

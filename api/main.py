@@ -17,14 +17,16 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from api.auth import SECRET, get_current_user
+from api.auth import SECRET, get_current_user, validate_demo_users
 from api.limiter import limiter
+from api.security.security_headers import SecurityHeadersMiddleware
 
 _log = logging.getLogger(__name__)
 
 from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications, projects
 from api.routers import auth as auth_router
-from api.routers import admin, users, roadmap, projet_budget, livrables, audit
+from api.routers import admin, users, roadmap, projet_budget, livrables, audit, risks, security as security_router
+from api.routers import ai as ai_router
 
 _PROTECTED = [Depends(get_current_user)]
 
@@ -40,16 +42,23 @@ _TAGS: list[dict] = [
     {"name": "admin",          "description": "Gestion des utilisateurs et habilitations — ADMIN uniquement"},
     {"name": "analytics",      "description": "Tableaux de bord, KPIs, suivi de trésorerie, requêtes NL"},
     {"name": "notifications",  "description": "Notifications persistantes — alertes factures et budget"},
+    {"name": "risks",          "description": "Gestion des risques projet — matrice probabilité × impact"},
 ]
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     _startup()
+    from api.scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
     yield
+    stop_scheduler()
 
 
 def _startup() -> None:
+    # Validate demo user env vars
+    validate_demo_users()
+
     # Warn if JWT secret is below recommended minimum length for HMAC-SHA256
     if len(SECRET) < 32:
         _log.warning(
@@ -121,19 +130,27 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONR
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
-# CORS: allow Vite dev server origins only; in Docker the SPA is served
-# from the same origin so the wildcard is never needed in production.
-_CORS_ORIGINS = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:5174,http://localhost:4173",
-).split(",")
+# Security headers on all responses
+app.add_middleware(SecurityHeadersMiddleware)
+
+# CORS: restrict to known frontend origins only
+_CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:5174,http://localhost:4173",
+    ).split(",")
+    if o.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    expose_headers=["X-Total-Count", "X-Request-ID"],
+    max_age=600,
 )
 
 
@@ -159,11 +176,50 @@ app.include_router(projet_budget.router,   prefix="/api", dependencies=_PROTECTE
 app.include_router(livrables.router,       prefix="/api", dependencies=_PROTECTED)
 app.include_router(audit.router,           prefix="/api", dependencies=_PROTECTED)
 app.include_router(kpi.analytics_router,   prefix="/api", dependencies=_PROTECTED)
+app.include_router(risks.router,            prefix="/api", dependencies=_PROTECTED)
+app.include_router(ai_router.router,        prefix="/api", dependencies=_PROTECTED)
+app.include_router(security_router.router,  prefix="/api", dependencies=_PROTECTED)
 
 
-@app.get("/api/health")
+@app.get("/api/health", tags=["admin"])
 def health():
-    return {"status": "ok", "service": "biat-billing-api"}
+    from datetime import datetime, timezone
+    status = "ok"
+    components: dict = {}
+
+    # Database check
+    try:
+        from api.deps import get_engine
+        from sqlalchemy import text
+        engine = get_engine()
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        components["database"] = "ok"
+    except Exception:
+        components["database"] = "error"
+        status = "degraded"
+
+    # Ollama check
+    try:
+        from src.ai_agents.ollama_client import OllamaClient
+        components["ollama"] = "ok" if OllamaClient.get().is_available() else "unavailable"
+    except Exception:
+        components["ollama"] = "unavailable"
+
+    # Scheduler check
+    try:
+        from api.scheduler import get_scheduler
+        sched = get_scheduler()
+        components["scheduler"] = "ok" if (sched and sched.running) else "stopped"
+    except Exception:
+        components["scheduler"] = "unknown"
+
+    return {
+        "status": status,
+        "version": "1.0.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "components": components,
+    }
 
 
 # ── Serve React SPA (production / Docker) ─────────────────────────────────────

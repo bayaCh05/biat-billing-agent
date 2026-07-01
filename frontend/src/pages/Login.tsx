@@ -1,43 +1,23 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { BarChart2, FolderOpen, TrendingUp, ShieldCheck } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth, roleHome, type UserRole } from '../context/AuthContext'
 import { apiLogin } from '../api/client'
-
-const DEMO_CREDENTIALS: Record<UserRole, { email: string; password: string; pages: string }> = {
-  'Comptable':      { email: 'comptable@biat-it.tn',  password: 'biat2026',  pages: 'Factures, Journal, Grand Livre, Révision' },
-  'Chef de Projet': { email: 'chef@biat-it.tn',       password: 'biat2026',  pages: 'Projets, Facturation, Budget, Roadmap' },
-  'Direction':      { email: 'directeur@biat-it.tn',  password: 'biat2026',  pages: 'Direction, KPI, Budget, CAPEX' },
-  'Admin':          { email: 'admin@biat-it.tn',       password: 'admin2026', pages: 'Gestion utilisateurs, Habilitations' },
-}
-
-const roles: { id: UserRole; label: string; sub: string; icon: React.ReactNode }[] = [
-  { id: 'Comptable',      label: 'Comptable',      sub: 'Factures & Journal', icon: <BarChart2 size={16} /> },
-  { id: 'Chef de Projet', label: 'Chef de Projet', sub: 'Billing & Budget',   icon: <FolderOpen size={16} /> },
-  { id: 'Direction',      label: 'Direction',      sub: 'KPIs & Tableaux',    icon: <TrendingUp size={16} /> },
-  { id: 'Admin',          label: 'Admin',          sub: 'Gestion & Accès',    icon: <ShieldCheck size={16} /> },
-]
 
 export default function Login() {
   const { loginWithToken } = useAuth()
   const navigate = useNavigate()
-  const [selectedRole, setSelectedRole] = useState<UserRole>('Comptable')
-  const [customEmail, setCustomEmail] = useState('')
+  const [email, setEmail]     = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  const selectRole = (r: UserRole) => { setSelectedRole(r); setCustomEmail(''); setError('') }
+  const [error, setError]     = useState('')
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    if (!email.trim() || !password) return setError('Veuillez remplir tous les champs.')
     setLoading(true)
-    const creds = DEMO_CREDENTIALS[selectedRole]
-    const email = customEmail.trim() || creds.email
-    const pw = password || creds.password
     try {
-      const { access_token, role, force_password_change } = await apiLogin(email, pw)
+      const { access_token, role, force_password_change } = await apiLogin(email.trim(), password)
       loginWithToken(access_token, role as UserRole, force_password_change)
       if (force_password_change) {
         navigate('/changer-mot-de-passe')
@@ -45,7 +25,7 @@ export default function Login() {
         navigate(roleHome(role as UserRole))
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erreur de connexion.')
+      setError(err instanceof Error ? err.message : 'Identifiants incorrects.')
     } finally {
       setLoading(false)
     }
@@ -58,26 +38,16 @@ export default function Login() {
         className="relative flex flex-col justify-center px-12 overflow-hidden"
         style={{ width: '40%', background: '#1A3A5C', flexShrink: 0 }}
       >
-        {/* Decorative circles */}
-        <div
-          className="absolute rounded-full"
-          style={{ width: 320, height: 320, bottom: -96, left: -96, border: '1px solid rgba(255,255,255,0.08)' }}
-        />
-        <div
-          className="absolute rounded-full"
-          style={{ width: 220, height: 220, top: -64, right: -64, border: '1px solid rgba(255,255,255,0.08)' }}
-        />
-        <div
-          className="absolute rounded-full"
-          style={{ width: 120, height: 120, bottom: 96, right: 32, border: '1px solid rgba(255,255,255,0.06)' }}
-        />
+        <div className="absolute rounded-full"
+          style={{ width: 320, height: 320, bottom: -96, left: -96, border: '1px solid rgba(255,255,255,0.08)' }} />
+        <div className="absolute rounded-full"
+          style={{ width: 220, height: 220, top: -64, right: -64, border: '1px solid rgba(255,255,255,0.08)' }} />
+        <div className="absolute rounded-full"
+          style={{ width: 120, height: 120, bottom: 96, right: 32, border: '1px solid rgba(255,255,255,0.06)' }} />
 
         <div className="relative z-10 flex flex-col gap-5">
-          {/* Logo box */}
-          <div
-            className="flex flex-col items-center justify-center gap-1.5 rounded-xl"
-            style={{ width: 56, height: 56, background: '#14293F' }}
-          >
+          <div className="flex flex-col items-center justify-center gap-1.5 rounded-xl"
+            style={{ width: 56, height: 56, background: '#14293F' }}>
             <div className="rounded-full" style={{ width: 20, height: 3, background: '#5BA3C9' }} />
             <div className="rounded-full" style={{ width: 14, height: 3, background: '#F0A600' }} />
           </div>
@@ -98,107 +68,86 @@ export default function Login() {
           <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.55)', maxWidth: 280 }}>
             Traitement automatisé des factures fournisseurs et facturation client pour BIAT IT, Tunisie.
           </p>
+
+          {/* Demo hint */}
+          <div className="rounded-xl p-4 mt-2" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <p className="text-xs font-semibold mb-2" style={{ color: '#F0A600' }}>Comptes démo</p>
+            {[
+              { role: 'Comptable',      email: 'comptable@biat-it.tn' },
+              { role: 'Chef de Projet', email: 'chef@biat-it.tn' },
+              { role: 'Direction',      email: 'directeur@biat-it.tn' },
+              { role: 'Admin',          email: 'admin@biat-it.tn' },
+            ].map(d => (
+              <button
+                key={d.role}
+                type="button"
+                onClick={() => setEmail(d.email)}
+                className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-white/10 transition-all"
+                style={{ color: 'rgba(255,255,255,0.7)' }}
+              >
+                <span style={{ color: '#5BA3C9' }}>{d.role}</span>
+                {' — '}{d.email}
+              </button>
+            ))}
+            <p className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.4)' }}>
+              Mot de passe défini dans DEMO_*_PASSWORD (.env)
+            </p>
+          </div>
         </div>
       </div>
 
       {/* ── Right login panel ── */}
-      <div
-        className="flex flex-1 items-center justify-center p-8"
-        style={{ background: '#F0F4F9' }}
-      >
-        <div
-          className="w-full rounded-2xl bg-white p-10"
-          style={{ maxWidth: 420, boxShadow: '0 4px 24px rgba(26,58,92,0.10)' }}
-        >
+      <div className="flex flex-1 items-center justify-center p-8" style={{ background: '#F0F4F9' }}>
+        <div className="w-full rounded-2xl bg-white p-10" style={{ maxWidth: 400, boxShadow: '0 4px 24px rgba(26,58,92,0.10)' }}>
           <h2 className="text-2xl font-bold mb-1" style={{ color: '#1A1A2E' }}>Connexion</h2>
-          <p className="text-sm mb-7" style={{ color: '#5D6D7E' }}>Accédez à votre espace de gestion</p>
+          <p className="text-sm mb-8" style={{ color: '#5D6D7E' }}>Accédez à votre espace de gestion</p>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {/* Role selector */}
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-medium" style={{ color: '#374151' }}>Votre rôle</label>
-              <div className="grid grid-cols-2 gap-2">
-                {roles.map(r => {
-                  const active = selectedRole === r.id
-                  return (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => selectRole(r.id)}
-                      className="flex flex-col items-center gap-1.5 rounded-xl p-3 text-center transition-all"
-                      style={{
-                        border: active ? '2px solid #1A3A5C' : '1px solid #D5E8F5',
-                        background: active ? '#F5F8FC' : '#fff',
-                      }}
-                    >
-                      <div
-                        className="flex items-center justify-center rounded-lg"
-                        style={{
-                          width: 32, height: 32,
-                          background: active ? '#EFF4FA' : '#F8FAFC',
-                          color: active ? '#1A3A5C' : '#5D6D7E',
-                        }}
-                      >
-                        {r.icon}
-                      </div>
-                      <span className="text-xs font-semibold leading-tight" style={{ color: active ? '#1A3A5C' : '#1A1A2E' }}>
-                        {r.label}
-                      </span>
-                      <span className="text-[10px] leading-tight" style={{ color: '#9BAFBF' }}>
-                        {r.sub}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Email */}
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium" style={{ color: '#374151' }}>Adresse email</label>
               <input
                 type="email"
-                value={customEmail || DEMO_CREDENTIALS[selectedRole].email}
-                onChange={e => setCustomEmail(e.target.value)}
+                autoComplete="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
                 className="rounded-lg border px-3 py-2.5 text-sm outline-none transition-all w-full"
                 style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
-                onFocus={e => {
-                  if (!customEmail) setCustomEmail(DEMO_CREDENTIALS[selectedRole].email)
-                  e.target.style.borderColor = '#5BA3C9'
-                }}
+                onFocus={e => (e.target.style.borderColor = '#5BA3C9')}
                 onBlur={e => (e.target.style.borderColor = '#D5E8F5')}
+                placeholder="vous@biat-it.tn"
               />
             </div>
 
-            {/* Password */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium" style={{ color: '#374151' }}>Mot de passe</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium" style={{ color: '#374151' }}>Mot de passe</label>
+                <Link
+                  to="/forgot-password"
+                  className="text-xs hover:underline"
+                  style={{ color: '#5BA3C9' }}
+                >
+                  Mot de passe oublié ?
+                </Link>
+              </div>
               <input
                 type="password"
-                placeholder="biat2026"
+                autoComplete="current-password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 className="rounded-lg border px-3 py-2.5 text-sm outline-none transition-all w-full"
                 style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}
                 onFocus={e => (e.target.style.borderColor = '#5BA3C9')}
                 onBlur={e => (e.target.style.borderColor = '#D5E8F5')}
+                placeholder="••••••••"
               />
             </div>
 
-            {/* Access hint */}
-            <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: '#EFF4FA', color: '#1A3A5C' }}>
-              <span className="font-semibold">Accès {selectedRole} :</span>{' '}
-              {DEMO_CREDENTIALS[selectedRole].pages}
-              {!customEmail && (
-                <span className="ml-1 opacity-60">· mot de passe : <code>{DEMO_CREDENTIALS[selectedRole].password}</code></span>
-              )}
-            </div>
-
             {error && (
-              <p className="text-xs text-center py-1" style={{ color: '#C0391B' }}>{error}</p>
+              <div className="rounded-lg px-3 py-2.5 text-sm" style={{ background: '#FEF0EE', color: '#C0391B' }}>
+                {error}
+              </div>
             )}
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={loading}
@@ -210,7 +159,7 @@ export default function Login() {
           </form>
 
           <p className="text-xs text-center mt-6" style={{ color: '#9BAFBF' }}>
-            © 2026 BIAT Innovation &amp; Technology — Système sécurisé · Démo
+            © 2026 BIAT Innovation &amp; Technology — Système sécurisé
           </p>
         </div>
       </div>

@@ -36,7 +36,8 @@ class AssetORM(Base):
     acquisition_cost_ht: Mapped[float] = mapped_column(Float, nullable=False)
     useful_life_years: Mapped[int] = mapped_column(Integer, nullable=False)
     depreciation_method: Mapped[str] = mapped_column(String(16), default="linear")
-    supplier_invoice_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    supplier_invoice_id: Mapped[str | None] = mapped_column(Text)
+    amortization_source: Mapped[str | None] = mapped_column(String(16))
     notes: Mapped[str] = mapped_column(Text, default="")
     fully_depreciated: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
@@ -148,6 +149,9 @@ class AssetRepository:
 
     @staticmethod
     def _to_orm(asset: Asset) -> AssetORM:
+        supplier_id = asset.supplier_invoice_id
+        if supplier_id is not None:
+            supplier_id = str(supplier_id)
         return AssetORM(
             id=asset.id,
             designation=asset.designation,
@@ -157,7 +161,8 @@ class AssetRepository:
             acquisition_cost_ht=asset.acquisition_cost_ht,
             useful_life_years=asset.useful_life_years,
             depreciation_method=asset.depreciation_method,
-            supplier_invoice_id=asset.supplier_invoice_id,
+            supplier_invoice_id=supplier_id,
+            amortization_source=asset.amortization_source,
             notes=asset.notes,
             created_at=asset.created_at,
         )
@@ -171,7 +176,9 @@ class AssetRepository:
         orm.acquisition_cost_ht = asset.acquisition_cost_ht
         orm.useful_life_years = asset.useful_life_years
         orm.depreciation_method = asset.depreciation_method
-        orm.supplier_invoice_id = asset.supplier_invoice_id
+        supplier_id = asset.supplier_invoice_id
+        orm.supplier_invoice_id = str(supplier_id) if supplier_id is not None else None
+        orm.amortization_source = asset.amortization_source
         orm.notes = asset.notes
 
     @staticmethod
@@ -186,6 +193,7 @@ class AssetRepository:
             useful_life_years=orm.useful_life_years,
             depreciation_method=orm.depreciation_method,
             supplier_invoice_id=orm.supplier_invoice_id,
+            amortization_source=orm.amortization_source,
             notes=orm.notes or "",
             created_at=orm.created_at or datetime.utcnow(),
         )

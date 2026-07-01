@@ -24,6 +24,8 @@ from src.storage.orm_models_audit import AuditLogORM
 
 def log_action(session: Session, entry: AuditLogCreate) -> None:
     """Append one audit entry to the session (does not commit)."""
+    from api.security.audit_integrity import compute_row_hash
+
     row = AuditLogORM(
         user_id=entry.user_id,
         user_email=entry.user_email,
@@ -40,6 +42,7 @@ def log_action(session: Session, entry: AuditLogCreate) -> None:
         status=entry.status,
         detail=entry.detail,
     )
+    row.row_hash = compute_row_hash(row)
     session.add(row)
 
 

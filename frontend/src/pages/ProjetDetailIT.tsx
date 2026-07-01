@@ -5,12 +5,30 @@ import PageHeader from '../components/ui/PageHeader'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import { useAuth } from '../context/AuthContext'
-import type { Project, ProjectPhase, LigneBudget, BudgetSynthese, Livrable } from '../types'
+import type { Project, ProjectPhase, LigneBudget, BudgetSynthese, Livrable, Risk, NiveauCriticite } from '../types'
 import {
   getProject, listProjectPhases,
   listProjetBudget, createLigneBudget, deleteLigneBudget, getBudgetSynthese,
   listLivrables, createLivrable, updateLivrable, validerPhase,
+  getRisksForProject,
 } from '../api/endpoints'
+
+const CRITICITE_COLOR: Record<NiveauCriticite, string> = {
+  FAIBLE:   '#1D9E76',
+  MOYENNE:  '#F0A500',
+  ELEVEE:   '#E67E22',
+  CRITIQUE: '#C0391B',
+}
+const CRITICITE_BG: Record<NiveauCriticite, string> = {
+  FAIBLE:   '#E6F9F3',
+  MOYENNE:  '#FEF9E7',
+  ELEVEE:   '#FDF2E9',
+  CRITIQUE: '#FDEDEC',
+}
+const STATUT_RISQUE_LABEL: Record<string, string> = {
+  IDENTIFIE: 'Identifié', EN_SURVEILLANCE: 'Surveillance', EN_TRAITEMENT: 'Traitement',
+  MAITRISE: 'Maîtrisé', SURVENU: 'Survenu', CLOTURE: 'Clôturé',
+}
 import { formatTND } from '../utils/formatters'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -56,11 +74,12 @@ export default function ProjetDetailIT() {
   const { role } = useAuth()
   const canEdit = ['Chef de Projet', 'Admin'].includes(role)
 
-  const [tab, setTab] = useState<'phases' | 'budget'>('phases')
+  const [tab, setTab] = useState<'phases' | 'budget' | 'risques'>('phases')
   const [project, setProject] = useState<Project | null>(null)
   const [phases, setPhases] = useState<ProjectPhase[]>([])
   const [budgetLines, setBudgetLines] = useState<LigneBudget[]>([])
   const [synthese, setSynthese] = useState<BudgetSynthese | null>(null)
+  const [risks, setRisks] = useState<Risk[]>([])
   const [loading, setLoading] = useState(true)
 
   // Livrables per phase (keyed by phase id)
@@ -84,9 +103,9 @@ export default function ProjetDetailIT() {
   useEffect(() => {
     if (!id) return
     setLoading(true)
-    Promise.all([getProject(id), listProjectPhases(id), listProjetBudget(id), getBudgetSynthese(id)])
-      .then(([proj, ph, budget, syn]) => {
-        setProject(proj); setPhases(ph); setBudgetLines(budget); setSynthese(syn)
+    Promise.all([getProject(id), listProjectPhases(id), listProjetBudget(id), getBudgetSynthese(id), getRisksForProject(id).catch(() => [])])
+      .then(([proj, ph, budget, syn, rs]) => {
+        setProject(proj); setPhases(ph); setBudgetLines(budget); setSynthese(syn); setRisks(rs as Risk[])
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -195,7 +214,7 @@ export default function ProjetDetailIT() {
 
       {/* Tabs */}
       <div className="flex gap-0 px-6 pt-5 border-b" style={{ borderColor: '#E2EBF3' }}>
-        {(['phases', 'budget'] as const).map(t => (
+        {(['phases', 'budget', 'risques'] as const).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -205,7 +224,7 @@ export default function ProjetDetailIT() {
               color: tab === t ? '#1A3A5C' : '#5D6D7E',
             }}
           >
-            {t === 'phases' ? 'Phases & Livrables' : 'Budget'}
+            {t === 'phases' ? 'Phases & Livrables' : t === 'budget' ? 'Budget' : `Risques${risks.length > 0 ? ` (${risks.length})` : ''}`}
           </button>
         ))}
       </div>
@@ -363,6 +382,48 @@ export default function ProjetDetailIT() {
               )}
             </Card>
           </>
+        )}
+
+        {/* ── RISQUES TAB ────────────────────────────────────────────────────── */}
+        {tab === 'risques' && (
+          risks.length === 0 ? (
+            <Card>
+              <p className="text-sm text-center py-10" style={{ color: '#5D6D7E' }}>Aucun risque enregistré pour ce projet.</p>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {risks.map(r => (
+                <Card key={r.id}>
+                  <div className="flex items-start gap-3">
+                    <span
+                      className="shrink-0 text-xs font-bold px-2 py-1 rounded-full mt-0.5"
+                      style={{
+                        color: CRITICITE_COLOR[r.niveau_criticite as NiveauCriticite],
+                        background: CRITICITE_BG[r.niveau_criticite as NiveauCriticite],
+                      }}
+                    >
+                      {r.niveau_criticite}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: '#1A3A5C' }}>{r.titre}</p>
+                      {r.description && <p className="text-xs mt-0.5" style={{ color: '#5D6D7E' }}>{r.description}</p>}
+                      <div className="flex items-center gap-3 mt-1.5 text-xs" style={{ color: '#5D6D7E' }}>
+                        <span>P: {r.probabilite}</span>
+                        <span>I: {r.impact}</span>
+                        <span>{STATUT_RISQUE_LABEL[r.statut] ?? r.statut}</span>
+                        {r.date_echeance_mitigation && <span>Échéance: {r.date_echeance_mitigation}</span>}
+                      </div>
+                      {r.plan_mitigation && (
+                        <p className="text-xs mt-1.5 p-2 rounded" style={{ background: '#F5F8FC', color: '#374151' }}>
+                          Mitigation: {r.plan_mitigation}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )
         )}
       </div>
 

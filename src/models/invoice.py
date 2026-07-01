@@ -86,6 +86,11 @@ class InvoiceRecord(BaseModel):
     matched_contract_id: str | None = None
     matched_client_id: str | None = None
 
+    # ── AI classification metadata ─────────────────────────────────────────────
+    payment_term_days: int | None = None
+    classification_reason: str | None = None
+    classification_pass: str | None = None
+
     # ── Validation ─────────────────────────────────────────────────────────────
     flags: list[ValidationFlag] = Field(default_factory=list)
     human_review_required: bool = False

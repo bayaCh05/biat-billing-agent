@@ -173,7 +173,7 @@ export default function AuditPage() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-900">Piste d'Audit</h1>
-            <p className="text-xs text-gray-500">Journal de conformité BCT — inaltérable et infalsifiable</p>
+            <p className="text-xs text-gray-500">Journal d'audit interne — inaltérable et infalsifiable</p>
           </div>
         </div>
         <div className="flex items-center gap-2">

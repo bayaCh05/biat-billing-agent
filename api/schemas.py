@@ -54,6 +54,10 @@ class InvoiceOut(BaseModel):
     human_review_required: bool
     received_at: datetime
     line_items: list[LineItemOut]
+    # AI classification metadata
+    classification_reason: str | None = None
+    classification_pass: str | None = None
+    payment_term_days: int | None = None
 
     @classmethod
     def from_record(cls, inv: InvoiceRecord) -> "InvoiceOut":
@@ -103,6 +107,9 @@ class InvoiceOut(BaseModel):
                 )
                 for li in inv.line_items
             ],
+            classification_reason=getattr(inv, "classification_reason", None),
+            classification_pass=getattr(inv, "classification_pass", None),
+            payment_term_days=getattr(inv, "payment_term_days", None),
         )
 
 
@@ -125,6 +132,9 @@ class InvoiceSummary(BaseModel):
     human_review_required: bool
     has_errors: bool
     received_at: datetime
+    classification_reason: str | None = None
+    classification_pass: str | None = None
+    payment_term_days: int | None = None
 
     @classmethod
     def from_record(cls, inv: InvoiceRecord) -> "InvoiceSummary":
@@ -156,6 +166,9 @@ class InvoiceSummary(BaseModel):
             human_review_required=inv.human_review_required,
             has_errors=inv.has_errors,
             received_at=inv.received_at,
+            classification_reason=getattr(inv, "classification_reason", None),
+            classification_pass=getattr(inv, "classification_pass", None),
+            payment_term_days=getattr(inv, "payment_term_days", None),
         )
 
 
@@ -181,6 +194,7 @@ class JournalEntryOut(BaseModel):
     description: str
     lines: list[JournalLineOut]
     source_invoice_id: str | None
+    accounting_explanation: str | None = None
 
 
 # ── Budget ────────────────────────────────────────────────────────────────────

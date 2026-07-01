@@ -167,11 +167,11 @@ export default function KPIDashboard() {
       name: '🔴 Taux d\'erreur extraction',
       value: errorRate, unit: '%',
       trend: '↓ −1.1pp vs M-1', trendType: 'up',
-      sub: 'Factures avec flag ERROR ou EXTRACTION_FAILED. Objectif ≤ 5%.',
+      sub: 'Factures en erreur ou dont l\'extraction OCR a échoué. Objectif ≤ 5%.',
       sparkHeights: [28, 26, 24, 20, 18, 12], sparkColor: '#1D9E76',
       footer: [
         { label: 'Erreurs ce mois', val: String(errorCount) },
-        { label: 'Dont EXTRACTION_FAILED', val: String(failedCount) },
+        { label: 'Dont extraction OCR échouée', val: String(failedCount) },
       ],
     },
     {

@@ -80,6 +80,10 @@ class InvoiceORM(Base):
     matched_po_id: Mapped[str | None] = mapped_column(Text)
     matched_contract_id: Mapped[str | None] = mapped_column(Text)
     matched_client_id: Mapped[str | None] = mapped_column(Text)
+    # AI-populated fields
+    payment_term_days: Mapped[int | None] = mapped_column(Integer)
+    classification_reason: Mapped[str | None] = mapped_column(Text)
+    classification_pass: Mapped[str | None] = mapped_column(String(32))
 
     # ── Human review ──────────────────────────────────────────────────────────
     human_review_required: Mapped[bool] = mapped_column(Boolean, default=False)

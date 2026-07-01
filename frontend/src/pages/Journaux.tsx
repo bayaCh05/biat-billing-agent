@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Download } from 'lucide-react'
+import { Download, Bot } from 'lucide-react'
 import type { JournalEntry } from '../types'
 import { listJournal } from '../api/endpoints'
 import { formatTND } from '../utils/formatters'
@@ -110,11 +110,24 @@ export default function Journaux() {
         </select>
         <div className="flex-1" />
         <button
+          onClick={() => {
+            const header = 'Date;Référence;Description;Compte;Libellé;Débit (TND);Crédit (TND)'
+            const rows = entries.flatMap(e => e.lines.map(l => {
+              const [y, m, d] = e.date_ecriture.split('-')
+              return [`${d}/${m}/${y}`, e.reference, `"${e.description}"`, l.compte, l.libelle, l.debit.toFixed(3), l.credit.toFixed(3)].join(';')
+            }))
+            const csv = [header, ...rows].join('\n')
+            const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a'); a.href = url
+            a.download = `journal_${new Date().toISOString().slice(0, 10)}.csv`
+            a.click(); URL.revokeObjectURL(url)
+          }}
           className="flex items-center gap-1.5 text-xs font-semibold text-white px-4 py-2 rounded-lg"
           style={{ background: '#1A3A5C' }}
         >
           <Download size={13} />
-          Exporter FEC
+          Exporter Journal (.csv)
         </button>
       </div>
 
@@ -157,6 +170,9 @@ export default function Journaux() {
           const lineToRef = new Map(
             dayEntries.flatMap(e => e.lines.map(l => [l, e.reference]))
           )
+          const lineToExplanation = new Map(
+            dayEntries.flatMap(e => e.lines.map(l => [l, e.accounting_explanation ?? null]))
+          )
 
           return (
             <div key={date} className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: '#D5E8F5' }}>
@@ -187,7 +203,18 @@ export default function Journaux() {
                       </td>
                       <td className="px-4 py-2.5 text-sm" style={{ color: '#1A1A2E' }}>{line.libelle}</td>
                       <td className="px-4 py-2.5 text-xs font-mono" style={{ color: '#5D6D7E' }}>
-                        {lineToRef.get(line) ?? ''}
+                        <span className="flex items-center gap-1.5">
+                          {lineToRef.get(line) ?? ''}
+                          {lineToExplanation.get(line) && (
+                            <span
+                              title={lineToExplanation.get(line) ?? ''}
+                              className="cursor-help shrink-0"
+                              style={{ color: '#804CD7' }}
+                            >
+                              <Bot size={11} />
+                            </span>
+                          )}
+                        </span>
                       </td>
                       <td className="px-4 py-2.5 text-sm font-medium text-right" style={{ color: '#1A1A2E' }}>
                         {line.debit > 0 ? line.debit.toLocaleString('fr-TN', { minimumFractionDigits: 3 }) : ''}

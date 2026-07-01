@@ -4,21 +4,54 @@ const BASE = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
   : '/api'
 
-const TOKEN_KEY = 'biat_token'
+// Token stored in memory only — never written to localStorage for security.
+// Role + name are still persisted to localStorage for UX (surviving hard refresh).
+let _accessToken: string | null = null
+let _refreshing: Promise<string | null> | null = null
 
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
-}
-export function saveToken(t: string): void {
-  localStorage.setItem(TOKEN_KEY, t)
-}
+export function getToken(): string | null { return _accessToken }
+
+export function saveToken(t: string): void { _accessToken = t }
+
 export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY)
+  _accessToken = null
   localStorage.removeItem('biat_role')
 }
 
-function authHeaders(): Record<string, string> {
-  const token = getToken()
+function decodeExp(token: string): number {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof payload.exp === 'number' ? payload.exp : 0
+  } catch { return 0 }
+}
+
+async function tryRefresh(): Promise<string | null> {
+  if (_refreshing) return _refreshing
+  _refreshing = (async () => {
+    try {
+      const res = await fetch(`${BASE}/auth/refresh`, { method: 'POST', credentials: 'include' })
+      if (!res.ok) return null
+      const data = await res.json()
+      if (data.access_token) { _accessToken = data.access_token; return data.access_token }
+      return null
+    } catch { return null }
+    finally { _refreshing = null }
+  })()
+  return _refreshing
+}
+
+async function getValidToken(): Promise<string | null> {
+  if (!_accessToken) return null
+  // Refresh proactively if token expires in < 5 min
+  const exp = decodeExp(_accessToken)
+  if (exp && exp - Date.now() / 1000 < 300) {
+    const fresh = await tryRefresh()
+    return fresh ?? _accessToken
+  }
+  return _accessToken
+}
+
+function authHeaders(token: string | null): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
@@ -29,8 +62,9 @@ function handle401(): never {
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = await getValidToken()
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...init?.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token), ...init?.headers },
     ...init,
   })
   if (res.status === 401) return handle401()
@@ -43,8 +77,9 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
 /** Fetch a binary response (e.g. ZIP download) and trigger a browser download. */
 export async function apiBlobFetch(path: string, filename: string, init?: RequestInit): Promise<void> {
+  const token = await getValidToken()
   const res = await fetch(`${BASE}${path}`, {
-    headers: authHeaders(),
+    headers: authHeaders(token),
     ...init,
   })
   if (res.status === 401) return handle401()
@@ -63,9 +98,10 @@ export async function apiBlobFetch(path: string, filename: string, init?: Reques
 
 /** POST a FormData and return JSON — used for file upload endpoints. */
 export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const token = await getValidToken()
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: authHeaders(),
+    headers: authHeaders(token),
     body: formData,
   })
   if (res.status === 401) return handle401()
@@ -76,7 +112,7 @@ export async function apiUpload<T>(path: string, formData: FormData): Promise<T>
   return res.json() as Promise<T>
 }
 
-export async function apiLogin(email: string, password: string): Promise<{ access_token: string; role: string; force_password_change: boolean }> {
+export async function apiLogin(email: string, password: string): Promise<{ access_token: string; role: string; force_password_change: boolean; user_id?: string; expires_in?: number }> {
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

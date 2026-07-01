@@ -40,12 +40,17 @@ function daysSince(dateStr: string): number {
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86_400_000)
 }
 
-const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
-  EXPORTED:  { bg: '#E3F0F9', color: '#1A3A5C' },
-  PAID:      { bg: '#E8F5F0', color: '#1D9E76' },
-  COLLECTED: { bg: '#E8F5F0', color: '#1D9E76' },
-  FLAGGED:   { bg: '#FEF0EE', color: '#C0391B' },
-  VALIDATED: { bg: '#FFF8E8', color: '#F0A600' },
+const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
+  EXPORTED:    { bg: '#E3F0F9', color: '#1A3A5C', label: 'Exportée' },
+  JOURNALED:   { bg: '#E8F5F0', color: '#0D6E52', label: 'Journalisée' },
+  PAID:        { bg: '#E8F5F0', color: '#1D9E76', label: 'Payée' },
+  COLLECTED:   { bg: '#E8F5F0', color: '#1D9E76', label: 'Encaissée' },
+  FLAGGED:     { bg: '#FEF0EE', color: '#C0391B', label: 'Signalée' },
+  VALIDATED:   { bg: '#FFF8E8', color: '#F0A600', label: 'Validée' },
+  REJECTED:    { bg: '#FDECEA', color: '#C0391B', label: 'Rejetée' },
+  RECEIVED:    { bg: '#E3F0F9', color: '#1A3A5C', label: 'Reçue' },
+  EXTRACTED:   { bg: '#E3F0F9', color: '#1A3A5C', label: 'Extraite' },
+  CLASSIFIED:  { bg: '#E3F0F9', color: '#1A3A5C', label: 'Classifiée' },
 }
 
 function InvoiceTable({ rows }: { rows: InvoiceSummary[] }) {
@@ -61,7 +66,7 @@ function InvoiceTable({ rows }: { rows: InvoiceSummary[] }) {
   return (
     <>
       {rows.map(inv => {
-        const st = STATUS_STYLE[inv.status] ?? { bg: '#F0F4F9', color: '#5D6D7E' }
+        const st = STATUS_STYLE[inv.status] ?? { bg: '#F0F4F9', color: '#5D6D7E', label: inv.status }
         const days = daysSince(inv.received_at)
         return (
           <tr key={inv.id} style={{ borderBottom: '1px solid #F0F4F9' }}>
@@ -70,7 +75,7 @@ function InvoiceTable({ rows }: { rows: InvoiceSummary[] }) {
             <td style={{ padding: '10px 14px', fontSize: 12, color: '#5D6D7E' }}>{formatDate(inv.invoice_date)}</td>
             <td style={{ padding: '10px 14px', fontSize: 13, fontWeight: 600, textAlign: 'right' }}>{formatTND(inv.amount_ttc)}</td>
             <td style={{ padding: '10px 14px' }}>
-              <span style={{ padding: '3px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>{inv.status}</span>
+              <span style={{ padding: '3px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>{st.label}</span>
             </td>
             <td style={{ padding: '10px 14px', fontSize: 12, color: days > 60 ? '#C0391B' : days > 30 ? '#F0A600' : '#5D6D7E', fontWeight: days > 30 ? 600 : 400 }}>
               {days}j

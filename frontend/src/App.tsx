@@ -19,6 +19,11 @@ import ProjetDetailIT from './pages/ProjetDetailIT'
 import Profile from './pages/Profile'
 import ChangerMotDePassePage from './pages/ChangerMotDePassePage'
 import RoadmapPage from './pages/RoadmapPage'
+import RisksPage from './pages/RisksPage'
+import AIActivityPage from './pages/AIActivityPage'
+import SecurityPage from './pages/SecurityPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import InscriptionPage from './pages/admin/InscriptionPage'
 import HabilitationsPage from './pages/admin/HabilitationsPage'
 import AuditPage from './pages/AuditPage'
@@ -63,6 +68,8 @@ export default function App() {
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/changer-mot-de-passe" element={<ChangerMotDePassePage />} />
         <Route element={<Layout />}>
           <Route element={<AuthGuard />}>
@@ -87,6 +94,9 @@ export default function App() {
                 <Route path="/projects/:id"   element={<ProjetDetail />} />
                 <Route path="/projets-it/:id" element={<ProjetDetailIT />} />
                 <Route path="/roadmap"        element={<RoadmapPage />} />
+                <Route path="/risques"        element={<RisksPage />} />
+                <Route path="/ai-activity"    element={<AIActivityPage />} />
+                <Route path="/security"       element={<SecurityPage />} />
                 <Route path="/audit"            element={<AuditPage />} />
                 <Route path="/notifications"    element={<NotificationsPage />} />
                 <Route path="/admin/inscription"   element={<InscriptionPage />} />

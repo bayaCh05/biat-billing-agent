@@ -64,6 +64,10 @@ export interface InvoiceSummary {
   human_review_required: boolean
   has_errors: boolean
   received_at: string
+  // AI fields
+  classification_reason?: string | null
+  classification_pass?: string | null
+  payment_term_days?: number | null
 }
 
 export type InvoiceStatus =
@@ -93,6 +97,7 @@ export interface JournalEntry {
   description: string
   lines: JournalLine[]
   source_invoice_id: string | null
+  accounting_explanation?: string | null
 }
 
 // ── Budget ────────────────────────────────────────────────────────────────────
@@ -375,4 +380,41 @@ export interface AuditLog {
   user_agent: string | null
   status: 'SUCCESS' | 'FAILURE'
   detail: string | null
+}
+
+// ── Risks ─────────────────────────────────────────────────────────────────────
+
+export type TypeRisque = 'DELAI' | 'BUDGET' | 'TECHNIQUE' | 'RESSOURCE' | 'FOURNISSEUR' | 'REGLEMENTAIRE' | 'AUTRE'
+export type Probabilite = 'FAIBLE' | 'MOYENNE' | 'ELEVEE'
+export type Impact = 'FAIBLE' | 'MOYEN' | 'ELEVE' | 'CRITIQUE'
+export type NiveauCriticite = 'FAIBLE' | 'MOYENNE' | 'ELEVEE' | 'CRITIQUE'
+export type StatutRisque = 'IDENTIFIE' | 'EN_SURVEILLANCE' | 'EN_TRAITEMENT' | 'MAITRISE' | 'SURVENU' | 'CLOTURE'
+
+export interface Risk {
+  id: string
+  titre: string
+  description: string
+  type_risque: TypeRisque
+  probabilite: Probabilite
+  impact: Impact
+  niveau_criticite: NiveauCriticite
+  statut: StatutRisque
+  plan_mitigation: string
+  responsable_id: string | null
+  date_identification: string
+  date_echeance_mitigation: string | null
+  date_cloture: string | null
+  feuille_route_id: string | null
+  projet_id: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RiskSummary {
+  by_criticite: Record<NiveauCriticite, number>
+  by_statut: Record<StatutRisque, number>
+  overdue: Array<{ id: string; titre: string; date_echeance_mitigation: string }>
+  top_critical: Array<{ id: string; titre: string; statut: string; projet_id: string | null }>
+  total_active: number
 }

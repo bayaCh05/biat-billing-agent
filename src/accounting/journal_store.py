@@ -49,6 +49,7 @@ class JournalEntryORM(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     source_invoice_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     source_asset_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    accounting_explanation: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
 
     lines: Mapped[list[JournalLineORM]] = relationship(
@@ -149,6 +150,7 @@ class JournalRepository:
             description=entry.description,
             source_invoice_id=entry.source_invoice_id,
             source_asset_id=entry.source_asset_id,
+            accounting_explanation=entry.accounting_explanation,
             created_at=entry.created_at,
         )
         orm.lines = self._build_line_orms(entry)
@@ -176,6 +178,7 @@ class JournalRepository:
             description=orm.description,
             source_invoice_id=orm.source_invoice_id,
             source_asset_id=orm.source_asset_id,
+            accounting_explanation=orm.accounting_explanation,
             created_at=orm.created_at or datetime.utcnow(),
             lines=[
                 JournalLine(

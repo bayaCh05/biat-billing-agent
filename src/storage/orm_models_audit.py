@@ -54,3 +54,6 @@ class AuditLogORM(Base):
 
     # ── Human-readable note ───────────────────────────────────────────────────
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Tamper detection ──────────────────────────────────────────────────────
+    row_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)

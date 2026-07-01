@@ -15,6 +15,7 @@ import type {
   BudgetPlanEntry,
   AccountSpendItem,
   AnalyticsKPIs,
+  Risk, RiskSummary,
 } from '../types'
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
@@ -274,7 +275,218 @@ export const listAuditLogs = (params: {
 export const getResourceHistory = (resourceType: string, resourceId: string) =>
   apiFetch<AuditLog[]>(`/audit/logs/${resourceType}/${resourceId}`)
 
+// ── Risks ─────────────────────────────────────────────────────────────────────
+
+export const listRisks = (params: {
+  projet_id?: string
+  feuille_route_id?: string
+  statut?: string
+  niveau_criticite?: string
+} = {}) => {
+  const q = new URLSearchParams()
+  if (params.projet_id)        q.set('projet_id', params.projet_id)
+  if (params.feuille_route_id) q.set('feuille_route_id', params.feuille_route_id)
+  if (params.statut)           q.set('statut', params.statut)
+  if (params.niveau_criticite) q.set('niveau_criticite', params.niveau_criticite)
+  const qs = q.toString()
+  return apiFetch<Risk[]>(`/risks${qs ? '?' + qs : ''}`)
+}
+
+export const getRiskSummary = () =>
+  apiFetch<RiskSummary>('/risks/summary')
+
+export const getRisksForRoadmap = (feuilleRouteId: string) =>
+  apiFetch<Risk[]>(`/risks/roadmap/${feuilleRouteId}`)
+
+export const getRisksForProject = (projetId: string) =>
+  apiFetch<Risk[]>(`/risks/projet/${projetId}`)
+
+export const createRisk = (body: {
+  titre: string
+  description?: string
+  type_risque?: string
+  probabilite: string
+  impact: string
+  statut?: string
+  plan_mitigation?: string
+  responsable_id?: string | null
+  date_identification: string
+  date_echeance_mitigation?: string | null
+  feuille_route_id?: string | null
+  projet_id?: string | null
+}) =>
+  apiFetch<Risk>('/risks', { method: 'POST', body: JSON.stringify(body) })
+
+export const updateRisk = (id: string, body: {
+  titre?: string
+  description?: string
+  type_risque?: string
+  probabilite?: string
+  impact?: string
+  statut?: string
+  plan_mitigation?: string
+  responsable_id?: string | null
+  date_echeance_mitigation?: string | null
+}) =>
+  apiFetch<Risk>(`/risks/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+
+export const closeRisk = (id: string) =>
+  apiFetch<void>(`/risks/${id}`, { method: 'DELETE' })
+
+// ── Password verification (OTP + reset link) ─────────────────────────────────
+
+export const requestOtp = (newPassword: string, currentPassword?: string) =>
+  apiFetch<{ message: string }>('/auth/change-password/request-otp', {
+    method: 'POST',
+    body: JSON.stringify({ new_password: newPassword, current_password: currentPassword ?? null }),
+  })
+
+export const confirmOtp = (otpCode: string, newPassword: string, currentPassword?: string) =>
+  apiFetch<{ success: boolean; message: string }>('/auth/change-password/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ otp_code: otpCode, new_password: newPassword, current_password: currentPassword ?? null }),
+  })
+
+export const forgotPassword = (email: string) =>
+  apiFetch<{ message: string }>('/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+
+export const resetPassword = (token: string, newPassword: string) =>
+  apiFetch<{ success: boolean; message: string }>('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token, new_password: newPassword }),
+  })
+
 // ── Health ────────────────────────────────────────────────────────────────────
 
 export const checkHealth = () =>
   apiFetch<{ status: string }>('/health')
+
+// ── AI ────────────────────────────────────────────────────────────────────────
+
+export interface HealthSummaryResult {
+  summary: string
+  status_label: 'Satisfaisant' | 'Vigilance requise' | 'Critique' | string
+  kpis_snapshot: Record<string, number>
+  generated_at: string
+  ollama_available: boolean
+}
+
+export interface PipelineStatusStep {
+  step: number
+  name: string
+  status: 'waiting' | 'running' | 'done' | 'failed' | 'skipped'
+  summary?: string | null
+  reason?: string | null
+}
+
+export interface JournalLine {
+  compte: string
+  libelle: string
+  debit: number
+  credit: number
+}
+
+export interface PipelineJournalEntry {
+  id: string
+  reference: string
+  date_ecriture: string
+  description: string
+  accounting_explanation: string | null
+  is_balanced: boolean
+  lines: JournalLine[]
+}
+
+export interface PipelineStatus {
+  invoice_id: string
+  final_status: string
+  steps: PipelineStatusStep[]
+  degraded_mode: boolean
+  human_review_required: boolean
+  journal_entry: PipelineJournalEntry | null
+}
+
+export const getAIHealthSummary = () =>
+  apiFetch<HealthSummaryResult>('/ai/health-summary')
+
+export const getPipelineStatus = (invoiceId: string) =>
+  apiFetch<PipelineStatus>(`/invoices/${invoiceId}/pipeline-status`)
+
+export const suggestMitigation = (body: {
+  titre: string; type_risque: string; probabilite: string; impact: string
+}) =>
+  apiFetch<{ suggestion: string; duration_ms: number }>('/ai/suggest-mitigation', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
+export const getAIActivity = () =>
+  apiFetch<{ ollama_stats: { total_calls: number; success_rate: number; avg_duration_ms: number }; ollama_available: boolean; model: string }>('/ai/activity')
+
+export const scanRoadmapRisks = () =>
+  apiFetch<{ items_scanned: number; risks_created: number; items_skipped: number }>('/ai/scan-roadmap-risks', { method: 'POST' })
+
+export const correctClassification = (invoiceId: string, body: {
+  cost_catalog_id: string; accounting_compte: string; invoice_text?: string
+}) =>
+  apiFetch<{ invoice_id: string; corrected_compte: string; feedback_count: number; retrain_triggered: boolean }>(
+    `/ai/invoices/${invoiceId}/classification`,
+    { method: 'PATCH', body: JSON.stringify(body) }
+  )
+
+// ── Security ──────────────────────────────────────────────────────────────────
+
+export interface SecuritySummary {
+  total_logins_today: number
+  failed_logins_today: number
+  locked_accounts_count: number
+  uploads_today: number
+  rejected_files_today: number
+  last_integrity_check: string | null
+  last_integrity_score: number | null
+  tampered_entries_count: number
+  active_sessions_count: number
+  unauthorized_access_attempts_today: number
+  accounts_with_recent_failures: { email: string; failed_attempts: number; last_attempt: string | null }[]
+  locked_accounts: { id: string; email: string; locked_until: string | null; failed_attempts: number }[]
+}
+
+export interface IntegrityResult {
+  total_checked: number
+  valid: number
+  tampered_count: number
+  tampered_entries: { id: string; created_at: string; action: string }[]
+  integrity_score: number
+  checked_at: string
+}
+
+export interface ActiveSession {
+  jti: string
+  created_at: string
+  expires_at: string
+  ip_address: string | null
+  is_current: boolean
+}
+
+export const getSecuritySummary = () =>
+  apiFetch<SecuritySummary>('/security/summary')
+
+export const verifyAuditIntegrity = () =>
+  apiFetch<IntegrityResult>('/audit/verify-integrity')
+
+export const unlockAccount = (userId: string) =>
+  apiFetch<{ message: string }>(`/security/unlock-account/${userId}`, { method: 'POST' })
+
+export const getSessions = () =>
+  apiFetch<{ sessions: ActiveSession[] }>('/auth/sessions')
+
+export const revokeSession = (jtiPrefix: string) =>
+  apiFetch<{ revoked: number }>('/auth/revoke-session', {
+    method: 'POST',
+    body: JSON.stringify({ jti_prefix: jtiPrefix }),
+  })
+
+export const logoutApi = () =>
+  apiFetch<{ message: string }>('/auth/logout', { method: 'POST' })

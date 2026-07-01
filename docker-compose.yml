@@ -1,0 +1,13 @@
+version: '3.9'
+
+services:
+  # ── Local SMTP server for development email testing ──────────────────────────
+  # Web UI to view sent emails: http://localhost:8025
+  # SMTP server: localhost:1025
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: biat_mailhog
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+    restart: unless-stopped

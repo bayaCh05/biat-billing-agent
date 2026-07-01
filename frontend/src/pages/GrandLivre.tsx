@@ -29,20 +29,20 @@ function buildGrandLivre(entries: JournalEntry[]): GrandLivreData {
   return result
 }
 
-function exportFEC(gl: GrandLivreData) {
-  const header = 'JournalCode;JournalLib;EcritureNum;EcritureDate;CompteNum;CompteLib;Debit;Credit'
+function exportGrandLivre(gl: GrandLivreData) {
+  const header = 'Compte PCE;Libellé;Date;Référence;Description;Débit (TND);Crédit (TND)'
   const rows: string[] = []
   for (const [compte, data] of Object.entries(gl)) {
     for (const line of data.lines) {
+      const [y, m, d] = line.date.split('-')
       rows.push([
-        'ACH', data.libelle, line.ref,
-        line.date.replace(/-/g, ''), compte, data.libelle,
+        compte, data.libelle, `${d}/${m}/${y}`, line.ref, `"${line.desc}"`,
         line.debit.toFixed(3), line.credit.toFixed(3),
       ].join(';'))
     }
   }
   const csv = [header, ...rows].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -86,14 +86,14 @@ export default function GrandLivre() {
     <div>
       <PageHeader title="📚 Grand Livre" badge="Par compte PCE">
         <button
-          onClick={() => exportFEC(gl)}
+          onClick={() => exportGrandLivre(gl)}
           style={{
             background: '#1A3A5C', color: '#fff', border: 'none',
             borderRadius: 8, padding: '7px 14px', fontSize: 12,
             fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter, sans-serif',
           }}
         >
-          ⬇ Exporter FEC
+          ⬇ Exporter Grand Livre (.csv)
         </button>
       </PageHeader>
 

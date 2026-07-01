@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ChevronDown, Download } from 'lucide-react'
+import { Download } from 'lucide-react'
 import StatusChip from '../components/ui/StatusChip'
 import { listInvoices, getInvoice } from '../api/endpoints'
 import type { InvoiceSummary, Invoice, InvoiceDirection } from '../types'
@@ -10,11 +10,6 @@ import PageSpinner from '../components/ui/PageSpinner'
 const TERMINAL = new Set(['EXPORTED', 'JOURNALED', 'JOURNALING', 'PAID', 'COLLECTED'])
 const PENDING  = new Set(['RECEIVED', 'EXTRACTING', 'EXTRACTED', 'CLASSIFYING', 'CLASSIFIED', 'VALIDATING', 'VALIDATED', 'FLAGGED', 'EXPORTING'])
 
-function confColor(c: number): string {
-  if (c >= 0.9) return '#1D9E76'
-  if (c >= 0.6) return '#F0A600'
-  return '#C0391B'
-}
 
 export default function InvoiceDetail() {
   const { role, initials } = useAuth()
@@ -85,10 +80,10 @@ export default function InvoiceDetail() {
         {/* KPI row */}
         <div className="grid grid-cols-4 gap-4">
           {[
-            { label: 'Total factures',    value: String(invoices.length),    sub: '18 ce mois' },
-            { label: 'Montant total TTC', value: totalStr,                   sub: '+8.2%' },
-            { label: 'En attente',        value: String(pendingCount),       sub: '4 en retard' },
-            { label: 'Exportées',         value: String(exportedCount),      sub: `Taux auto: ${invoices.length ? Math.round(exportedCount / invoices.length * 100) : 0}%` },
+            { label: 'Total factures',    value: String(invoices.length),    sub: `${byDir('SUPPLIER').length} fournisseurs · ${byDir('CLIENT').length} clients` },
+            { label: 'Montant total TTC', value: totalStr,                   sub: 'Toutes directions confondues' },
+            { label: 'En cours de traitement', value: String(pendingCount),  sub: pendingCount === 0 ? '✓ File vide' : 'En attente de validation' },
+            { label: 'Traitées',          value: String(exportedCount),      sub: `Taux : ${invoices.length ? Math.round(exportedCount / invoices.length * 100) : 0}% auto-approuvées` },
           ].map(card => (
             <div key={card.label} className="bg-white rounded-xl border p-4" style={{ borderColor: '#D5E8F5' }}>
               <p className="text-xs" style={{ color: '#5D6D7E' }}>{card.label}</p>
@@ -123,9 +118,6 @@ export default function InvoiceDetail() {
             )
           })}
           <div className="ml-auto flex items-center gap-2">
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm" style={{ borderColor: '#D5E8F5', color: '#1A1A2E' }}>
-              Direction <ChevronDown size={13} />
-            </button>
             <button
               onClick={exportCSV}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white"
@@ -143,7 +135,7 @@ export default function InvoiceDetail() {
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #D5E8F5' }}>
-                  {['Statut', 'Fournisseur', 'N° Facture', 'Date', 'TTC (TND)', 'Catégorie', 'Conf.'].map(h => (
+                  {['Statut', 'Fournisseur', 'N° Facture', 'Date', 'Montant TTC', 'Catégorie', 'Anomalies'].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold uppercase whitespace-nowrap" style={{ color: '#5D6D7E' }}>{h}</th>
                   ))}
                 </tr>
@@ -151,7 +143,7 @@ export default function InvoiceDetail() {
               <tbody>
                 {displayed.map(inv => {
                   const isSelected = inv.id === selectedId
-                  const conf = 0.88
+                  const flagCount = inv.flags?.length ?? 0
                   return (
                     <tr
                       key={inv.id}
@@ -167,17 +159,17 @@ export default function InvoiceDetail() {
                       <td className="px-4 py-3 font-semibold" style={{ color: '#1A1A2E' }}>{inv.issuer_name ?? '—'}</td>
                       <td className="px-4 py-3" style={{ color: '#1A1A2E' }}>{inv.invoice_number ?? '—'}</td>
                       <td className="px-4 py-3 whitespace-nowrap" style={{ color: '#5D6D7E' }}>
-                        {inv.invoice_date ? inv.invoice_date.slice(5).replace('-', '/') : '—'}
+                        {formatDate(inv.invoice_date)}
                       </td>
                       <td className="px-4 py-3 font-semibold" style={{ color: '#1A1A2E' }}>
-                        {inv.amount_ttc != null ? formatTND(inv.amount_ttc, 0) : '—'}
+                        {inv.amount_ttc != null ? formatTND(inv.amount_ttc) : '—'}
                       </td>
                       <td className="px-4 py-3 text-xs" style={{ color: '#5D6D7E' }}>{inv.accounting_label ?? '—'}</td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1 text-xs font-medium">
-                          <span className="w-2 h-2 rounded-full" style={{ background: confColor(conf) }} />
-                          {Math.round(conf * 100)}%
-                        </span>
+                        {flagCount > 0
+                          ? <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#FEF0EE', color: '#C0391B' }}>⚠ {flagCount}</span>
+                          : <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: '#1D9E76' }}>✓ OK</span>
+                        }
                       </td>
                     </tr>
                   )

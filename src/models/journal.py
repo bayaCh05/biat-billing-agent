@@ -43,6 +43,7 @@ class JournalEntry(BaseModel):
     lines: list[JournalLine] = Field(min_length=2)
     source_invoice_id: UUID | None = None   # facture ayant généré l'écriture
     source_asset_id: UUID | None = None     # immobilisation (dotation amortissement)
+    accounting_explanation: str | None = None  # LLM-generated explanation in French
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

@@ -1,13 +1,17 @@
 """Audit log endpoints — append-only compliance trail (BCT Circulaire 2025-13)."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.auth import require_role
 from api.deps import get_session
-from src.models.audit import AuditLogOut
+from api.security.audit_integrity import compute_row_hash, verify_row_hash
+from src.models.audit import AuditLogCreate, AuditLogOut
+from src.services.audit_service import log_action, _ip, _ua
 from src.storage.orm_models_audit import AuditLogORM
 
 router = APIRouter(prefix="/audit", tags=["admin"])
@@ -113,3 +117,54 @@ def resource_history(
         .limit(limit)
     ).scalars().all()
     return [_to_out(r) for r in rows]
+
+
+@router.get(
+    "/verify-integrity",
+    summary="Vérifier l'intégrité des journaux d'audit",
+    description=(
+        "Recalcule le HMAC de chaque entrée et détecte toute altération. "
+        "Réservé au rôle Admin."
+    ),
+)
+def verify_integrity(
+    _: dict = Depends(require_role("Admin")),
+    session: Session = Depends(get_session),
+):
+    rows = session.execute(select(AuditLogORM).order_by(AuditLogORM.created_at)).scalars().all()
+
+    valid = 0
+    tampered = []
+    for row in rows:
+        if not row.row_hash:
+            # Pre-migration row — backfill hash
+            row.row_hash = compute_row_hash(row)
+            valid += 1
+        elif verify_row_hash(row):
+            valid += 1
+        else:
+            tampered.append({
+                "id": str(row.id),
+                "created_at": row.created_at.isoformat(),
+                "action": row.action,
+            })
+
+    total = len(rows)
+    score = (valid / total * 100) if total > 0 else 100.0
+
+    log_action(session, AuditLogCreate(
+        action="AUDIT_INTEGRITY_CHECK",
+        resource_type="AuditLog",
+        status="SUCCESS" if not tampered else "FAILURE",
+        detail=f"Score: {score:.1f}%, {len(tampered)} entrées altérées sur {total}",
+    ))
+    session.commit()
+
+    return {
+        "total_checked": total,
+        "valid": valid,
+        "tampered_count": len(tampered),
+        "tampered_entries": tampered,
+        "integrity_score": round(score, 2),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
