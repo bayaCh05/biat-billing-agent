@@ -1,0 +1,1286 @@
+' ============================================================
+' BIAT IT Billing Agent — 18 Diagrammes PlantUML
+' Coller chaque bloc dans https://plantuml.com/plantuml
+' ou dans IntelliJ / VS Code (extension PlantUML)
+' ============================================================
+
+
+' ============================================================
+' DIAGRAM 1 — Architecture Technique (Composants)
+' ============================================================
+@startuml Diagram01_ArchitectureTechnique
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+skinparam componentStyle rectangle
+skinparam component {
+  BackgroundColor #EFF4FA
+  BorderColor #1A3A5C
+  FontColor #1A3A5C
+}
+skinparam package {
+  BackgroundColor #F5F7FA
+  BorderColor #2E86C1
+  FontColor #1A3A5C
+}
+skinparam arrow {
+  Color #2E86C1
+  FontColor #5D6D7E
+  FontSize 10
+}
+title Architecture Technique — BIAT IT Billing Agent
+
+package "Frontend (port 5173)" {
+  [React 18 + TypeScript] as React
+  [Vite + Tailwind CSS] as Vite
+  [React Router v6] as Router
+  [Recharts] as Charts
+}
+
+package "Backend (port 8000)" {
+  [FastAPI Python 3.14] as FastAPI
+  [SQLAlchemy ORM] as ORM
+  [Alembic Migrations] as Alembic
+  [APScheduler] as Scheduler
+  [SlowAPI Rate Limiter] as RateLimit
+  [JWT + bcrypt] as Auth
+}
+
+package "Couche IA (LOCAL uniquement)" #FFFCE8 {
+  [AIOrchestrator] as Orchestrator
+  [ExtractionAgent] as ExtAgent
+  [ClassificationAgent] as ClassAgent
+  [AnomalyAgent] as AnomalyAgent
+  [AccountingAgent] as AccAgent
+  [RiskAgent] as RiskAgent
+  [InsightAgent] as InsightAgent
+  [Ollama qwen2.5:3b] as Ollama #FFE0A0
+  [TF-IDF + LogisticRegression] as ML
+  [ChromaDB (vecteurs)] as Chroma
+  [PyMuPDF + Tesseract OCR] as OCR
+}
+
+package "Données" {
+  database "SQLite WAL\ndata/invoices.db" as DB
+  [cost_catalog.yaml\n33 entrées PCE] as Catalog
+  [budget_plan.yaml] as Budget
+  [ml_model.joblib] as MLModel
+}
+
+React --> FastAPI : HTTP/JSON REST\nport 8000
+FastAPI --> ORM
+FastAPI --> Auth
+FastAPI --> RateLimit
+FastAPI --> Orchestrator : process_invoice()
+ORM --> DB
+Alembic --> DB
+Scheduler --> Orchestrator : tâches nightly
+Orchestrator --> ExtAgent
+Orchestrator --> ClassAgent
+Orchestrator --> AnomalyAgent
+Orchestrator --> AccAgent
+Orchestrator --> RiskAgent
+Orchestrator --> InsightAgent
+ExtAgent --> OCR
+ExtAgent --> Ollama
+ClassAgent --> ML
+ClassAgent --> Ollama
+ClassAgent --> Catalog
+AnomalyAgent --> Chroma
+AccAgent --> Ollama
+RiskAgent --> Ollama
+InsightAgent --> Ollama
+
+note bottom of Ollama
+  DATA RESIDENCY : LOCAL ONLY
+  Aucune donnée facture envoyée au cloud
+end note
+@enduml
+
+
+' ============================================================
+' DIAGRAM 2 — Architecture Fonctionnelle (Modules)
+' ============================================================
+@startuml Diagram02_ArchitectureFonctionnelle
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title Architecture Fonctionnelle — 8 Modules Métier
+
+rectangle "Entrée" #EFF4FA {
+  (Facture PDF\nFournisseur / Client) as PDF
+}
+
+rectangle "Pipeline IA" #FFF8E8 {
+  [1. Extraction OCR+LLM] as EXT
+  [2. Classification PCE] as CLASS
+  [3. Validation & Anomalies] as VALID
+  [4. Écriture Comptable] as ACC
+}
+
+rectangle "Modules Métier" #E8F5F0 {
+  [Budget & Variance] as BUD
+  [CAPEX Amortissement] as CAPEX
+  [Facturation Client] as BILLING
+  [Gestion des Risques] as RISK
+}
+
+rectangle "Infrastructure" #F0EBF9 {
+  [Suivi & Réconciliation] as SUIVI
+  [Feuille de Route] as ROAD
+  [Journal PCE] as JOURNAL
+}
+
+rectangle "UI Admin" #EFF4FA {
+  [Tableau de Bord Direction] as DIR
+  [Sécurité & Audit] as SEC
+  [Activité IA] as AI
+}
+
+PDF --> EXT
+EXT --> CLASS
+CLASS --> VALID
+VALID --> ACC
+ACC --> JOURNAL
+ACC --> BUD
+ACC --> CAPEX
+VALID --> RISK
+ROAD --> RISK
+RISK --> AI
+ACC --> BILLING
+ACC --> SUIVI
+SUIVI --> DIR
+BUD --> DIR
+CAPEX --> DIR
+RISK --> DIR
+JOURNAL --> SEC
+SEC --> AI
+@enduml
+
+
+' ============================================================
+' DIAGRAM 3 — Architecture Agents IA
+' ============================================================
+@startuml Diagram03_AgentsIA
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title 6 Agents IA + RAG — Architecture Interne
+
+package "AIOrchestrator" #FFF8E8 {
+  [ExtractionAgent\nPDF → OCR → LLM] as EA #FFE0A0
+  [ClassificationAgent\nFuzzy → ML → RAG] as CA #FFE0A0
+  [AnomalyAgent\n8 contrôles + embeddings] as AA #FFE0A0
+  [AccountingAgent\nPCE + explication] as AccA #FFE0A0
+  [RiskAgent\nDétection retards] as RA #FFE0A0
+  [InsightAgent\nRésumé exécutif] as IA #FFE0A0
+}
+
+package "Ressources locales" #E8F5F0 {
+  [Ollama\nqwen2.5:3b] as Ollama #FFD580
+  [TF-IDF + LogReg\nml_model.joblib] as ML
+  database "ChromaDB\n(vecteurs PCE)" as Chroma
+  [sentence-transformers\nall-MiniLM-L6-v2] as ST
+  [cost_catalog.yaml\n33 entrées] as Cat
+  [Tesseract OCR] as OCR
+  [PyMuPDF] as PDF
+}
+
+EA --> PDF : extraction native
+EA --> OCR : fallback
+EA --> Ollama : prompt extraction
+
+CA --> Cat : fuzzy match (Pass A)
+CA --> ML : TF-IDF (Pass B)
+CA --> Chroma : RAG (Pass C)
+CA --> Ollama : Pass C LLM
+
+AA --> ST : encodage sémantique
+AA --> Chroma : recherche duplicats
+
+AccA --> Ollama : explication PCE
+AccA --> Ollama : durée amort. CAPEX
+
+RA --> Ollama : génération plan mitigation
+
+IA --> Ollama : résumé KPIs
+
+note right of Ollama
+  Inférence 100% locale
+  Aucun appel API cloud
+  (conformité bancaire)
+end note
+@enduml
+
+
+' ============================================================
+' DIAGRAM 4 — Architecture Sécurité
+' ============================================================
+@startuml Diagram04_Securite
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title Couches de Sécurité — BIAT IT Billing Agent
+
+rectangle "Couche 1 — Périmètre réseau" #FDECEA {
+  [CORS (origines autorisées)] as CORS
+  [HTTPS (prod)] as HTTPS
+  [SlowAPI Rate Limiter\n10 req/min login, 60/min API] as RATE
+}
+
+rectangle "Couche 2 — Authentification" #EFF4FA {
+  [JWT HS256\nAccess 8h + Refresh 7j] as JWT
+  [httpOnly Cookie\n(refresh token)] as COOKIE
+  [bcrypt (12 rounds)\nmots de passe] as BCRYPT
+  [Verrouillage compte\n5 échecs → 15 min] as LOCK
+}
+
+rectangle "Couche 3 — Autorisation" #E8F5F0 {
+  [require_role()\nComptable|ChefProjet|Direction|Admin] as ROLES
+  [Dépendances FastAPI\n_PROTECTED sur toutes les routes] as DEP
+}
+
+rectangle "Couche 4 — Traçabilité" #FFF8E8 {
+  [audit_logs\nHMAC-SHA256] as AUDIT
+  [Vérification intégrité\n(Admin)] as INTEG
+  [X-Request-ID\npar requête] as REQID
+}
+
+rectangle "Couche 5 — En-têtes HTTP" #F0EBF9 {
+  [X-Content-Type-Options: nosniff] as H1
+  [X-Frame-Options: DENY] as H2
+  [Content-Security-Policy] as H3
+  [Referrer-Policy: strict-origin] as H4
+}
+
+CORS --> JWT
+RATE --> JWT
+JWT --> COOKIE
+JWT --> BCRYPT
+JWT --> LOCK
+JWT --> ROLES
+ROLES --> DEP
+DEP --> AUDIT
+AUDIT --> INTEG
+AUDIT --> REQID
+@enduml
+
+
+' ============================================================
+' DIAGRAM 5 — Schéma Base de Données
+' ============================================================
+@startuml Diagram05_BDD
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title Schéma Base de Données — 9 Tables Principales
+
+entity "invoices" as INV #EFF4FA {
+  * id : UUID <<PK>>
+  --
+  status : VARCHAR (RECEIVED→PAID)
+  direction : VARCHAR (SUPPLIER|CLIENT)
+  charge_type : VARCHAR (OPEX|CAPEX)
+  file_hash : TEXT <<unique>>
+  issuer_name : TEXT
+  amount_ht : FLOAT
+  tva_rate : FLOAT
+  amount_ttc : FLOAT
+  accounting_compte : TEXT
+  human_review_required : BOOL
+  received_at : TIMESTAMP
+}
+
+entity "invoice_flags" as FLAGS #FDECEA {
+  * id : UUID <<PK>>
+  --
+  invoice_id : UUID <<FK>>
+  flag_type : VARCHAR
+  severity : VARCHAR (ERROR|WARNING)
+  message : TEXT
+  resolved : BOOL
+}
+
+entity "journal_entries" as JE #EFF4FA {
+  * id : UUID <<PK>>
+  --
+  reference : TEXT (OD-2026-NNNN)
+  date_ecriture : DATE
+  source_invoice_id : UUID <<FK>>
+  accounting_explanation : TEXT
+}
+
+entity "journal_lines" as JL #EFF4FA {
+  * id : UUID <<PK>>
+  --
+  entry_id : UUID <<FK>>
+  compte : TEXT (401|4366|6xxx|2xxx)
+  libelle : TEXT
+  debit : FLOAT
+  credit : FLOAT
+}
+
+entity "assets" as ASSET #E8F5F0 {
+  * id : UUID <<PK>>
+  --
+  designation : TEXT
+  compte_immobilisation : TEXT (2xxx)
+  acquisition_cost_ht : FLOAT
+  useful_life_years : INT
+  depreciation_method : VARCHAR
+  supplier_invoice_id : UUID <<FK>>
+}
+
+entity "feuilles_de_route" as ROAD #FFF8E8 {
+  * id : UUID <<PK>>
+  --
+  titre : TEXT
+  date_debut : DATE
+  date_fin : DATE
+  statut : VARCHAR (PLANIFIE|EN_COURS|TERMINE)
+  priorite : VARCHAR (HAUTE|MOYENNE|BASSE)
+  annee : INT
+}
+
+entity "risques" as RISK #FFF8E8 {
+  * id : UUID <<PK>>
+  --
+  titre : TEXT
+  type_risque : VARCHAR (DELAI|BUDGET|RESSOURCE)
+  probabilite : VARCHAR (FAIBLE|MOYENNE|ELEVEE)
+  impact : VARCHAR
+  niveau_criticite : VARCHAR (FAIBLE→CRITIQUE)
+  statut : VARCHAR (IDENTIFIE→CLOTURE)
+  feuille_route_id : UUID <<FK>>
+  created_by : TEXT
+}
+
+entity "audit_logs" as AUDIT #F0EBF9 {
+  * id : UUID <<PK>>
+  --
+  user_id : TEXT
+  action : VARCHAR
+  resource_type : TEXT
+  status : VARCHAR
+  ip_address : TEXT
+  integrity_hash : TEXT (HMAC-SHA256)
+  created_at : TIMESTAMP
+}
+
+entity "payment_installments" as PAY #F0EBF9 {
+  * id : UUID <<PK>>
+  --
+  invoice_id : UUID <<FK>>
+  due_date : DATE
+  amount : FLOAT
+  status : VARCHAR (PENDING|PAID|LATE)
+  penalty_amount : FLOAT
+}
+
+INV ||--o{ FLAGS : "a des flags"
+INV ||--o| JE : "génère écriture"
+JE ||--o{ JL : "a des lignes"
+INV ||--o| ASSET : "crée actif CAPEX"
+INV ||--o{ PAY : "génère échéances"
+ROAD ||--o{ RISK : "a des risques"
+@enduml
+
+
+' ============================================================
+' DIAGRAM 6 — Cas d'Utilisation
+' ============================================================
+@startuml Diagram06_CasUtilisation
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+left to right direction
+title Cas d'Utilisation par Rôle — BIAT IT Billing Agent
+
+actor "Comptable" as C #1A3A5C
+actor "Chef de Projet" as CP #2E86C1
+actor "Direction" as D #1D9E76
+actor "Admin" as A #C0391B
+actor "Système IA\n(APScheduler)" as SYS #F0A500
+
+rectangle "Gestion des Factures" {
+  usecase "Soumettre facture PDF" as UC1
+  usecase "Réviser facture FLAGGED" as UC2
+  usecase "Valider / Rejeter facture" as UC3
+  usecase "Exporter journal PCE" as UC4
+  usecase "Gérer échéancier\n& pénalités" as UC5
+}
+
+rectangle "Gestion de Projets" {
+  usecase "Créer projet & phases" as UC6
+  usecase "Mettre à jour avancement" as UC7
+  usecase "Gérer feuille de route" as UC8
+  usecase "Créer / confirmer risque" as UC9
+}
+
+rectangle "Facturation Client" {
+  usecase "Générer facture client" as UC10
+  usecase "Marquer facture payée" as UC11
+}
+
+rectangle "CAPEX & Budget" {
+  usecase "Valider durée amortissement" as UC12
+  usecase "Consulter budget vs réel" as UC13
+}
+
+rectangle "Tableau de Bord" {
+  usecase "Voir KPIs exécutifs" as UC14
+  usecase "Voir activité IA" as UC15
+  usecase "Vérifier intégrité audit" as UC16
+  usecase "Gérer utilisateurs" as UC17
+}
+
+rectangle "IA Automatique" {
+  usecase "Extraire & classifier facture" as UC18
+  usecase "Détecter anomalies" as UC19
+  usecase "Scanner jalons en retard" as UC20
+  usecase "Recalculer pénalités" as UC21
+}
+
+C --> UC1
+C --> UC2
+C --> UC3
+C --> UC4
+C --> UC5
+CP --> UC6
+CP --> UC7
+CP --> UC8
+CP --> UC9
+CP --> UC10
+CP --> UC11
+C --> UC12
+C --> UC13
+D --> UC14
+A --> UC15
+A --> UC16
+A --> UC17
+SYS --> UC18
+SYS --> UC19
+SYS --> UC20
+SYS --> UC21
+@enduml
+
+
+' ============================================================
+' DIAGRAM 7 — Diagramme de Classes
+' ============================================================
+@startuml Diagram07_Classes
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+skinparam classBackgroundColor #EFF4FA
+skinparam classBorderColor #2E86C1
+title Diagramme de Classes — Modèles Principaux
+
+enum InvoiceStatus {
+  RECEIVED
+  EXTRACTING
+  EXTRACTED
+  CLASSIFYING
+  CLASSIFIED
+  VALIDATING
+  VALIDATED
+  FLAGGED
+  JOURNALING
+  JOURNALED
+  EXPORTED
+  PAID
+  ERROR
+  REJECTION_FAILED
+}
+
+enum FlagType {
+  TOTAL_MISMATCH
+  TVA_MISMATCH
+  MISSING_FIELD
+  DUPLICATE
+  HIGH_VALUE
+  UNKNOWN_DIRECTION
+  CATALOG_NO_MATCH
+}
+
+enum NiveauCriticite {
+  FAIBLE
+  MOYENNE
+  ELEVEE
+  CRITIQUE
+}
+
+class InvoiceRecord {
+  +id : UUID
+  +status : InvoiceStatus
+  +direction : str
+  +charge_type : str
+  +file_hash : str
+  +issuer_name : ConfidenceField[str]
+  +amount_ht : ConfidenceField[float]
+  +tva_rate : ConfidenceField[float]
+  +amount_ttc : ConfidenceField[float]
+  +accounting_compte : str
+  +human_review_required : bool
+  +add_flag(flag: InvoiceFlag)
+  +has_errors() bool
+}
+
+class ConfidenceField {
+  +value : T
+  +confidence : float
+}
+
+class InvoiceFlag {
+  +flag_type : FlagType
+  +severity : str
+  +message : str
+  +resolved : bool
+}
+
+class JournalEntry {
+  +id : UUID
+  +reference : str
+  +date_ecriture : date
+  +lines : List[JournalLine]
+  +is_balanced() bool
+}
+
+class JournalLine {
+  +compte : str
+  +libelle : str
+  +debit : float
+  +credit : float
+}
+
+class Asset {
+  +id : UUID
+  +designation : str
+  +acquisition_cost_ht : float
+  +useful_life_years : int
+  +depreciation_method : str
+  +annual_depreciation() float
+}
+
+class Risque {
+  +id : UUID
+  +titre : str
+  +type_risque : str
+  +probabilite : str
+  +impact : str
+  +niveau_criticite : NiveauCriticite
+  +statut : str
+  +created_by : str
+}
+
+class FeuilleDeRoute {
+  +id : UUID
+  +titre : str
+  +date_debut : date
+  +date_fin : date
+  +statut : str
+  +priorite : str
+  +days_overdue() int
+  +is_late() bool
+}
+
+class BudgetPlan {
+  +from_yaml(path) BudgetPlan
+  +get_line(catalog_id) BudgetLine
+  +ytd_budget(month) float
+}
+
+class CostCatalog {
+  +from_yaml(path) CostCatalog
+  +match(text, flux) CostCatalogEntry
+  +get(id) CostCatalogEntry
+}
+
+InvoiceRecord "1" *-- "many" InvoiceFlag
+InvoiceRecord "1" o-- "many" ConfidenceField
+InvoiceRecord "1" --> "0..1" JournalEntry
+JournalEntry "1" *-- "many" JournalLine
+InvoiceRecord "1" --> "0..1" Asset
+FeuilleDeRoute "1" o-- "many" Risque
+InvoiceRecord --> CostCatalog : classe avec
+InvoiceRecord --> BudgetPlan : impute dans
+@enduml
+
+
+' ============================================================
+' DIAGRAM 8 — Diagramme Objet (snapshot CAPEX)
+' ============================================================
+@startuml Diagram08_Objet
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+skinparam objectBackgroundColor #EFF4FA
+skinparam objectBorderColor #2E86C1
+title Diagramme Objet — Snapshot Facture CAPEX (état JOURNALED)
+
+object "inv_001 : InvoiceRecord" as INV {
+  id = "3f4a…"
+  status = JOURNALED
+  direction = SUPPLIER
+  charge_type = CAPEX
+  issuer_name.value = "Dell Technologies TN"
+  issuer_name.confidence = 0.97
+  amount_ht.value = 42 500.00
+  tva_rate.value = 19.0
+  amount_ttc.value = 50 575.00
+  accounting_compte = "2184"
+  human_review_required = False
+}
+
+object "entry_001 : JournalEntry" as JE {
+  reference = "OD-2026-0087"
+  date_ecriture = 2026-06-15
+  is_balanced = True
+}
+
+object "line_01 : JournalLine" as L1 {
+  compte = "2184"
+  libelle = "Acquisition matériel informatique"
+  debit = 42 500.00
+  credit = 0.00
+}
+
+object "line_02 : JournalLine" as L2 {
+  compte = "4366"
+  libelle = "TVA déductible 19%"
+  debit = 8 075.00
+  credit = 0.00
+}
+
+object "line_03 : JournalLine" as L3 {
+  compte = "401"
+  libelle = "Fournisseur Dell Technologies"
+  debit = 0.00
+  credit = 50 575.00
+}
+
+object "asset_001 : Asset" as ASSET {
+  designation = "Serveur Dell PowerEdge R750"
+  compte_immobilisation = "2184"
+  compte_amortissement = "2884"
+  acquisition_cost_ht = 42 500.00
+  useful_life_years = 5
+  depreciation_method = "linear"
+  annual_depreciation = 8 500.00 TND/an
+  amortization_source = "AI"
+}
+
+INV --> JE : génère
+JE *-- L1
+JE *-- L2
+JE *-- L3
+INV --> ASSET : crée actif
+
+note bottom of ASSET
+  Durée de 5 ans suggérée par Ollama
+  Dotation annuelle : 8 500 TND
+  Compte 6811 / 2884
+end note
+@enduml
+
+
+' ============================================================
+' DIAGRAM 9 — Séquence : Pipeline IA (avec risques)
+' ============================================================
+@startuml Diagram09_SeqPipeline
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+skinparam sequenceArrowColor #2E86C1
+skinparam sequenceParticipantBackgroundColor #EFF4FA
+title Pipeline IA — Facture PDF → JOURNALED (avec indicateurs de risque)
+
+actor Comptable #1A3A5C
+participant Frontend #2E86C1
+participant FastAPI #2E86C1
+participant Orchestrator #F0A500
+participant ExtractionAgent #F0A500
+participant ClassificationAgent #F0A500
+participant AnomalyAgent #F0A500
+participant AccountingAgent #F0A500
+participant Ollama #F0A500
+database Database #1A3A5C
+
+Comptable -> Frontend : Upload PDF
+Frontend -> FastAPI : POST /api/invoices/upload\nBearer token + multipart
+FastAPI -> FastAPI : JWT auth + MIME check\n+ rate limit
+FastAPI -> Database : AuditLog(INVOICE_UPLOADED)
+FastAPI -> Orchestrator : process_invoice(invoice)
+
+== Étape 1 — Extraction ==
+note over Orchestrator #FFF8E8 : ⚠️ Risque : PDF illisible
+Orchestrator -> ExtractionAgent : run({invoice})
+ExtractionAgent -> ExtractionAgent : Tentative PDF natif\n(PyMuPDF)
+ExtractionAgent -> ExtractionAgent : Fallback OCR Tesseract
+ExtractionAgent -> Ollama : prompt extraction JSON
+Ollama --> ExtractionAgent : ConfidenceField[]
+
+alt Extraction échoue totalement
+  ExtractionAgent --> Orchestrator : success=False
+  Orchestrator -> Database : status = EXTRACTION_FAILED
+  FastAPI --> Frontend : ❌ Extraction impossible
+else Extraction ok
+  ExtractionAgent --> Orchestrator : AgentResult(confidence_fields)
+  Orchestrator -> Database : status = EXTRACTED
+
+  == Étape 2 — Classification ==
+  note over Orchestrator #FFF8E8 : ⚠️ Risque : compte PCE incorrect si confiance < 85%
+  Orchestrator -> ClassificationAgent : run({invoice})
+  ClassificationAgent -> ClassificationAgent : Pass A: CostCatalog fuzzy
+  alt Pass A ≥ 70
+    ClassificationAgent --> Orchestrator : Pass A matched
+  else Pass A < 70 → Pass B ML
+    ClassificationAgent -> ClassificationAgent : TF-IDF + LogReg
+    alt Pass B ≥ 0.7
+      ClassificationAgent --> Orchestrator : Pass B matched
+    else Pass B < 0.7 → Pass C RAG+LLM
+      ClassificationAgent -> Ollama : prompt RAG classification
+      Ollama --> ClassificationAgent : compte PCE + raison
+      ClassificationAgent --> Orchestrator : Pass C matched
+    end
+  end
+  Orchestrator -> Database : status = CLASSIFIED
+
+  == Étape 3 — Validation & Anomalies ==
+  note over Orchestrator #FFF8E8 : ⚠️ Risques : math/doublon/montant suspect
+  Orchestrator -> AnomalyAgent : run({invoice, db})
+  AnomalyAgent -> AnomalyAgent : Math: |HT+TVA-TTC| < 0.005
+  AnomalyAgent -> AnomalyAgent : Doublon: hash + sémantique
+  AnomalyAgent -> AnomalyAgent : Montant > 50 000 TND ?
+
+  alt Flag ERROR détecté
+    AnomalyAgent --> Orchestrator : human_review_required=True
+    Orchestrator -> Database : status = FLAGGED
+    Frontend --> Comptable : ⚠️ Facture à réviser
+  else Aucun flag bloquant
+    Orchestrator -> Database : status = VALIDATED
+
+    == Étape 4 — Comptabilisation ==
+    note over Orchestrator #FDECEA : ⚠️ CRITIQUE : débit ≠ crédit → bloquage
+    Orchestrator -> AccountingAgent : run({invoice, db})
+    AccountingAgent -> AccountingAgent : Générer écriture PCE
+    AccountingAgent -> AccountingAgent : Vérifier équilibre\n|Σdébits - Σcrédits| < 0.005
+    AccountingAgent -> Ollama : explication comptable
+    Ollama --> AccountingAgent : 2 phrases PCE
+
+    alt CAPEX → créer actif
+      AccountingAgent -> Ollama : durée amortissement (1-20 ans)
+      Ollama --> AccountingAgent : N ans
+      AccountingAgent -> Database : save Asset
+    end
+
+    alt Écriture équilibrée
+      AccountingAgent -> Database : save JournalEntry + JournalLines
+      Orchestrator -> Database : status = JOURNALED
+      Frontend --> Comptable : ✅ Facture traitée — écriture PCE générée
+    else Écriture déséquilibrée
+      Orchestrator -> Database : status = ERROR
+      Frontend --> Comptable : ❌ Erreur comptable — écriture déséquilibrée
+    end
+  end
+end
+@enduml
+
+
+' ============================================================
+' DIAGRAM 10 — Séquence : Authentification
+' ============================================================
+@startuml Diagram10_SeqAuth
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title Flux d'Authentification — Login + Refresh + OTP
+
+actor Utilisateur #1A3A5C
+participant Frontend #2E86C1
+participant FastAPI #2E86C1
+participant "JWT Handler" as JWT #F0A500
+participant "Account Lockout" as Lock #C0391B
+database Database #1A3A5C
+
+== Login ==
+Utilisateur -> Frontend : Saisit email + mot de passe
+Frontend -> FastAPI : POST /api/auth/login\n{email, password}
+FastAPI -> Lock : check_lockout(email)
+
+alt Compte verrouillé
+  Lock --> FastAPI : locked (remaining: Xmin)
+  FastAPI --> Frontend : 423 Compte verrouillé
+  Frontend --> Utilisateur : ❌ Compte verrouillé jusqu'à HH:MM
+else Compte disponible
+  FastAPI -> Database : Chercher user par email
+  FastAPI -> FastAPI : bcrypt.verify(password, hash)
+
+  alt Mot de passe incorrect
+    FastAPI -> Lock : record_failure(email)
+    FastAPI -> Database : AuditLog(LOGIN_FAILURE)
+    Lock --> FastAPI : attempts=N/5
+    FastAPI --> Frontend : 401 Identifiants incorrects
+    Frontend --> Utilisateur : ❌ Email ou mot de passe incorrect
+  else Mot de passe correct
+    FastAPI -> Lock : reset_failures(email)
+    FastAPI -> JWT : create_access_token(8h)
+    FastAPI -> JWT : create_refresh_token(7j)
+    JWT --> FastAPI : access_token, refresh_token
+    FastAPI -> Database : AuditLog(LOGIN_SUCCESS)
+    FastAPI --> Frontend : {access_token}\n+ cookie httpOnly biat_refresh
+    Frontend -> Frontend : saveToken(access_token)\nlocalStorage: role, nom
+    Frontend --> Utilisateur : ✅ Connecté — redirection Dashboard
+  end
+end
+
+== Refresh automatique (token expirant dans < 5 min) ==
+Frontend -> Frontend : decodeExp(token) < now + 5min
+Frontend -> FastAPI : POST /api/auth/refresh\ncredentials: include (cookie)
+FastAPI -> JWT : verify_refresh_token(cookie)
+
+alt Token refresh valide
+  FastAPI -> JWT : create_access_token(nouveau 8h)
+  FastAPI --> Frontend : {access_token}
+  Frontend -> Frontend : saveToken(nouveau_token)
+else Token expiré / révoqué
+  FastAPI --> Frontend : 401
+  Frontend -> Frontend : clearToken()
+  Frontend --> Utilisateur : Redirection /login
+end
+
+== Changement mot de passe avec OTP ==
+Utilisateur -> Frontend : Demande changement mot de passe
+Frontend -> FastAPI : POST /api/auth/change-password/request-otp
+FastAPI -> FastAPI : Générer OTP 6 chiffres (10 min)
+FastAPI -> Database : Stocker OTP hashé
+FastAPI --> Frontend : {message: "OTP envoyé"}
+Frontend --> Utilisateur : Saisir le code reçu
+Utilisateur -> Frontend : Saisit OTP + nouveau mot de passe
+Frontend -> FastAPI : POST /api/auth/change-password/confirm\n{otp_code, new_password}
+FastAPI -> Database : Vérifier OTP + expiry
+FastAPI -> FastAPI : bcrypt.hash(new_password)
+FastAPI -> Database : Mettre à jour hash + invalider OTP
+FastAPI -> Database : AuditLog(PASSWORD_CHANGED)
+FastAPI --> Frontend : 200 OK
+Frontend --> Utilisateur : ✅ Mot de passe mis à jour
+@enduml
+
+
+' ============================================================
+' DIAGRAM 11 — Séquence : Validation Manuelle
+' ============================================================
+@startuml Diagram11_SeqValidation
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title Révision Manuelle — Facture FLAGGED → JOURNALED
+
+actor Comptable #1A3A5C
+participant "Review Queue" as RQ #2E86C1
+participant FastAPI #2E86C1
+participant Orchestrator #F0A500
+participant AccountingAgent #F0A500
+participant Ollama #F0A500
+database Database #1A3A5C
+
+Comptable -> RQ : Ouvre la file de révision
+RQ -> FastAPI : GET /api/review
+FastAPI -> Database : SELECT WHERE status=FLAGGED\nORDER BY received_at
+Database --> FastAPI : Liste factures FLAGGED
+FastAPI --> RQ : InvoiceOut[] (flags, champs, confiance)
+RQ --> Comptable : Affiche les factures à réviser
+
+Comptable -> RQ : Ouvre la facture #INV-2026-042\n(voir les flags : TOTAL_MISMATCH)
+RQ --> Comptable : Affiche PDF + extraction + flags détaillés
+
+alt Comptable corrige et approuve
+  Comptable -> RQ : Modifie amount_ttc, approuve
+  RQ -> FastAPI : POST /api/review/{id}/approve\n{corrections: {...}}
+  FastAPI -> Database : Appliquer corrections
+  FastAPI -> Database : Résoudre flags ERROR
+  FastAPI -> Database : status = VALIDATED
+  FastAPI -> Orchestrator : Relancer Étape 4 (AccountingAgent)
+  Orchestrator -> AccountingAgent : run({invoice corrigée, db})
+  AccountingAgent -> AccountingAgent : Générer écriture PCE
+  AccountingAgent -> Ollama : explication comptable
+  Ollama --> AccountingAgent : 2 phrases
+  AccountingAgent -> Database : save JournalEntry
+  Orchestrator -> Database : status = JOURNALED
+  FastAPI -> Database : AuditLog(INVOICE_APPROVED, user_id)
+  FastAPI --> RQ : ✅ Facture validée et comptabilisée
+  RQ --> Comptable : Facture déplacée dans "Traitées"
+else Comptable rejette
+  Comptable -> RQ : Motif de rejet
+  RQ -> FastAPI : POST /api/review/{id}/reject\n{reason: "Facture frauduleuse"}
+  FastAPI -> Database : status = REJECTED
+  FastAPI -> Database : AuditLog(INVOICE_REJECTED, user_id)
+  FastAPI --> RQ : ❌ Facture rejetée
+  RQ --> Comptable : Facture archivée comme rejetée
+end
+@enduml
+
+
+' ============================================================
+' DIAGRAM 12 — Séquence : Facture Client
+' ============================================================
+@startuml Diagram12_SeqFactureClient
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title Facturation Client — Génération & Encaissement
+
+actor "Chef de Projet" as CP #2E86C1
+participant Frontend #2E86C1
+participant FastAPI #2E86C1
+participant "BillingService" as BILL #F0A500
+participant "PDF Generator\n(fpdf2)" as PDF #F0A500
+participant Ollama #F0A500
+database Database #1A3A5C
+
+CP -> Frontend : Navigue vers Facturation\nSélectionne template + phase validée
+Frontend -> FastAPI : GET /api/billing/templates
+FastAPI --> Frontend : ClientTemplate[]
+Frontend --> CP : Affiche templates disponibles
+
+CP -> Frontend : Choisit template, saisit lignes\n(désignation, JH, TJM)
+Frontend -> FastAPI : POST /api/billing/invoices\n{template_id, lignes, client_name}
+FastAPI -> BILL : generate_invoice(template, lignes)
+BILL -> BILL : Calculer HT = Σ(JH × TJM)
+BILL -> BILL : Appliquer TVA (19%)
+BILL -> BILL : Numéroter FAC-IT-2026-NNNN
+BILL -> Database : save ClientInvoice (DRAFT)
+BILL -> PDF : Générer PDF avec logo BIAT
+PDF --> BILL : invoice.pdf (bytes)
+FastAPI --> Frontend : ClientInvoiceOut + PDF URL
+Frontend --> CP : ✅ Facture créée — télécharger PDF
+
+CP -> Frontend : Marquer comme envoyée au client
+Frontend -> FastAPI : PATCH /api/billing/invoices/{id}\n{status: SENT}
+FastAPI -> Database : status = SENT
+FastAPI -> Database : AuditLog(CLIENT_INVOICE_SENT)
+
+note over Database : La facture client génère\nécriture comptable 411/7xxx
+
+FastAPI -> Database : JournalEntry:\nDébit 411 (Client) amount_ttc\nCrédit 706 (Prestations) amount_ht\nCrédit 4367 (TVA collectée) tva
+
+Frontend --> CP : Facture en attente de paiement
+
+CP -> Frontend : Client a payé → Marquer PAID
+Frontend -> FastAPI : PATCH /api/billing/invoices/{id}\n{status: PAID}
+FastAPI -> Database : status = PAID
+FastAPI -> Database : AuditLog(CLIENT_INVOICE_PAID)
+FastAPI --> Frontend : ✅ Encaissement enregistré
+@enduml
+
+
+' ============================================================
+' DIAGRAM 13 — Séquence : CAPEX Amortissement
+' ============================================================
+@startuml Diagram13_SeqCAPEX
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title CAPEX — Immobilisation & Amortissement IA (PCE Tunisien)
+
+actor Comptable #1A3A5C
+participant Frontend #2E86C1
+participant FastAPI #2E86C1
+participant ExtractionAgent #F0A500
+participant AccountingAgent #F0A500
+participant Ollama #F0A500
+participant "DepreciationCalculator" as DEPR #1D9E76
+database Database #1A3A5C
+
+note over ExtractionAgent : La facture a été classifiée\ncharge_type = CAPEX\ncompte = 2184 (matériel informatique)
+
+Comptable -> Frontend : Upload facture CAPEX\n(Serveur Dell, 42 500 TND HT)
+Frontend -> FastAPI : POST /api/invoices/upload
+FastAPI -> ExtractionAgent : Extraction + Classification
+ExtractionAgent --> FastAPI : charge_type=CAPEX, compte=2184
+
+FastAPI -> AccountingAgent : Génération écriture CAPEX
+AccountingAgent -> Ollama : "Quelle durée d'amortissement\npour un serveur informatique ?"
+Ollama --> AccountingAgent : "5 ans — matériel informatique\n(durée fiscale standard)"
+AccountingAgent -> AccountingAgent : Préparer écriture:\nDébit 2184 : 42 500\nDébit 4366 : 8 075\nCrédit 401 : 50 575
+AccountingAgent -> Database : save JournalEntry\nsave Asset(useful_life=5, source=AI)
+
+FastAPI --> Frontend : ✅ Immobilisation créée
+
+Comptable -> Frontend : Naviguer vers Immobilisations
+Frontend -> FastAPI : GET /api/capex/assets
+FastAPI --> Frontend : Asset[] avec statut amortissement
+Frontend --> Comptable : Affiche registre + dotations à venir
+
+note over Comptable : Chaque mois, APScheduler calcule\nles dotations aux amortissements
+
+"APScheduler" -> FastAPI : [CRON mensuel] Calcul amortissements
+FastAPI -> DEPR : calculate_monthly_depreciation(asset)
+DEPR -> DEPR : annuel = 42 500 / 5 = 8 500 TND/an\nmensuel = 8 500 / 12 = 708.33 TND
+DEPR -> Database : JournalEntry:\nDébit 6811 (Dotations) 708.33\nCrédit 2884 (Amort. cumulé) 708.33
+FastAPI --> Comptable : Dotation mensuelle enregistrée
+
+Comptable -> Frontend : Voir tableau d'amortissement
+Frontend -> FastAPI : GET /api/capex/assets/{id}/depreciation
+FastAPI -> DEPR : get_schedule(asset)
+DEPR --> FastAPI : 60 mensualités × 708.33 TND
+FastAPI --> Frontend : Tableau complet (Jan 2026 → Déc 2030)
+Frontend --> Comptable : Graphique d'amortissement linéaire
+@enduml
+
+
+' ============================================================
+' DIAGRAM 14 — État : Statuts Facture (avec risques)
+' ============================================================
+@startuml Diagram14_StatutFacture
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title Machine à États — Facture Fournisseur (avec risques)
+
+[*] --> RECEIVED : Dépôt PDF
+
+RECEIVED --> EXTRACTING : Pipeline démarre
+EXTRACTING --> EXTRACTED : Extraction réussie
+EXTRACTING --> EXTRACTION_FAILED : OCR + LLM échouent\n⚠️ Risque CRITIQUE
+EXTRACTING --> ERROR : Erreur système
+
+EXTRACTED --> CLASSIFYING : Étape 2
+CLASSIFYING --> CLASSIFIED : Compte PCE trouvé
+CLASSIFIED --> VALIDATING : Étape 3
+VALIDATING --> VALIDATED : Aucun flag ERROR
+VALIDATING --> FLAGGED : Flag ERROR détecté\n(math/doublon/anomalie)\n⚠️ Risque MOYEN
+
+VALIDATED --> JOURNALING : Étape 4
+JOURNALING --> JOURNALED : Écriture équilibrée
+JOURNALING --> ERROR : Débit ≠ Crédit\n⚠️ Risque CRITIQUE
+
+FLAGGED --> VALIDATED : Comptable corrige + approuve
+FLAGGED --> REJECTED : Comptable rejette
+
+JOURNALED --> EXPORTED : Exporté PCE
+EXPORTED --> PAID : Paiement reçu
+EXPORTED --> EXPORTED : Retard → +10%/30j\n⚠️ Risque pénalités
+
+EXTRACTION_FAILED : ❌ Terminal
+ERROR : ❌ Terminal
+REJECTED : ❌ Terminal
+PAID : ✅ Terminal
+
+note right of FLAGGED
+  File de révision humaine
+  Comptable a 48h pour traiter
+end note
+
+note right of JOURNALING
+  Invariant PCE :
+  |Σdébits - Σcrédits| < 0.005 TND
+  Bloquage automatique si non respecté
+end note
+@enduml
+
+
+' ============================================================
+' DIAGRAM 15 — Workflow : Échéancier & Pénalités
+' ============================================================
+@startuml Diagram15_Penalites
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title Échéancier de Paiement & Pénalités de Retard
+
+start
+:Facture reçue\nMontant TTC : 14 280 TND\nDélai : 90 jours (3 × 30j);
+
+:Générer 3 échéances\n(AccountingAgent);
+
+fork
+  :Échéance 1 — Jour 30\n4 760 TND;
+  if (Payée à temps ?) then (Oui)
+    :✅ PAID;
+  else (Non)
+    :⚠️ LATE — Retard détecté;
+    :Jour 60 : +10%\n5 236 TND;
+    if (Payée maintenant ?) then (Oui)
+      :✅ PAID avec pénalité;
+    else (Non)
+      :Jour 90 : +21%\n5 760 TND;
+      :Relance comptable;
+    end if
+  end if
+fork again
+  :Échéance 2 — Jour 60\n4 760 TND;
+  :Payer à temps;
+  :✅ PAID;
+fork again
+  :Échéance 3 — Jour 90\n4 760 TND;
+  :Payer à temps;
+  :✅ PAID;
+end fork
+
+note right
+  Formule pénalité :
+  montant × (1 + 10%)^n_périodes
+  Recalcul automatique
+  chaque nuit (APScheduler)
+end note
+
+:Écriture comptable pénalité:
+|Débit 401 (Fournisseur) |
+|Débit 668 (Pénalités de retard) |
+|Crédit 532 (Banque) |
+stop
+@enduml
+
+
+' ============================================================
+' DIAGRAM 16 — Workflow : Gestion des Risques
+' ============================================================
+@startuml Diagram16_Risques
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title Workflow Gestion des Risques — Création & Cycle de vie
+
+|Chef de Projet|
+start
+
+split
+  :Voie A — Création manuelle;
+  :Saisir titre, type,\nprobabilité, impact;
+  :Cliquer "Suggérer plan mitigation"\n→ Ollama génère 3 actions;
+  :Sauvegarder le risque;
+split again
+  :Voie B — Détection IA (APScheduler 08h00);
+  :Analyser feuilles de route\ndate_fin < aujourd'hui\nET statut ∉ TERMINE/ANNULE;
+  if (Risque IA déjà existant ?) then (Oui)
+    :Ignorer — anti-doublon;
+    stop
+  else (Non)
+    :Calculer retard\ndays_overdue = today - date_fin;
+    :1-7j → probabilité FAIBLE\n8-30j → MOYENNE\n>30j → ELEVÉE;
+    :Impact = priorité du jalon\n(BASSE→MOYEN, HAUTE→CRITIQUE);
+    :Calculer criticité\nf(probabilité × impact);
+    :Créer risque\ncreated_by = "system:ai"\nbadge 🤖;
+  end if
+end split
+
+:Risque créé — statut IDENTIFIÉ;
+
+|Chef de Projet|
+repeat
+  :Consulter la liste des risques;
+  switch (Décision)
+  case (Surveiller)
+    :statut → EN_SURVEILLANCE;
+  case (Traiter)
+    :statut → EN_TRAITEMENT;
+    :Appliquer plan mitigation;
+  case (Clore)
+    :statut → MAITRISE ou CLOTURE;
+  endswitch
+repeat while (Risque non clôturé ?) is (Oui)
+
+:✅ Risque CLOTURE;
+stop
+@enduml
+
+
+' ============================================================
+' DIAGRAM 17 — Flux par Rôle (avec risques)
+' ============================================================
+@startuml Diagram17_FluxRoles
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title Flux Quotidien par Rôle (avec conscience des risques)
+
+|Comptable|
+start
+:Se connecter;
+:Consulter file de révision\n(factures FLAGGED);
+if (Factures à réviser ?) then (Oui)
+  :Corriger / Approuver / Rejeter;
+end if
+:Uploader nouvelles factures;
+:Vérifier échéancier\n⚠️ Retards → pénalités ?;
+:Exporter journal PCE;
+stop
+
+|Chef de Projet|
+start
+:Se connecter;
+:Mettre à jour avancement phases;
+:Consulter risques IA suggérés;
+if (Nouveaux risques IA ?) then (Oui)
+  :Confirmer ou ignorer;
+end if
+:Vérifier feuille de route\n⚠️ Jalons en retard ?;
+if (Jalons en retard ?) then (Oui)
+  :Cliquer 🤖 → créer risque IA\nou escalader;
+end if
+:Suivre factures client;
+stop
+
+|Direction|
+start
+:Se connecter;
+:Consulter KPIs exécutifs\n(résumé IA InsightAgent);
+:Vérifier risques CRITIQUE\nnon traités;
+:Analyser variances budget\nvs plan annuel;
+:Vérifier répartition CAPEX/OPEX;
+stop
+
+|Admin|
+start
+:Se connecter (hebdomadaire);
+:Vérifier tentatives connexion\n⚠️ Comptes verrouillés ?;
+:Lancer vérification intégrité\naudit HMAC-SHA256;
+:Gérer utilisateurs si besoin;
+:Consulter rapport activité;
+stop
+@enduml
+
+
+' ============================================================
+' DIAGRAM 18 — Risques dans les Processus
+' ============================================================
+@startuml Diagram18_RisquesProcessus
+!theme cerulean-outline
+skinparam backgroundColor #FAFAFA
+title Risques Embarqués dans les 4 Processus Métier
+
+package "Processus 1 — Factures Fournisseurs" {
+  [PDF reçu] as P1S1
+  [Extraction OCR+LLM] as P1S2
+  [Classification PCE] as P1S3
+  [Validation AnomalyAgent] as P1S4
+  [Écriture comptable] as P1S5
+  [Paiement] as P1S6
+
+  note bottom of P1S2 #FFF8E8 : ⚠️ Risque ÉLEVÉ\nPDF illisible → fallback OCR
+  note bottom of P1S3 #FFF8E8 : ⚠️ Risque MOYEN\nCompte PCE erroné\n→ révision humaine
+  note bottom of P1S4 #FFF8E8 : ⚠️ Risque ÉLEVÉ\nAnomalie math/doublon
+  note bottom of P1S5 #FDECEA : ⚠️ Risque CRITIQUE\nÉcriture déséquilibrée\n→ bloquage auto
+  note bottom of P1S6 #FFF8E8 : ⚠️ Risque ÉLEVÉ\nRetard → +10%/30j
+}
+
+package "Processus 2 — Gestion de Projets" {
+  [Phases & livrables] as P2S1
+  [Suivi avancement JH] as P2S2
+  [Validation phase] as P2S3
+
+  note bottom of P2S2 #FFF8E8 : ⚠️ Risque ÉLEVÉ\nRetard jalon → RiskAgent
+  note bottom of P2S2 #FDECEA : ⚠️ Risque CRITIQUE\nBudget ligne dépassé
+  note bottom of P2S1 #FFF8E8 : ⚠️ Risque MOYEN\nLivrable non livré
+}
+
+package "Processus 3 — Facturation Client" {
+  [Phase validée] as P3S1
+  [Génération facture] as P3S2
+  [Encaissement] as P3S3
+
+  note bottom of P3S1 #FDECEA : ⚠️ Risque CRITIQUE\nPhase non validée\n→ facture bloquée
+  note bottom of P3S3 #FFF8E8 : ⚠️ Risque MOYEN\nCréance impayée
+}
+
+package "Processus 4 — CAPEX Amortissement" {
+  [Facture CAPEX] as P4S1
+  [IA suggère durée] as P4S2
+  [Dotation mensuelle] as P4S3
+
+  note bottom of P4S2 #FFF8E8 : ⚠️ Risque ÉLEVÉ\nDurée incorrecte\n→ validation humaine obligatoire
+  note bottom of P4S3 #FDECEA : ⚠️ Risque CRITIQUE\nActif non créé\n→ non-conformité PCE
+}
+
+legend right
+  | Couleur | Niveau |
+  | <#FDECEA> | CRITIQUE |
+  | <#FFF8E8> | ÉLEVÉ |
+  | <#E8F5F0> | MOYEN |
+  | <#EFF4FA> | FAIBLE |
+endlegend
+@enduml
