@@ -1,6 +1,7 @@
 """Shared FastAPI dependencies — DB session, pipeline components."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Generator
 
@@ -57,3 +58,18 @@ def get_components() -> PipelineComponents:
     """Build a fresh PipelineComponents (Ollama backend). Close after use."""
     components, _ = build_pipeline_components()
     return components
+
+
+@contextmanager
+def get_session_ctx():
+    """Context-manager session for use in scheduler jobs (not FastAPI DI)."""
+    _, sf, _, _, _ = _shared_resources()
+    session = sf()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

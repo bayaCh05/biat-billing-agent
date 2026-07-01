@@ -63,7 +63,19 @@ def get_me(
 
     user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="Utilisateur non trouvé.")
+        # Demo users are not persisted in the DB — synthesise from JWT claims.
+        role = current_user.get("role", "")
+        demo_names = {
+            "Comptable":      ("Baya",      "C."),
+            "Chef de Projet": ("Karim",     "B."),
+            "Direction":      ("Directeur", "IT"),
+            "Admin":          ("Admin",     "BIAT"),
+        }
+        nom, prenom = demo_names.get(role, ("Demo", "User"))
+        return UserMeOut(
+            id=None, nom=nom, prenom=prenom,
+            email=email, role=role, departement="", created_at=None,
+        )
     return UserMeOut(
         id=str(user.id), nom=user.nom, prenom=user.prenom, email=user.email,
         role=user.role, departement=user.departement,

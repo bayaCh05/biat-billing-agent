@@ -21,6 +21,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "img-src 'self' data:; "
             "connect-src 'self' http://localhost:11434 http://localhost:8000"
         )
-        response.headers.pop("server", None)
-        response.headers.pop("x-powered-by", None)
+        for hdr in ("server", "x-powered-by"):
+            if hdr in response.headers:
+                del response.headers[hdr]
         return response

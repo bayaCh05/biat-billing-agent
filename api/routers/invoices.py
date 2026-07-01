@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
+from api.auth import get_current_user
 from api.deps import get_session, get_components
 from api.schemas import InvoiceOut, InvoiceSummary, ActionResultOut
 from src.models.enums import InvoiceStatus
@@ -38,8 +39,12 @@ async def upload_invoice(
     request: Request,
     file: UploadFile = File(...),
     live: bool = Form(True),
+    current_user: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
+    if current_user["role"] not in ("COMPTABLE", "ADMIN"):
+        raise HTTPException(403, "Accès refusé. Seul un Comptable peut soumettre des factures.")
+
     content = await file.read()
 
     # Validate file before processing
@@ -53,6 +58,9 @@ async def upload_invoice(
             action="FILE_REJECTED", resource_type="InvoiceRecord", status="FAILURE",
             detail=str(validation_err),
             ip_address=request.client.host if request.client else None,
+            user_id=current_user.get("user_id"),
+            user_email=current_user.get("email"),
+            user_role=current_user.get("role"),
         ))
         session.commit()
         raise
@@ -63,9 +71,12 @@ async def upload_invoice(
         tmp_path = tmp.name
 
     log_action(session, AuditLogCreate(
-        action="FILE_UPLOADED", resource_type="InvoiceRecord", status="SUCCESS",
+        action="INVOICE_UPLOADED", resource_type="InvoiceRecord", status="SUCCESS",
         detail=f"type={file_info['detected_type']} size={file_info['file_size_bytes']}B",
         ip_address=request.client.host if request.client else None,
+        user_id=current_user.get("user_id"),
+        user_email=current_user.get("email"),
+        user_role=current_user.get("role"),
     ))
 
     repo = InvoiceRepository(session)

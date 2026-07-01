@@ -52,6 +52,8 @@ def init_db(engine) -> None:
     import src.storage.orm_models_users         # noqa: F401
     import src.storage.orm_models_extra         # noqa: F401
     import src.storage.orm_models_notifications # noqa: F401
+    import src.storage.orm_models_auth                     # noqa: F401
+    import src.storage.orm_models_payments                 # noqa: F401
     import src.storage.orm_models_audit                    # noqa: F401
     import src.storage.orm_models_password_verification    # noqa: F401
 
