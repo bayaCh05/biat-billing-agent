@@ -45,6 +45,7 @@ def list_entries(
             date_ecriture=entry.date_ecriture,
             description=entry.description,
             source_invoice_id=str(entry.source_invoice_id) if entry.source_invoice_id else None,
+            accounting_explanation=getattr(entry, "accounting_explanation", None),
             lines=[
                 JournalLineOut(
                     compte=line.compte or '',
