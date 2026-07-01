@@ -52,7 +52,7 @@ def security_summary(
 
     uploads_today = session.scalar(
         select(func.count()).select_from(AuditLogORM).where(
-            AuditLogORM.action == "FILE_UPLOADED",
+            AuditLogORM.action.in_(["FILE_UPLOADED", "INVOICE_UPLOADED"]),
             AuditLogORM.created_at >= today_start,
         )
     ) or 0
