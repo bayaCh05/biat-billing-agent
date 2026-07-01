@@ -1,47 +1,71 @@
-# Diagram 15 — Payment Schedule with Late Penalties
+# Diagram 15 — Workflow : Échéancier et Pénalités de Retard (avec colonne risque)
 # Paste into Eraser → New Diagram → Flowchart
 
 ```mermaid
 flowchart TB
-  classDef pending fill:#E3F0F9,stroke:#2E86C1,color:#1A3A5C
-  classDef late fill:#FEF0EE,stroke:#C0391B,color:#C0391B
-  classDef paid fill:#E6F9F3,stroke:#1D9E76,color:#1D9E76
-  classDef journal fill:#E8F5F0,stroke:#1D9E76,color:#0D6E52
-  classDef scheduler fill:#FEF9E7,stroke:#F0A500,color:#8B6914
 
-  START(["📄 Facture JOURNALED\npayment_term_days = 90\namount_ttc = 14 280 TND"])
+  INV["📥 Facture reçue — Jour 0\nMontant TTC : 14 280 TND\nDélai : 90 jours (3 × 30j)"]
 
-  GEN["AccountingAgent\ngénère 3 échéances\n(14 280 / 3 = 4 760 TND chacune)"]:::pending
+  subgraph GEN["Génération de l'échéancier (IA)"]
+    E1["Échéance 1 — Jour 30\n4 760 TND\n🟢 PENDING — À l'heure"]
+    E2["Échéance 2 — Jour 60\n4 760 TND\n🟢 PENDING — À l'heure"]
+    E3["Échéance 3 — Jour 90\n4 760 TND\n🟢 PENDING — À l'heure"]
+  end
 
-  I1["Échéance 1\nDue: J+30 (31 juillet)\n4 760.000 TND\nstatut: PENDING"]:::pending
-  I2["Échéance 2\nDue: J+60 (30 août)\n4 760.000 TND\nstatut: PENDING"]:::pending
-  I3["Échéance 3\nDue: J+90 (29 sept.)\n4 760.000 TND\nstatut: PENDING"]:::pending
+  INV --> E1
+  INV --> E2
+  INV --> E3
 
-  CRON["⏰ APScheduler\nJob nocturne 00:01\n_job_recalculate_installments()"]:::scheduler
+  subgraph LATE1["Scénario : Échéance 1 non payée"]
+    D31["Jour 31 — Retard détecté\n🔴 LATE\n⚠️ Risque : Pénalité imminente"]
+    D31 -->|"+10% après 30j de retard"| P1["Jour 60 : 4 760 × 1,10\n= 5 236 TND\n🔴 Pénalité +10%"]
+    P1 -->|"+10% après 60j de retard"| P2["Jour 90 : 4 760 × 1,21\n= 5 760 TND\n🔴 Pénalité +21%"]
+  end
 
-  LATE1["Échéance 1 — LATE\nDays overdue > 30\nlate_periods = 1\ncurrent = 4 760 × 1.10\n= 5 236.000 TND"]:::late
-  LATE2["Échéance 1 — LATE\nDays overdue > 60\nlate_periods = 2\ncurrent = 4 760 × 1.21\n= 5 759.600 TND"]:::late
+  subgraph PAID1["Paiement tardif de l'échéance 1"]
+    PAY["Jour 65 : Paiement 5 760 TND\n✅ PAID"]
+    JE["Écriture comptable :\nDébit 401 (Fournisseur) 4 760\nDébit 668 (Pénalités) 1 000\nCrédit 532 (Banque) 5 760"]
+  end
 
-  PAY1["✅ Comptable règle Échéance 1\n5 759.600 TND (jour 65)"]:::paid
-  J1["📒 JournalEntry:\nDébit 401: 5 759.600\nCrédit 532 Banque: 5 759.600"]:::journal
+  E1 -->|"Non payée"| D31
+  P1 --> PAY
+  PAY --> JE
 
-  LATE_I2["Échéance 2 — LATE\n(J+60 non payée)"]:::late
-  PAY2["✅ Règlement Échéance 2\nà la valeur majorée"]:::paid
-  J2["📒 JournalEntry:\nDébit 401 + Débit 668 Intérêts\nCrédit 532 Banque"]:::journal
+  subgraph FORMULA["Formule de pénalité"]
+    F["montant × (1 + taux)^périodes_retard\nTaux = 10% par période de 30j\n\nEx : 4 760 × (1,10)² = 5 759,6 TND"]
+  end
 
-  PAY3["✅ Règlement Échéance 3\n4 760.000 TND (dans les délais)"]:::paid
-  J3["📒 JournalEntry:\nDébit 401: 4 760.000\nCrédit 532: 4 760.000"]:::journal
+  subgraph RISK_COL["Niveaux de risque par échéance"]
+    R1["🟢 PENDING — Risque : Nul"]
+    R2["🟡 Échéance dans 7j — Risque : Faible\nPulse jaune dans l'UI"]
+    R3["🔴 1–30j de retard — Risque : ELEVEE\n+10% appliqué"]
+    R4["🔴🔴 > 30j de retard — Risque : CRITIQUE\n+21% ou plus appliqué"]
+  end
 
-  START --> GEN
-  GEN --> I1 & I2 & I3
-
-  I1 -->|"J+30 non payée"| CRON
-  CRON -->|"31 < overdue ≤ 60"| LATE1
-  LATE1 -->|"overdue > 60"| LATE2
-  LATE2 --> PAY1 --> J1
-
-  I2 -->|"J+60 non payée"| LATE_I2
-  LATE_I2 --> PAY2 --> J2
-
-  I3 --> PAY3 --> J3
+  style INV fill:#1A3A5C,color:#FFFFFF
+  style D31 fill:#E74C3C,color:#FFFFFF
+  style P1 fill:#E67E22,color:#FFFFFF
+  style P2 fill:#E74C3C,color:#FFFFFF
+  style PAY fill:#1D9E76,color:#FFFFFF
+  style JE fill:#2E86C1,color:#FFFFFF
+  style F fill:#F5F7FA,color:#1A3A5C,stroke:#2E86C1
+  style R1 fill:#E8F5F0,color:#0D6E52
+  style R2 fill:#FFF8E8,color:#B07800
+  style R3 fill:#FEE8E0,color:#C0391B
+  style R4 fill:#FEE2E2,color:#7F1D1D
 ```
+
+## Tableau récapitulatif des risques par période
+
+| Jour | Échéance | Montant | Statut | Niveau de risque | Action système |
+|------|----------|---------|--------|-----------------|----------------|
+| J+30 | 1 | 4 760 TND | PENDING | 🟢 Nul | — |
+| J+37 | 1 | 4 760 TND | LATE | 🔴 ÉLEVÉ | Alerte comptable |
+| J+60 | 1 | 5 236 TND | LATE +10% | 🔴 CRITIQUE | Pénalité appliquée |
+| J+90 | 1 | 5 760 TND | LATE +21% | 🔴 CRITIQUE | Pénalité compoundée |
+| J+65 | 1 | 5 760 TND | PAID | ✅ Soldée | Écriture 401/668/532 |
+| J+60 | 2 | 4 760 TND | PENDING | 🟢 Nul | — |
+| J+90 | 3 | 4 760 TND | PENDING | 🟢 Nul | — |
+
+> **Règle** : Chaque période de 30 jours de retard = +10% cumulatif sur l'échéance concernée.
+> Recalcul automatique chaque nuit par le scheduler APScheduler.

@@ -41,14 +41,18 @@ class RiskAgent(BaseAgent):
             from sqlalchemy import text
             from src.storage.orm_models_extra import FeuilleDeRouteORM, RisqueORM
             from sqlalchemy import select
+            from uuid import UUID as _UUID
 
-            # Overdue roadmap items
-            overdue = db.execute(
-                select(FeuilleDeRouteORM).where(
-                    FeuilleDeRouteORM.date_fin < today,
-                    FeuilleDeRouteORM.statut.notin_(["TERMINE", "ANNULE"]),
-                )
-            ).scalars().all()
+            item_id_filter = context.get("item_id")
+
+            # Overdue roadmap items (optionally filtered to a single item)
+            q = select(FeuilleDeRouteORM).where(
+                FeuilleDeRouteORM.date_fin < today,
+                FeuilleDeRouteORM.statut.notin_(["TERMINE", "ANNULE"]),
+            )
+            if item_id_filter:
+                q = q.where(FeuilleDeRouteORM.id == _UUID(item_id_filter))
+            overdue = db.execute(q).scalars().all()
 
             created, skipped = 0, 0
 

@@ -420,3 +420,15 @@ export interface RiskSummary {
   top_critical: Array<{ id: string; titre: string; statut: string; projet_id: string | null }>
   total_active: number
 }
+
+export interface RiskBrief {
+  count: number
+  highest_criticite: NiveauCriticite | null
+}
+
+export interface RoadmapItemWithRisks extends RoadmapItem {
+  days_overdue: number
+  is_late: boolean
+  days_until_due: number
+  risk_summary: RiskBrief
+}

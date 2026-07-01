@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from api.auth import require_role
@@ -15,6 +15,8 @@ from api.deps import get_session
 router = APIRouter(prefix="/roadmap", tags=["roadmap"])
 
 _EDIT = Depends(require_role("Chef de Projet", "Admin"))
+
+_CRITICITE_NUM = {4: "CRITIQUE", 3: "ELEVEE", 2: "MOYENNE", 1: "FAIBLE"}
 
 
 class RoadmapItemOut(BaseModel):
@@ -28,6 +30,18 @@ class RoadmapItemOut(BaseModel):
     statut: str
     priorite: str
     annee: int
+
+
+class RiskBriefOut(BaseModel):
+    count: int
+    highest_criticite: str | None
+
+
+class RoadmapItemWithRisks(RoadmapItemOut):
+    days_overdue: int
+    is_late: bool
+    days_until_due: int
+    risk_summary: RiskBriefOut
 
 
 class RoadmapCreateRequest(BaseModel):
@@ -85,6 +99,74 @@ def list_roadmap(
         .order_by(FeuilleDeRouteORM.date_debut)
     ).scalars().all()
     return [_to_out(i) for i in items]
+
+
+@router.get(
+    "/with-risks",
+    response_model=list[RoadmapItemWithRisks],
+    summary="Roadmap avec résumé des risques et indicateurs de retard",
+    description=(
+        "Retourne tous les jalons enrichis avec : "
+        "days_overdue, is_late, days_until_due, et un résumé des risques liés "
+        "(count + niveau de criticité le plus élevé). "
+        "Une seule requête — pas de N+1."
+    ),
+)
+def list_roadmap_with_risks(
+    annee: int = Query(2026),
+    session: Session = Depends(get_session),
+):
+    from src.storage.orm_models_extra import FeuilleDeRouteORM, RisqueORM
+
+    today = date.today()
+
+    items = session.execute(
+        select(FeuilleDeRouteORM)
+        .where(FeuilleDeRouteORM.annee == annee)
+        .order_by(FeuilleDeRouteORM.date_debut)
+    ).scalars().all()
+
+    risk_rows = session.execute(
+        select(
+            RisqueORM.feuille_route_id,
+            func.count(RisqueORM.id).label("risk_count"),
+            func.max(
+                case(
+                    (RisqueORM.niveau_criticite == "CRITIQUE", 4),
+                    (RisqueORM.niveau_criticite == "ELEVEE", 3),
+                    (RisqueORM.niveau_criticite == "MOYENNE", 2),
+                    (RisqueORM.niveau_criticite == "FAIBLE", 1),
+                    else_=0,
+                )
+            ).label("max_criticite_num"),
+        )
+        .where(RisqueORM.feuille_route_id.is_not(None))
+        .group_by(RisqueORM.feuille_route_id)
+    ).all()
+
+    risk_by_item: dict[str, RiskBriefOut] = {
+        str(row.feuille_route_id): RiskBriefOut(
+            count=row.risk_count,
+            highest_criticite=_CRITICITE_NUM.get(row.max_criticite_num),
+        )
+        for row in risk_rows
+    }
+
+    result: list[RoadmapItemWithRisks] = []
+    for item in items:
+        item_id = str(item.id)
+        days_until_due = (item.date_fin - today).days
+        is_late = days_until_due < 0 and item.statut not in ("TERMINE", "ANNULE")
+        days_overdue = max(0, -days_until_due) if is_late else 0
+        rs = risk_by_item.get(item_id, RiskBriefOut(count=0, highest_criticite=None))
+        result.append(RoadmapItemWithRisks(
+            **_to_out(item).model_dump(),
+            days_overdue=days_overdue,
+            is_late=is_late,
+            days_until_due=days_until_due,
+            risk_summary=rs,
+        ))
+    return result
 
 
 @router.post(

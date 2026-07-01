@@ -83,6 +83,27 @@ def scan_roadmap_risks(
     return result.output
 
 
+@router.post(
+    "/scan-item-risk/{item_id}",
+    summary="Créer risque IA pour un jalon spécifique en retard",
+    description=(
+        "Génère un risque de type DELAI via l'IA pour le jalon identifié. "
+        "Accessible aux Chef de Projet et Admin. "
+        "Évite les doublons si un risque IA existe déjà pour ce jalon."
+    ),
+)
+def scan_item_risk(
+    item_id: str,
+    session: Session = Depends(get_session),
+    _user=Depends(require_role("Chef de Projet", "Admin")),
+):
+    from src.ai_agents.risk_agent import RiskAgent
+    result = RiskAgent().run({"task": "scan_roadmap", "db": session, "item_id": item_id})
+    if not result.success:
+        raise HTTPException(500, detail=result.error or "Scan failed")
+    return result.output
+
+
 # ── Mitigation suggestion ─────────────────────────────────────────────────────
 
 @router.post(

@@ -15,7 +15,7 @@ import type {
   BudgetPlanEntry,
   AccountSpendItem,
   AnalyticsKPIs,
-  Risk, RiskSummary,
+  Risk, RiskSummary, RoadmapItemWithRisks,
 } from '../types'
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
@@ -209,6 +209,14 @@ export const getBudgetSynthese = (projetId: string) =>
 
 export const listRoadmap = (annee = 2026) =>
   apiFetch<RoadmapItem[]>(`/roadmap?annee=${annee}`)
+
+export const listRoadmapWithRisks = (annee = 2026) =>
+  apiFetch<RoadmapItemWithRisks[]>(`/roadmap/with-risks?annee=${annee}`)
+
+export const scanItemRisk = (itemId: string) =>
+  apiFetch<{ items_scanned: number; risks_created: number; items_skipped: number }>(
+    `/ai/scan-item-risk/${itemId}`, { method: 'POST' }
+  )
 
 export const createRoadmapItem = (body: Partial<RoadmapItem>) =>
   apiFetch<RoadmapItem>('/roadmap', { method: 'POST', body: JSON.stringify(body) })
