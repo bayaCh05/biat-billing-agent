@@ -88,21 +88,24 @@ export default function SecurityPage() {
       </PageHeader>
 
       <div className="p-6 flex flex-col gap-5">
-        {error && (
-          <div className="px-4 py-3 rounded-xl text-sm text-red-700 bg-red-50">{error}</div>
+        {error && !summary && (
+          <div className="px-4 py-3 rounded-xl text-sm text-amber-700 bg-amber-50 flex items-center gap-2">
+            <AlertTriangle size={14} />
+            Données en cours de chargement — réessayez dans un instant
+          </div>
         )}
 
         {/* KPI overview */}
         <div className="grid grid-cols-4 gap-4">
-          <StatCard label="Connexions aujourd'hui" value={summary?.total_logins_today ?? '—'} color="#2E86C1" />
+          <StatCard label="Connexions aujourd'hui" value={summary?.total_logins_today ?? 0} color="#2E86C1" />
           <StatCard
             label="Échecs de connexion"
-            value={summary?.failed_logins_today ?? '—'}
+            value={summary?.failed_logins_today ?? 0}
             color={summary && summary.failed_logins_today > 10 ? '#C0391B' : '#1A1A2E'}
             icon={summary && summary.failed_logins_today > 10 ? <AlertTriangle size={14} className="text-red-500" /> : undefined}
           />
-          <StatCard label="Comptes verrouillés" value={summary?.locked_accounts_count ?? '—'} color="#F0A500" />
-          <StatCard label="Sessions actives" value={summary?.active_sessions_count ?? '—'} color="#804CD7" />
+          <StatCard label="Comptes verrouillés" value={summary?.locked_accounts_count ?? 0} color="#F0A500" />
+          <StatCard label="Sessions actives" value={summary?.active_sessions_count ?? 0} color="#804CD7" />
         </div>
 
         <div className="grid grid-cols-2 gap-5">

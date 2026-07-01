@@ -115,6 +115,7 @@ export async function apiUpload<T>(path: string, formData: FormData): Promise<T>
 export async function apiLogin(email: string, password: string): Promise<{ access_token: string; role: string; force_password_change: boolean; user_id?: string; expires_in?: number }> {
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   })

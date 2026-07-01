@@ -74,7 +74,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ? `${import.meta.env.VITE_API_URL}/api`
       : '/api'
     fetch(`${base}/auth/refresh`, { method: 'POST', credentials: 'include' })
-      .then(r => r.ok ? r.json() : null)
+      .then(r => {
+        if (r.status === 401) {
+          localStorage.removeItem(STORAGE_KEY)
+          window.location.replace('/login')
+          return null
+        }
+        return r.ok ? r.json() : null
+      })
       .then((data: { access_token: string; role: string } | null) => {
         if (data?.access_token) {
           saveToken(data.access_token)
@@ -85,7 +92,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsAuthenticated(true)
         }
       })
-      .catch(() => { /* refresh cookie expired or missing — redirect to login */ })
+      .catch(() => {
+        localStorage.removeItem(STORAGE_KEY)
+        window.location.replace('/login')
+      })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

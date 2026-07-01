@@ -93,28 +93,22 @@ export default function AIActivityPage() {
           }
         </div>
 
-        {error && (
-          <div className="px-4 py-3 rounded-xl text-sm text-red-700 bg-red-50">
-            {error}
-          </div>
-        )}
-
         {/* Stats cards */}
         <div className="grid grid-cols-3 gap-4">
           <StatCard
             label="Total appels Ollama"
-            value={stats?.total_calls ?? '—'}
+            value={stats?.total_calls ?? 0}
             color="#2E86C1"
           />
           <StatCard
             label="Taux de succès"
-            value={stats ? `${(stats.success_rate * 100).toFixed(1)}` : '—'}
+            value={stats ? `${(stats.success_rate * 100).toFixed(1)}` : '0.0'}
             unit="%"
             color="#1D9E76"
           />
           <StatCard
             label="Durée moyenne"
-            value={stats?.avg_duration_ms ? Math.round(stats.avg_duration_ms) : '—'}
+            value={stats?.avg_duration_ms ? Math.round(stats.avg_duration_ms) : 0}
             unit="ms"
             color="#804CD7"
           />
