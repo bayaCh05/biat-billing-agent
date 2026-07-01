@@ -360,4 +360,6 @@ class NLQueryResult(BaseModel):
     columns: list[str]
     rows: list[list[Any]]
     row_count: int
+    answer: str | None = None
+    explanation: str | None = None
     error: str | None = None

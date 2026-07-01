@@ -326,6 +326,8 @@ export interface NLQueryResult {
   columns: string[]
   rows: (string | number | null)[][]
   row_count: number
+  answer: string | null
+  explanation: string | null
   error: string | null
 }
 

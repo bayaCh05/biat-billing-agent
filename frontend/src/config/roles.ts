@@ -2,7 +2,7 @@ import type { UserRole } from '../context/AuthContext'
 
 export const ROLE_PATHS: Record<UserRole, string[]> = {
   'Admin':          ['/admin', '/kpi', '/audit', '/ai-activity', '/security', '/notifications'],
-  'Comptable':      ['/upload', '/kpi', '/review', '/invoices', '/suivi', '/journal', '/grand-livre', '/billing', '/projects', '/projets-it', '/budget', '/capex', '/requetes', '/roadmap', '/risques', '/notifications'],
+  'Comptable':      ['/upload', '/kpi', '/review', '/invoices', '/suivi', '/journal', '/grand-livre', '/billing', '/projects', '/projets-it', '/budget', '/capex', '/requetes', '/roadmap', '/risques', '/nl-query', '/notifications'],
   'Chef de Projet': ['/upload', '/kpi', '/invoices', '/suivi', '/billing', '/projects', '/projets-it', '/budget', '/roadmap', '/risques', '/notifications'],
-  'Direction':      ['/direction', '/kpi', '/budget', '/capex', '/requetes', '/roadmap', '/risques', '/audit', '/notifications'],
+  'Direction':      ['/direction', '/kpi', '/budget', '/capex', '/requetes', '/roadmap', '/risques', '/nl-query', '/audit', '/notifications'],
 }

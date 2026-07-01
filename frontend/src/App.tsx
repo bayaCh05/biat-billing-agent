@@ -21,6 +21,7 @@ import ChangerMotDePassePage from './pages/ChangerMotDePassePage'
 import RoadmapPage from './pages/RoadmapPage'
 import RisksPage from './pages/RisksPage'
 import AIActivityPage from './pages/AIActivityPage'
+import NLQueryPage from './pages/NLQueryPage'
 import SecurityPage from './pages/SecurityPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
@@ -96,6 +97,7 @@ export default function App() {
                 <Route path="/roadmap"        element={<RoadmapPage />} />
                 <Route path="/risques"        element={<RisksPage />} />
                 <Route path="/ai-activity"    element={<AIActivityPage />} />
+                <Route path="/nl-query"       element={<NLQueryPage />} />
                 <Route path="/security"       element={<SecurityPage />} />
                 <Route path="/audit"            element={<AuditPage />} />
                 <Route path="/notifications"    element={<NotificationsPage />} />

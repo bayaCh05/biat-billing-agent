@@ -3,7 +3,7 @@ import {
   Home, ClipboardList, Files,
   Activity, BookOpen, BookMarked, CreditCard, BarChart2,
   Building2, TrendingUp, Gauge, MessageSquare, FolderKanban,
-  LogOut, Map, ShieldCheck, ShieldAlert, Users, History, Bot,
+  LogOut, Map, ShieldCheck, ShieldAlert, Users, History, Bot, Sparkles,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { ROLE_PATHS } from '../../config/roles'
@@ -28,6 +28,7 @@ const ALL_NAV = [
   { path: '/roadmap',     icon: Map,             label: 'Feuille de Route', roles: ['Comptable', 'Chef de Projet', 'Direction'] },
   { path: '/risques',     icon: ShieldAlert,     label: 'Risques',        roles: ['Comptable', 'Chef de Projet', 'Direction'] },
   { path: '/requetes',    icon: MessageSquare,   label: 'Requêtes',       roles: ['Comptable', 'Direction'] },
+  { path: '/nl-query',    icon: Sparkles,        label: 'Requête IA',     roles: ['Comptable', 'Direction'] },
   { path: '/ai-activity',    icon: Bot,      label: 'Activité IA',    roles: ['Admin'] },
   { path: '/security',       icon: ShieldCheck, label: 'Sécurité',     roles: ['Admin'] },
   { path: '/audit',          icon: History,  label: 'Piste d\'Audit',  roles: ['Admin', 'Direction'] },

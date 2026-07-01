@@ -39,7 +39,9 @@ def nl_query(
 
     sql = result.get("sql") or ""
     rows_raw = result.get("result") or []
-    error = None if sql else (result.get("answer") or result.get("explanation"))
+    answer = result.get("answer")
+    explanation = result.get("explanation")
+    error = None if sql else answer
 
     if rows_raw:
         columns = list(rows_raw[0].keys())
@@ -53,5 +55,7 @@ def nl_query(
         columns=columns,
         rows=rows,
         row_count=len(rows),
+        answer=answer,
+        explanation=explanation,
         error=error,
     )
