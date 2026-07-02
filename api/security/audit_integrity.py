@@ -5,17 +5,26 @@ import hashlib
 import hmac
 import os
 
-HMAC_SECRET = os.getenv("AUDIT_HMAC_SECRET", "")
-
-
 def _get_secret() -> bytes:
-    s = HMAC_SECRET or os.getenv("JWT_SECRET", "")  # fallback for dev
+    # Read from env on every call — do NOT cache at module level.
+    # The module may be imported before the shell sets JWT_SECRET, and a
+    # stale module-level constant would cause every hash to use the wrong key.
+    s = os.getenv("AUDIT_HMAC_SECRET", "").strip() or os.getenv("JWT_SECRET", "")
     return s.encode()
 
 
 def compute_row_hash(log) -> str:
     """Compute HMAC-SHA256 for an AuditLogORM row."""
-    created = log.created_at.isoformat() if log.created_at else ""
+    if log.created_at:
+        dt = log.created_at
+        # Always strip timezone before isoformat — SQLite reads back naive datetimes,
+        # so a timezone-aware isoformat ("+00:00") written at insert time produces a
+        # different string and causes false "tampered" positives on every verification.
+        if getattr(dt, "tzinfo", None) is not None:
+            dt = dt.replace(tzinfo=None)
+        created = dt.isoformat()
+    else:
+        created = ""
     payload = (
         f"{log.id}|"
         f"{created}|"

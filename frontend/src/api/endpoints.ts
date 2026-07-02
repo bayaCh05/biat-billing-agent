@@ -464,9 +464,11 @@ export interface SecuritySummary {
 export interface IntegrityResult {
   total_checked: number
   valid: number
+  null_hash_count: number
   tampered_count: number
   tampered_entries: { id: string; created_at: string; action: string }[]
   integrity_score: number
+  message: string
   checked_at: string
 }
 

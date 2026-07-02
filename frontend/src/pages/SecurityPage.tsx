@@ -124,7 +124,7 @@ export default function SecurityPage() {
                 <div>
                   {integrityScore >= 99
                     ? <p className="text-xs text-green-700 font-medium">✅ Aucune altération détectée</p>
-                    : <p className="text-xs text-red-700 font-medium">⚠️ {integrity?.tampered_count ?? '?'} entrées altérées</p>
+                    : <p className="text-xs text-red-700 font-medium">⚠️ {integrity?.tampered_count ?? '?'} entrée(s) potentiellement altérée(s)</p>
                   }
                   {(integrity?.checked_at ?? summary?.last_integrity_check) && (
                     <p className="text-[10px] text-gray-500">
@@ -135,14 +135,38 @@ export default function SecurityPage() {
               </div>
             )}
 
+            {/* Pre-HMAC entries — not suspicious */}
+            {integrity != null && integrity.null_hash_count > 0 && (
+              <div className="mb-2 p-2 rounded-lg bg-yellow-50 border border-yellow-200">
+                <p className="text-xs font-semibold text-yellow-700 flex items-center gap-1">
+                  🟡 Entrées pré-HMAC (non suspectes) : {integrity.null_hash_count}
+                </p>
+                <p className="text-[10px] text-yellow-600 mt-0.5">
+                  Créées avant l'activation de la vérification — hashes recalculés automatiquement.
+                </p>
+              </div>
+            )}
+
+            {/* Genuinely tampered entries */}
             {integrity?.tampered_entries && integrity.tampered_entries.length > 0 && (
-              <div className="mb-3 p-2 rounded-lg bg-red-50">
-                <p className="text-xs font-semibold text-red-700 mb-1">Entrées altérées:</p>
+              <div className="mb-2 p-2 rounded-lg bg-red-50 border border-red-200">
+                <p className="text-xs font-semibold text-red-700 flex items-center gap-1 mb-1">
+                  🔴 Entrées potentiellement altérées : {integrity.tampered_count}
+                </p>
                 {integrity.tampered_entries.map(e => (
                   <p key={e.id} className="text-[10px] text-red-600">
                     {e.action} — {new Date(e.created_at).toLocaleDateString('fr-TN')}
                   </p>
                 ))}
+              </div>
+            )}
+
+            {/* All clear after check */}
+            {integrity != null && integrity.null_hash_count === 0 && integrity.tampered_count === 0 && (
+              <div className="mb-2 p-2 rounded-lg bg-green-50 border border-green-200">
+                <p className="text-xs text-green-700 font-medium">
+                  ✅ {integrity.total_checked} entrées vérifiées — aucune anomalie.
+                </p>
               </div>
             )}
 

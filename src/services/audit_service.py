@@ -42,8 +42,11 @@ def log_action(session: Session, entry: AuditLogCreate) -> None:
         status=entry.status,
         detail=entry.detail,
     )
-    row.row_hash = compute_row_hash(row)
     session.add(row)
+    # Flush to let SQLAlchemy apply column defaults (id, created_at) before
+    # computing the hash — without flush, row.id and row.created_at are None.
+    session.flush()
+    row.row_hash = compute_row_hash(row)
 
 
 def _ip(request) -> str | None:

@@ -134,11 +134,17 @@ def verify_integrity(
     rows = session.execute(select(AuditLogORM).order_by(AuditLogORM.created_at)).scalars().all()
 
     valid = 0
+    null_hash_entries = []
     tampered = []
     for row in rows:
         if not row.row_hash:
-            # Pre-migration row — backfill hash
+            # Pre-HMAC entry — backfill hash, count separately from genuine tampering
             row.row_hash = compute_row_hash(row)
+            null_hash_entries.append({
+                "id": str(row.id),
+                "created_at": row.created_at.isoformat(),
+                "action": row.action,
+            })
             valid += 1
         elif verify_row_hash(row):
             valid += 1
@@ -152,19 +158,42 @@ def verify_integrity(
     total = len(rows)
     score = (valid / total * 100) if total > 0 else 100.0
 
+    null_count = len(null_hash_entries)
+    tampered_count = len(tampered)
+
+    if null_count and tampered_count:
+        detail_msg = (
+            f"{null_count} entrée(s) antérieure(s) au système HMAC (non suspectes). "
+            f"{tampered_count} entrée(s) potentiellement altérée(s)."
+        )
+    elif null_count:
+        detail_msg = (
+            f"{null_count} entrée(s) antérieure(s) au système HMAC (non suspectes). "
+            f"Score recalculé: {score:.1f}%."
+        )
+    elif tampered_count:
+        detail_msg = (
+            f"{tampered_count} entrée(s) potentiellement altérée(s) détectée(s). "
+            f"Score: {score:.1f}%."
+        )
+    else:
+        detail_msg = f"Intégrité vérifiée — {total} entrées conformes. Score: {score:.1f}%."
+
     log_action(session, AuditLogCreate(
         action="AUDIT_INTEGRITY_CHECK",
         resource_type="AuditLog",
         status="SUCCESS" if not tampered else "FAILURE",
-        detail=f"Score: {score:.1f}%, {len(tampered)} entrées altérées sur {total}",
+        detail=detail_msg,
     ))
     session.commit()
 
     return {
         "total_checked": total,
         "valid": valid,
-        "tampered_count": len(tampered),
+        "null_hash_count": null_count,
+        "tampered_count": tampered_count,
         "tampered_entries": tampered,
         "integrity_score": round(score, 2),
+        "message": detail_msg,
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }

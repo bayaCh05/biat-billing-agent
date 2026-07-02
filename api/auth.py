@@ -15,7 +15,9 @@ if _env_path.exists():
         _line = _line.strip()
         if _line and not _line.startswith("#") and "=" in _line:
             _k, _v = _line.split("=", 1)
-            os.environ.setdefault(_k.strip(), _v.strip())
+            # Strip inline comments (e.g. KEY=value  # comment → value)
+            _v = _v.split("#")[0].strip()
+            os.environ.setdefault(_k.strip(), _v)
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
