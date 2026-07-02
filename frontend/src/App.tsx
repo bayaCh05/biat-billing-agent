@@ -27,6 +27,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage'
 import InscriptionPage from './pages/admin/InscriptionPage'
 import HabilitationsPage from './pages/admin/HabilitationsPage'
 import AuditPage from './pages/AuditPage'
+import EcheancierPage from './pages/EcheancierPage'
 import NotificationsPage from './pages/NotificationsPage'
 import { useAuth, roleHome } from './context/AuthContext'
 import { ROLE_PATHS } from './config/roles'
@@ -82,6 +83,7 @@ export default function App() {
                 <Route path="/review"         element={<ReviewQueue />} />
                 <Route path="/invoices"       element={<InvoiceDetail />} />
                 <Route path="/suivi"          element={<Suivi />} />
+                <Route path="/echeancier"    element={<EcheancierPage />} />
                 <Route path="/journal"        element={<Journaux />} />
                 <Route path="/grand-livre"    element={<GrandLivre />} />
                 <Route path="/billing"        element={<Facturation />} />

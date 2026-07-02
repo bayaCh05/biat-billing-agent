@@ -23,7 +23,7 @@ from api.security.security_headers import SecurityHeadersMiddleware
 
 _log = logging.getLogger(__name__)
 
-from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications, projects
+from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications, projects, payments
 from api.routers import auth as auth_router
 from api.routers import admin, users, roadmap, projet_budget, livrables, audit, risks, security as security_router
 from api.routers import ai as ai_router
@@ -167,6 +167,7 @@ app.include_router(kpi.router,           prefix="/api", dependencies=_PROTECTED)
 app.include_router(billing.router,       prefix="/api", dependencies=_PROTECTED)
 app.include_router(nl_query.router,      prefix="/api", dependencies=_PROTECTED)
 app.include_router(suivi.router,         prefix="/api", dependencies=_PROTECTED)
+app.include_router(payments.router,      prefix="/api", dependencies=_PROTECTED)
 app.include_router(notifications.router, prefix="/api", dependencies=_PROTECTED)
 app.include_router(projects.router,        prefix="/api", dependencies=_PROTECTED)
 app.include_router(admin.router,           prefix="/api", dependencies=_PROTECTED)

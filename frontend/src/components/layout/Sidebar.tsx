@@ -3,7 +3,7 @@ import {
   Home, ClipboardList, Files,
   Activity, BookOpen, BookMarked, CreditCard, BarChart2,
   Building2, TrendingUp, Gauge, MessageSquare, FolderKanban,
-  LogOut, Map, ShieldCheck, ShieldAlert, Users, History, Bot,
+  LogOut, Map, ShieldCheck, ShieldAlert, Users, History, Bot, CalendarClock,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { ROLE_PATHS } from '../../config/roles'
@@ -18,6 +18,7 @@ const ALL_NAV = [
   { path: '/review',      icon: ClipboardList,   label: 'File de révision', roles: ['Comptable'] },
   { path: '/invoices',    icon: Files,           label: 'Factures',       roles: ['Comptable', 'Chef de Projet'] },
   { path: '/suivi',       icon: Activity,        label: 'Suivi',          roles: ['Comptable', 'Chef de Projet'] },
+  { path: '/echeancier', icon: CalendarClock,   label: 'Échéancier',     roles: ['Comptable', 'Direction'] },
   { path: '/journal',     icon: BookOpen,        label: 'Journal',        roles: ['Comptable'] },
   { path: '/grand-livre', icon: BookMarked,      label: 'Grand Livre',    roles: ['Comptable'] },
   { path: '/billing',     icon: CreditCard,      label: 'Facturation',    roles: ['Comptable', 'Chef de Projet'] },
