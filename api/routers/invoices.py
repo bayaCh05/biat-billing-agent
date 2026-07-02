@@ -42,7 +42,7 @@ async def upload_invoice(
     current_user: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    if current_user["role"] not in ("COMPTABLE", "ADMIN"):
+    if current_user["role"] not in ("Comptable", "Admin"):
         raise HTTPException(403, "Accès refusé. Seul un Comptable peut soumettre des factures.")
 
     content = await file.read()
