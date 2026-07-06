@@ -208,6 +208,60 @@ class TestRepository:
         assert sample_invoice.id in ids
         assert inv2.id in ids
 
+    def test_get_review_queue_returns_flagged_and_human_review(self, repo):
+        """get_review_queue doit retourner les FLAGGED ET les human_review_required=True."""
+        # Facture 1 : FLAGGED (doit apparaître)
+        inv_flagged = InvoiceRecord(
+            file_hash="hash_flagged" + "0" * 52,
+            raw_file_path="/inbox/flagged.pdf",
+            direction=InvoiceDirection.SUPPLIER,
+            status=InvoiceStatus.FLAGGED,
+        )
+        inv_flagged.human_review_required = True
+
+        # Facture 2 : VALIDATED mais human_review_required=True (doit apparaître)
+        inv_review = InvoiceRecord(
+            file_hash="hash_review" + "0" * 53,
+            raw_file_path="/inbox/review.pdf",
+            direction=InvoiceDirection.SUPPLIER,
+            status=InvoiceStatus.VALIDATED,
+        )
+        inv_review.human_review_required = True
+
+        # Facture 3 : VALIDATED et human_review_required=False (ne doit PAS apparaître)
+        inv_normal = InvoiceRecord(
+            file_hash="hash_normal" + "0" * 53,
+            raw_file_path="/inbox/normal.pdf",
+            direction=InvoiceDirection.SUPPLIER,
+            status=InvoiceStatus.VALIDATED,
+        )
+        inv_normal.human_review_required = False
+
+        repo.save(inv_flagged)
+        repo.save(inv_review)
+        repo.save(inv_normal)
+
+        queue = repo.get_review_queue()
+        ids = {i.id for i in queue}
+
+        assert inv_flagged.id in ids, "La facture FLAGGED doit être dans la file de révision"
+        assert inv_review.id in ids, "La facture VALIDATED+human_review doit être dans la file"
+        assert inv_normal.id not in ids, "La facture VALIDATED normale ne doit pas apparaître"
+
+    def test_get_review_queue_excludes_resolved(self, repo):
+        """Une facture VALIDATED sans human_review ne doit jamais apparaître dans la file."""
+        inv = InvoiceRecord(
+            file_hash="hash_exported" + "0" * 51,
+            raw_file_path="/inbox/exported.pdf",
+            direction=InvoiceDirection.SUPPLIER,
+            status=InvoiceStatus.EXPORTED,
+        )
+        inv.human_review_required = False
+        repo.save(inv)
+
+        queue = repo.get_review_queue()
+        assert not any(i.id == inv.id for i in queue)
+
 
 # ── Exporter tests ─────────────────────────────────────────────────────────────
 

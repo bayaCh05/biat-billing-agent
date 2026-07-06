@@ -11,15 +11,19 @@ Strategy:
 from __future__ import annotations
 
 import os
+from datetime import date
+from uuid import UUID
 
 # Must be set before any api.* imports so the limiter reads it
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.storage.db import build_engine, build_session_factory, init_db
+from src.storage.orm_models_payments import PaymentInstallmentORM
 
 # ── In-memory DB shared across all tests in this module ───────────────────────
 
@@ -165,6 +169,57 @@ class TestInvoices:
         token = _login("comptable@biat-it.tn", "biat2026")
         r = client.post("/api/invoices/upload", headers=_auth(token))
         assert r.status_code == 422
+
+
+# ── Payment installments endpoint ───────────────────────────────────────────
+
+class TestPaymentInstallments:
+    def test_mark_paid_updates_existing_installment(self):
+        token = _login("comptable@biat-it.tn", "biat2026")
+
+        session = _sf()
+        try:
+            session.execute(text(
+                "INSERT INTO payment_installments ("
+                "id, invoice_id, installment_number, total_installments, base_amount, current_amount, due_date, status, late_periods, created_at, updated_at"
+                ") VALUES ("
+                ":id, :invoice_id, :installment_number, :total_installments, :base_amount, :current_amount, :due_date, :status, :late_periods, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
+                ")"
+            ), {
+                "id": "7947955e-a599-4512-b8c7-5c2ab4c27166",
+                "invoice_id": "invoice-1",
+                "installment_number": 2,
+                "total_installments": 3,
+                "base_amount": 5751.667,
+                "current_amount": 5751.667,
+                "due_date": "2026-06-27",
+                "status": "PENDING",
+                "late_periods": 0,
+            })
+            session.commit()
+        finally:
+            session.close()
+
+        r = client.patch(
+            "/api/installments/7947955e-a599-4512-b8c7-5c2ab4c27166/mark-paid",
+            headers=_auth(token),
+            json={"paid_amount": 5751.667, "paid_date": "2026-06-27"},
+        )
+
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "PAID"
+
+        session = _sf()
+        try:
+            row = session.execute(text(
+                "SELECT status, paid_amount, paid_date FROM payment_installments WHERE id = :id"
+            ), {"id": "7947955e-a599-4512-b8c7-5c2ab4c27166"}).mappings().first()
+            assert row is not None
+            assert row["status"] == "PAID"
+            assert row["paid_amount"] == 5751.667
+            assert str(row["paid_date"]) == "2026-06-27"
+        finally:
+            session.close()
 
 
 # ── RBAC tests ────────────────────────────────────────────────────────────────
@@ -336,3 +391,86 @@ class TestBilling:
     def test_billing_requires_auth(self):
         r = client.get("/api/billing/invoices")
         assert r.status_code == 401
+
+
+# ── Review RBAC — M1a ─────────────────────────────────────────────────────────
+
+class TestReviewRBAC:
+    """Vérifie que seuls Comptable et Admin peuvent approuver/rejeter.
+
+    On utilise un UUID inexistant : le rôle guard (403) s'évalue AVANT
+    la recherche en base, donc les rôles autorisés retournent 404 (RBAC OK)
+    et les rôles non autorisés retournent 403 (RBAC KO).
+    """
+
+    _FAKE_ID = "00000000-0000-0000-0000-000000000099"
+
+    def test_direction_cannot_approve(self):
+        token = _login("directeur@biat-it.tn", "biat2026")
+        r = client.post(f"/api/review/{self._FAKE_ID}/approve", headers=_auth(token))
+        assert r.status_code == 403, r.text
+
+    def test_chef_cannot_approve(self):
+        token = _login("chef@biat-it.tn", "biat2026")
+        r = client.post(f"/api/review/{self._FAKE_ID}/approve", headers=_auth(token))
+        assert r.status_code == 403, r.text
+
+    def test_comptable_can_approve_rbac_passes(self):
+        # RBAC OK → 404 car la facture n'existe pas en DB
+        token = _login("comptable@biat-it.tn", "biat2026")
+        r = client.post(f"/api/review/{self._FAKE_ID}/approve", headers=_auth(token))
+        assert r.status_code == 404, r.text
+
+    def test_admin_can_approve_rbac_passes(self):
+        token = _login("admin@biat-it.tn", "admin2026")
+        r = client.post(f"/api/review/{self._FAKE_ID}/approve", headers=_auth(token))
+        assert r.status_code == 404, r.text
+
+    def test_direction_cannot_reject(self):
+        token = _login("directeur@biat-it.tn", "biat2026")
+        r = client.post(f"/api/review/{self._FAKE_ID}/reject", headers=_auth(token))
+        assert r.status_code == 403, r.text
+
+    def test_chef_cannot_reject(self):
+        token = _login("chef@biat-it.tn", "biat2026")
+        r = client.post(f"/api/review/{self._FAKE_ID}/reject", headers=_auth(token))
+        assert r.status_code == 403, r.text
+
+
+# ── Reset token replay — M1b ──────────────────────────────────────────────────
+
+class TestResetTokenReplay:
+    """Vérifie que le token de réinitialisation de mot de passe est invalidé après usage."""
+
+    def test_demo_reset_token_cannot_be_replayed(self):
+        from src.services.password_verification_service import (
+            generate_demo_reset_link,
+            _DEMO_RESET_TOKENS,
+        )
+
+        demo_email = "comptable@biat-it.tn"
+        original_password = "biat2026"
+
+        link = generate_demo_reset_link(demo_email, "FORGOT_PASSWORD")
+        token = link.split("token=", 1)[1]
+
+        try:
+            # Premier usage : doit réussir
+            r1 = client.post("/api/auth/reset-password", json={
+                "token": token,
+                "new_password": "nouveauPass99",
+            })
+            assert r1.status_code == 200, r1.text
+            assert r1.json()["success"] is True
+
+            # Deuxième usage avec le même token : doit échouer (token consommé)
+            r2 = client.post("/api/auth/reset-password", json={
+                "token": token,
+                "new_password": "autrePass99",
+            })
+            assert r2.status_code == 400, r2.text
+        finally:
+            # Restaure le mot de passe d'origine pour ne pas casser les autres tests
+            from api.routers.auth import USERS
+            if demo_email in USERS:
+                USERS[demo_email]["password"] = original_password
