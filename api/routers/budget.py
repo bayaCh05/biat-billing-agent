@@ -5,12 +5,14 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.auth import require_role
+from api.auth import get_current_user, require_role
 from api.deps import get_session, get_budget_plan
+from src.models.audit import AuditLogCreate
+from src.services.audit_service import log_action, _ip, _ua
 from api.schemas import (
     BudgetSummaryOut, BudgetLineOut,
     BudgetPlanEntryOut, BudgetPlanEntryIn, BudgetPlanUpdateIn,
@@ -111,8 +113,9 @@ def get_budget_plan_entries(year: int = date.today().year, session: Session = De
 def update_budget_plan_entry(
     catalog_id: str,
     body: BudgetPlanUpdateIn,
+    request: Request,
     year: int = date.today().year,
-    _: None = _COMPTABLE_OR_ADMIN,
+    current_user: dict = _COMPTABLE_OR_ADMIN,
     session: Session = Depends(get_session),
 ):
     row = session.execute(
@@ -132,6 +135,17 @@ def update_budget_plan_entry(
     if body.note is not None:
         row.note = body.note
     row.updated_at = datetime.now(timezone.utc)
+    log_action(session, AuditLogCreate(
+        user_id=current_user.get("sub"),
+        user_email=current_user.get("email"),
+        user_role=current_user.get("role"),
+        action="BUDGET_PLAN_UPDATED",
+        resource_type="BudgetPlan",
+        resource_id=f"{catalog_id}/{year}",
+        status="SUCCESS",
+        ip_address=_ip(request),
+        user_agent=_ua(request),
+    ))
     session.commit()
     return BudgetPlanEntryOut(
         catalog_id=row.catalog_id, year=row.year, label=row.label,
@@ -142,8 +156,9 @@ def update_budget_plan_entry(
 @router.post("/plan", response_model=BudgetPlanEntryOut, status_code=201, summary="Ajouter une ligne budgétaire")
 def create_budget_plan_entry(
     body: BudgetPlanEntryIn,
+    request: Request,
     year: int = date.today().year,
-    _: None = _COMPTABLE_OR_ADMIN,
+    current_user: dict = _COMPTABLE_OR_ADMIN,
     session: Session = Depends(get_session),
 ):
     if len(body.monthly) != 12:
@@ -161,6 +176,17 @@ def create_budget_plan_entry(
         monthly=[float(v) for v in body.monthly], note=body.note,
     )
     session.add(row)
+    log_action(session, AuditLogCreate(
+        user_id=current_user.get("sub"),
+        user_email=current_user.get("email"),
+        user_role=current_user.get("role"),
+        action="BUDGET_PLAN_CREATED",
+        resource_type="BudgetPlan",
+        resource_id=f"{body.catalog_id}/{year}",
+        status="SUCCESS",
+        ip_address=_ip(request),
+        user_agent=_ua(request),
+    ))
     session.commit()
     return BudgetPlanEntryOut(
         catalog_id=row.catalog_id, year=row.year, label=row.label,
@@ -171,8 +197,9 @@ def create_budget_plan_entry(
 @router.delete("/plan/{catalog_id}", status_code=204, summary="Supprimer une ligne budgétaire")
 def delete_budget_plan_entry(
     catalog_id: str,
+    request: Request,
     year: int = date.today().year,
-    _: None = _COMPTABLE_OR_ADMIN,
+    current_user: dict = _COMPTABLE_OR_ADMIN,
     session: Session = Depends(get_session),
 ):
     row = session.execute(
@@ -184,4 +211,15 @@ def delete_budget_plan_entry(
     if not row:
         raise HTTPException(status_code=404, detail=f"Budget line '{catalog_id}' not found")
     session.delete(row)
+    log_action(session, AuditLogCreate(
+        user_id=current_user.get("sub"),
+        user_email=current_user.get("email"),
+        user_role=current_user.get("role"),
+        action="BUDGET_PLAN_DELETED",
+        resource_type="BudgetPlan",
+        resource_id=f"{catalog_id}/{year}",
+        status="SUCCESS",
+        ip_address=_ip(request),
+        user_agent=_ua(request),
+    ))
     session.commit()
