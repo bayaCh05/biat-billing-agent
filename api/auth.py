@@ -7,6 +7,8 @@ import string
 from pathlib import Path
 
 import bcrypt
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 # Load .env file if present (dev convenience — production uses real env vars)
 _env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -31,6 +33,7 @@ from api.security.jwt_handler import (
     decode_any,
     verify_access_token,
 )
+from api.deps import get_session
 
 # ── Demo fallback users ────────────────────────────────────────────────────────
 # Passwords MUST be set via env vars — no hardcoded defaults.
@@ -54,6 +57,34 @@ USERS: dict[str, dict[str, str]] = {
     },
 }
 
+DEMO_USER_PROFILES: dict[str, dict[str, str]] = {
+    "comptable@biat-it.tn": {
+        "nom": "Comptable",
+        "prenom": "Demo",
+        "departement": "Comptabilité",
+    },
+    "chef@biat-it.tn": {
+        "nom": "Chef",
+        "prenom": "Demo",
+        "departement": "Projets",
+    },
+    "directeur@biat-it.tn": {
+        "nom": "Direction",
+        "prenom": "Demo",
+        "departement": "Direction",
+    },
+    "admin@biat-it.tn": {
+        "nom": "Admin",
+        "prenom": "Demo",
+        "departement": "IT",
+    },
+}
+
+DEMO_AUTH_STATE: dict[str, dict[str, object]] = {
+    email: {"is_first_login": True}
+    for email in USERS
+}
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
@@ -74,9 +105,18 @@ def generate_temp_password(length: int = 12) -> str:
 
 # ── FastAPI dependencies ───────────────────────────────────────────────────────
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
-    """FastAPI dependency — returns the full JWT payload dict."""
-    return decode_any(token)
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    session: Session = Depends(get_session),
+) -> dict:
+    """FastAPI dependency — vérifie signature, expiration ET révocation (après logout)."""
+    payload = verify_access_token(token, db=session)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token invalide ou révoqué — reconnectez-vous.",
+        )
+    return payload
 
 
 def require_role(*roles: str):
@@ -122,3 +162,72 @@ def validate_demo_users() -> None:
             "⚠️  Mots de passe faibles pour les comptes démo: %s (minimum 8 caractères recommandé).",
             ", ".join(weak),
         )
+
+
+def refresh_demo_passwords(session: Session) -> None:
+    """Re-apply env-var passwords to all seeded demo accounts on every startup.
+
+    Guarantees demo accounts are never permanently locked out after a
+    password-change flow or failed-attempts lockout in development.
+    """
+    from src.storage.orm_models_users import UserORM
+
+    mapping = {
+        "comptable@biat-it.tn": os.getenv("DEMO_COMPTABLE_PASSWORD", ""),
+        "chef@biat-it.tn":      os.getenv("DEMO_CHEF_PASSWORD", ""),
+        "directeur@biat-it.tn": os.getenv("DEMO_DIRECTION_PASSWORD", ""),
+        "admin@biat-it.tn":     os.getenv("DEMO_ADMIN_PASSWORD", ""),
+    }
+    refreshed = 0
+    for email, pw in mapping.items():
+        if not pw:
+            continue
+        user = session.execute(
+            select(UserORM).where(UserORM.email == email)
+        ).scalar_one_or_none()
+        if user:
+            user.hashed_password       = hash_password(pw)
+            user.is_first_login        = False
+            user.failed_login_attempts = 0
+            user.locked_until          = None
+            refreshed += 1
+    if refreshed:
+        session.commit()
+        import logging
+        logging.getLogger(__name__).info(
+            "✅ Demo passwords refreshed for %d account(s).", refreshed
+        )
+
+
+def seed_demo_users(session: Session) -> int:
+    """Ensure demo accounts exist in the database so all auth flows work uniformly."""
+    from src.storage.orm_models_users import UserORM
+
+    created = 0
+    for email, info in USERS.items():
+        password = info.get("password", "")
+        if not password:
+            continue
+
+        existing = session.execute(
+            select(UserORM).where(UserORM.email == email)
+        ).scalar_one_or_none()
+        if existing:
+            continue
+
+        profile = DEMO_USER_PROFILES.get(email, {})
+        session.add(UserORM(
+            nom=profile.get("nom", email.split("@")[0].capitalize()),
+            prenom=profile.get("prenom", "Demo"),
+            email=email,
+            hashed_password=hash_password(password),
+            role=info["role"],
+            departement=profile.get("departement", "Demo"),
+            is_first_login=True,
+            is_active=True,
+        ))
+        created += 1
+
+    if created:
+        session.commit()
+    return created
