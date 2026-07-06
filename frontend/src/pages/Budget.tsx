@@ -243,7 +243,7 @@ export default function Budget() {
   const [editing, setEditing] = useState<BudgetPlanEntry | null>(null)
   const [showAdd, setShowAdd] = useState(false)
 
-  const canEdit = role === 'Admin' || role === 'Comptable' || role === 'Direction'
+  const canEdit = role === 'Admin' || role === 'Comptable'
   const showProjectBanner = role === 'Chef de Projet' || role === 'Comptable'
 
   const load = useCallback(() => {

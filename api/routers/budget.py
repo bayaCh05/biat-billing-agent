@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from api.auth import require_role
 from api.deps import get_session, get_budget_plan
 from api.schemas import (
     BudgetSummaryOut, BudgetLineOut,
@@ -20,6 +21,8 @@ from src.storage.orm_models import BudgetPlanORM
 router = APIRouter(prefix="/budget", tags=["budget"])
 
 _YAML_PATH = Path("config/budget_plan.yaml")
+
+_COMPTABLE_OR_ADMIN = Depends(require_role("Comptable", "Admin"))
 
 
 def _seed_from_yaml(session: Session, year: int) -> None:
@@ -109,6 +112,7 @@ def update_budget_plan_entry(
     catalog_id: str,
     body: BudgetPlanUpdateIn,
     year: int = date.today().year,
+    _: None = _COMPTABLE_OR_ADMIN,
     session: Session = Depends(get_session),
 ):
     row = session.execute(
@@ -139,6 +143,7 @@ def update_budget_plan_entry(
 def create_budget_plan_entry(
     body: BudgetPlanEntryIn,
     year: int = date.today().year,
+    _: None = _COMPTABLE_OR_ADMIN,
     session: Session = Depends(get_session),
 ):
     if len(body.monthly) != 12:
@@ -167,6 +172,7 @@ def create_budget_plan_entry(
 def delete_budget_plan_entry(
     catalog_id: str,
     year: int = date.today().year,
+    _: None = _COMPTABLE_OR_ADMIN,
     session: Session = Depends(get_session),
 ):
     row = session.execute(
