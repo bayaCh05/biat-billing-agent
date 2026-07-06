@@ -43,6 +43,10 @@ export interface Invoice {
   human_review_required: boolean
   received_at: string
   line_items: LineItem[]
+  // Champs IA — optionnels car absents pour les factures anciennes
+  classification_reason?: string | null
+  classification_pass?: string | null
+  payment_term_days?: number | null
 }
 
 export interface InvoiceSummary {
@@ -243,6 +247,7 @@ export interface UserMe {
   role: string
   departement: string
   created_at: string | null
+  profile_picture?: string | null
 }
 
 export interface AdminUser {
@@ -419,6 +424,14 @@ export interface RiskSummary {
   overdue: Array<{ id: string; titre: string; date_echeance_mitigation: string }>
   top_critical: Array<{ id: string; titre: string; statut: string; projet_id: string | null }>
   total_active: number
+}
+
+export interface RisquesProjetGroupe {
+  projet_id: string
+  project_name: string
+  total: number
+  by_criticite: Record<NiveauCriticite, number>
+  risks: Risk[]
 }
 
 export interface RiskBrief {
