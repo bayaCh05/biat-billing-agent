@@ -86,14 +86,17 @@ export default function KPIDashboard() {
   const [error, setError] = useState(false)
 
   useEffect(() => {
+    const controller = new AbortController()
+    const { signal } = controller
     Promise.all([
-      apiFetch<KpiData>('/kpi').then(setKpi),
-      apiFetch<BudgetSummary>('/budget/summary').then(setBudget),
-      apiFetch<Asset[]>('/assets').then(setAssets),
-      apiFetch<InvoiceSummary[]>('/invoices').then(setInvoices),
+      apiFetch<KpiData>('/kpi', { signal }).then(setKpi),
+      apiFetch<BudgetSummary>('/budget/summary', { signal }).then(setBudget),
+      apiFetch<Asset[]>('/assets', { signal }).then(setAssets),
+      apiFetch<InvoiceSummary[]>('/invoices', { signal }).then(setInvoices),
     ])
-      .catch(() => setError(true))
+      .catch(err => { if (err.name !== 'AbortError') setError(true) })
       .finally(() => setLoading(false))
+    return () => controller.abort()
   }, [])
 
   const now = new Date()
