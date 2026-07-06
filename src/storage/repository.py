@@ -168,6 +168,23 @@ class InvoiceRepository:
         ).scalars().all()
         return [self._to_pydantic(o) for o in orms]
 
+    def get_review_queue(self) -> list[InvoiceRecord]:
+        """Factures en attente de révision humaine : FLAGGED ou human_review_required=True."""
+        from sqlalchemy import or_
+        orms = self.session.execute(
+            self._eager(
+                select(InvoiceORM)
+                .where(
+                    or_(
+                        InvoiceORM.status == InvoiceStatus.FLAGGED.value,
+                        InvoiceORM.human_review_required == True,  # noqa: E712
+                    )
+                )
+                .order_by(InvoiceORM.received_at.asc())
+            )
+        ).scalars().all()
+        return [self._to_pydantic(o) for o in orms]
+
     def find_potential_duplicates(
         self,
         invoice_number: str,

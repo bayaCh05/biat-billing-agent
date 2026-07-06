@@ -32,11 +32,7 @@ _COMPTABLE_OR_ADMIN = Depends(require_role("Comptable", "Admin"))
 )
 def get_review_queue(session: Session = Depends(get_session)):
     repo = InvoiceRepository(session)
-    all_inv = repo.list_all(limit=500)
-    queue = [
-        inv for inv in all_inv
-        if inv.human_review_required or inv.status == InvoiceStatus.FLAGGED
-    ]
+    queue = repo.get_review_queue()
     return [InvoiceSummary.from_record(inv) for inv in queue]
 
 
