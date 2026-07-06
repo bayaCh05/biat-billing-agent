@@ -69,7 +69,7 @@ def approve(
     repo.save(inv)
 
     log_action(session, AuditLogCreate(
-        user_id=current_user.get("user_id"),
+        user_id=current_user.get("sub"),
         user_email=current_user.get("email"),
         user_role=current_user.get("role"),
         action="APPROVE",
@@ -110,7 +110,7 @@ def reject(
     repo.save(inv)
 
     log_action(session, AuditLogCreate(
-        user_id=current_user.get("user_id"),
+        user_id=current_user.get("sub"),
         user_email=current_user.get("email"),
         user_role=current_user.get("role"),
         action="REJECT",

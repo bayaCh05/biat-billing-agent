@@ -58,7 +58,7 @@ async def upload_invoice(
             action="FILE_REJECTED", resource_type="InvoiceRecord", status="FAILURE",
             detail=str(validation_err),
             ip_address=request.client.host if request.client else None,
-            user_id=current_user.get("user_id"),
+            user_id=current_user.get("sub"),
             user_email=current_user.get("email"),
             user_role=current_user.get("role"),
         ))
@@ -74,7 +74,7 @@ async def upload_invoice(
         action="INVOICE_UPLOADED", resource_type="InvoiceRecord", status="SUCCESS",
         detail=f"type={file_info['detected_type']} size={file_info['file_size_bytes']}B",
         ip_address=request.client.host if request.client else None,
-        user_id=current_user.get("user_id"),
+        user_id=current_user.get("sub"),
         user_email=current_user.get("email"),
         user_role=current_user.get("role"),
     ))

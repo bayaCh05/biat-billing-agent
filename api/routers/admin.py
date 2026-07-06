@@ -92,7 +92,7 @@ def create_user(
     session.flush()  # get user.id before log
 
     log_action(session, AuditLogCreate(
-        user_id=current_user.get("user_id"),
+        user_id=current_user.get("sub"),
         user_email=current_user.get("email"),
         user_role=current_user.get("role"),
         action="CREATE",
@@ -140,7 +140,7 @@ def list_users(
             is_first_login=u.is_first_login,
             is_active=u.is_active,
             created_at=u.created_at.isoformat(),
-            is_demo=False,
+            is_demo=u.email in USERS,
         )
         for u in db_users
     ]
@@ -200,7 +200,7 @@ def update_user(
     after = {"role": user.role, "is_active": user.is_active, "departement": user.departement}
 
     log_action(session, AuditLogCreate(
-        user_id=current_user.get("user_id"),
+        user_id=current_user.get("sub"),
         user_email=current_user.get("email"),
         user_role=current_user.get("role"),
         action="UPDATE",
@@ -252,7 +252,7 @@ def reset_password(
     user.is_first_login = True
 
     log_action(session, AuditLogCreate(
-        user_id=current_user.get("user_id"),
+        user_id=current_user.get("sub"),
         user_email=current_user.get("email"),
         user_role=current_user.get("role"),
         action="UPDATE",
