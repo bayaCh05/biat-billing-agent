@@ -79,6 +79,11 @@ export default function AIActivityPage() {
       </PageHeader>
 
       <div className="p-6 flex flex-col gap-5">
+        {error && (
+          <div className="px-4 py-3 rounded-xl text-sm font-medium" style={{ background: '#FDECEA', color: '#C0391B' }}>
+            {error}
+          </div>
+        )}
         {/* Status banner */}
         <div
           className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium"

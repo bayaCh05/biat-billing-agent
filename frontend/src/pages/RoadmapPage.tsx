@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Plus, X, AlertTriangle, CheckCircle, Clock, ChevronRight } from 'lucide-react'
+import { useState, useEffect, useCallback, type CSSProperties } from 'react'
+import { Plus, X, AlertTriangle, CheckCircle, ChevronRight } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
@@ -39,7 +39,6 @@ const CRITICITE_COLOR: Record<NiveauCriticite, string> = {
   CRITIQUE: '#E74C3C',
 }
 
-const CRITICITE_ORDER: NiveauCriticite[] = ['FAIBLE', 'MOYENNE', 'ELEVEE', 'CRITIQUE']
 
 const QUARTERS = [
   { label: 'T1 2026', start: 0,   end: 90  },
@@ -104,6 +103,7 @@ export default function RoadmapPage() {
   const [items, setItems]           = useState<RoadmapItemWithRisks[]>([])
   const [projects, setProjects]     = useState<Project[]>([])
   const [loading, setLoading]       = useState(true)
+  const [loadError, setLoadError]   = useState(false)
   const [filterStatut, setFilterStatut] = useState('')
   const [filterProjet, setFilterProjet] = useState('')
   const [delayFilter, setDelayFilter]   = useState<DelayCategory>(null)
@@ -123,7 +123,7 @@ export default function RoadmapPage() {
   useEffect(() => {
     Promise.all([listRoadmapWithRisks(2026), listProjects()])
       .then(([r, p]) => { setItems(r); setProjects(p) })
-      .catch(() => {})
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false))
   }, [])
 
@@ -173,7 +173,7 @@ export default function RoadmapPage() {
   const counts = items.reduce(
     (acc, i) => {
       const cat = classifyItem(i)
-      acc[cat]++
+      if (cat !== null) acc[cat]++
       if (i.risk_summary.highest_criticite === 'CRITIQUE') acc.critical++
       return acc
     },
@@ -183,7 +183,7 @@ export default function RoadmapPage() {
   async function handleSave() {
     setSaving(true)
     try {
-      const created = await createRoadmapItem(form)
+      await createRoadmapItem(form)
       // listRoadmapWithRisks to get enriched item
       const all = await listRoadmapWithRisks(2026)
       setItems(all)
@@ -222,6 +222,12 @@ export default function RoadmapPage() {
       </PageHeader>
 
       <div className="p-6 space-y-5">
+
+        {loadError && (
+          <div className="px-4 py-3 rounded-xl text-sm font-medium" style={{ background: '#FDECEA', color: '#C0391B' }}>
+            Impossible de charger la feuille de route — vérifiez votre connexion et rechargez la page.
+          </div>
+        )}
 
         {/* Summary bar */}
         {!loading && (
@@ -344,7 +350,7 @@ export default function RoadmapPage() {
                           <div
                             key={item.id}
                             className={`flex items-center gap-3 group rounded-lg ${isSelectedPanel ? 'ring-1' : ''}`}
-                            style={isSelectedPanel ? { ringColor: '#2E86C1' } : {}}
+                            style={isSelectedPanel ? { '--tw-ring-color': '#2E86C1' } as CSSProperties : {}}
                           >
                             {/* Label */}
                             <div className="shrink-0 w-44 pr-3">
