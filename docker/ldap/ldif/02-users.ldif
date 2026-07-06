@@ -1,0 +1,75 @@
+# ── Admin ──────────────────────────────────────────────────────────────────────
+dn: cn=abenali,ou=users,dc=biat,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+cn: abenali
+sn: Ben Ali
+givenName: Amine
+uid: abenali
+mail: abenali@biat.local
+userPassword: Biat2026!
+departmentNumber: IT
+
+# ── Comptables ─────────────────────────────────────────────────────────────────
+dn: cn=mtrabelsi,ou=users,dc=biat,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+cn: mtrabelsi
+sn: Trabelsi
+givenName: Mehdi
+uid: mtrabelsi
+mail: mtrabelsi@biat.local
+userPassword: Biat2026!
+departmentNumber: Comptabilité
+
+dn: cn=kbouaziz,ou=users,dc=biat,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+cn: kbouaziz
+sn: Bouaziz
+givenName: Karim
+uid: kbouaziz
+mail: kbouaziz@biat.local
+userPassword: Biat2026!
+departmentNumber: Comptabilité
+
+# ── Chefs de projet ────────────────────────────────────────────────────────────
+dn: cn=sbouhdid,ou=users,dc=biat,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+cn: sbouhdid
+sn: Bouhdid
+givenName: Salma
+uid: sbouhdid
+mail: sbouhdid@biat.local
+userPassword: Biat2026!
+departmentNumber: Projets
+
+dn: cn=lfradj,ou=users,dc=biat,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+cn: lfradj
+sn: Fradj
+givenName: Leila
+uid: lfradj
+mail: lfradj@biat.local
+userPassword: Biat2026!
+departmentNumber: Projets
+
+# ── Direction ──────────────────────────────────────────────────────────────────
+dn: cn=rchakroun,ou=users,dc=biat,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+cn: rchakroun
+sn: Chakroun
+givenName: Riadh
+uid: rchakroun
+mail: rchakroun@biat.local
+userPassword: Biat2026!
+departmentNumber: Direction

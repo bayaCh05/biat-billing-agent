@@ -90,6 +90,7 @@ function StepRow({ step, isLast }: { step: PipelineStatusStep; isLast: boolean }
     running: { icon: null, color: '#2E86C1', label: 'En cours' },
     waiting: { icon: '⏳', color: '#A0ADB4', label: 'En attente' },
     failed: { icon: '❌', color: '#C0391B', label: 'Échec' },
+    skipped: { icon: '⏭', color: '#A0ADB4', label: 'Ignoré' },
   }
   const cfg = statusConfig[step.status] ?? statusConfig.waiting
 
@@ -129,7 +130,7 @@ export default function InvoicePipeline() {
   const [errorMsg, setErrorMsg] = useState('')
   const [recent, setRecent] = useState<InvoiceSummary[]>([])
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null)
-  const [pollingId, setPollingId] = useState<string | null>(null)
+  const [, setPollingId] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 

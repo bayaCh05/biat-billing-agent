@@ -35,3 +35,13 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #D5E8F5; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #5BA3C9; }
+
+/* Dropdown de notifications */
+@keyframes notifSlideDown {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+.notif-dropdown {
+  animation: notifSlideDown 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top right;
+}

@@ -1,0 +1,54 @@
+version: "3.9"
+
+# Serveur LDAP mock pour le développement et la démonstration.
+# Lance OpenLDAP pré-chargé avec 6 utilisateurs fictifs répartis en 4 groupes.
+#
+# Démarrage :
+#   docker compose -f docker/ldap/docker-compose.yml up -d
+#
+# Arrêt + suppression des données (reset complet) :
+#   docker compose -f docker/ldap/docker-compose.yml down -v
+
+services:
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: biat_ldap_mock
+    environment:
+      LDAP_ORGANISATION: "BIAT Innovation & Technology"
+      LDAP_DOMAIN: "biat.local"
+      LDAP_ADMIN_PASSWORD: "admin_secret"
+      LDAP_CONFIG_PASSWORD: "config_secret"
+      LDAP_TLS: "false"
+      LDAP_READONLY_USER: "false"
+      LDAP_RFC2307BIS_SCHEMA: "false"
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "true"
+    ports:
+      - "389:389"
+    volumes:
+      # Fichiers LDIF importés au premier démarrage
+      - ./ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom:ro
+      - openldap_data:/var/lib/ldap
+      - openldap_config:/etc/ldap/slapd.d
+    command: "--copy-service --loglevel warning"
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://localhost", "-b", "dc=biat,dc=local", "-D", "cn=admin,dc=biat,dc=local", "-w", "admin_secret"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  phpldapadmin:
+    image: osixia/phpldapadmin:0.9.0
+    container_name: biat_ldap_ui
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+    ports:
+      - "8081:80"
+    depends_on:
+      openldap:
+        condition: service_healthy
+
+volumes:
+  openldap_data:
+  openldap_config:

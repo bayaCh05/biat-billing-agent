@@ -1,0 +1,27 @@
+# Groupes applicatifs — chaque groupe correspond à un rôle dans l'application
+
+dn: cn=admins,ou=groups,dc=biat,dc=local
+objectClass: groupOfNames
+cn: admins
+description: Administrateurs systeme BIAT IT
+member: cn=abenali,ou=users,dc=biat,dc=local
+
+dn: cn=comptables,ou=groups,dc=biat,dc=local
+objectClass: groupOfNames
+cn: comptables
+description: Equipe comptabilite BIAT IT
+member: cn=mtrabelsi,ou=users,dc=biat,dc=local
+member: cn=kbouaziz,ou=users,dc=biat,dc=local
+
+dn: cn=chefs_projet,ou=groups,dc=biat,dc=local
+objectClass: groupOfNames
+cn: chefs_projet
+description: Chefs de projet BIAT IT
+member: cn=sbouhdid,ou=users,dc=biat,dc=local
+member: cn=lfradj,ou=users,dc=biat,dc=local
+
+dn: cn=direction,ou=groups,dc=biat,dc=local
+objectClass: groupOfNames
+cn: direction
+description: Equipe direction BIAT IT
+member: cn=rchakroun,ou=users,dc=biat,dc=local

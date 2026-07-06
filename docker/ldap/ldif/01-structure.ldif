@@ -1,0 +1,10 @@
+# Unités organisationnelles de base
+dn: ou=users,dc=biat,dc=local
+objectClass: organizationalUnit
+ou: users
+description: Utilisateurs BIAT IT
+
+dn: ou=groups,dc=biat,dc=local
+objectClass: organizationalUnit
+ou: groups
+description: Groupes applicatifs BIAT IT

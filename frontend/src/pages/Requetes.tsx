@@ -104,7 +104,7 @@ export default function Requetes() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
     } catch (e) {
       setElapsed(Math.round((Date.now() - t0) / 100) / 10)
-      setResult({ sql: '', columns: [], rows: [], row_count: 0, error: String(e) })
+      setResult({ sql: '', columns: [], rows: [], row_count: 0, answer: null, explanation: null, error: String(e) })
     } finally {
       setLoading(false)
     }

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
-import { getNotificationCount } from '../api/endpoints'
+import { getNotificationCount, getMe } from '../api/endpoints'
 import { getToken, saveToken, clearToken } from '../api/client'
 
 export type UserRole = 'Comptable' | 'Chef de Projet' | 'Direction' | 'Admin'
@@ -27,6 +27,11 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
   }
 }
 
+function isDemoToken(token: string): boolean {
+  const payload = decodeJwtPayload(token)
+  return typeof payload.sub === 'string' && payload.sub.startsWith('demo:')
+}
+
 function nameFromToken(token: string, role: UserRole): string {
   const payload = decodeJwtPayload(token)
   const prenom = typeof payload.prenom === 'string' ? payload.prenom : ''
@@ -45,10 +50,13 @@ interface AuthState {
   role: UserRole
   name: string
   initials: string
+  avatar: string | null
+  setAvatar: (url: string | null) => void
   notifCount: number
   setNotifCount: (count: number | ((prev: number) => number)) => void
   isAuthenticated: boolean
   forcePasswordChange: boolean
+  isDemoUser: boolean
   setRole: (r: UserRole) => void
   loginWithToken: (token: string, role: UserRole, forcePasswordChange?: boolean) => void
   logout: () => void
@@ -64,6 +72,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [notifCount, setNotifCount] = useState(0)
   const [forcePasswordChange, setForcePasswordChange] = useState(false)
+  const [isDemoUser, setIsDemoUser] = useState(false)
+  const [avatar, setAvatar] = useState<string | null>(null)
 
   // On mount: try to restore session via refresh cookie only if the user had a previous session.
   // We skip this on fresh visits (no stored role) to avoid a noisy CORS call on the login page.
@@ -89,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.setItem(STORAGE_KEY, r)
           setRoleState(r)
           setName(nameFromToken(data.access_token, r))
+          setIsDemoUser(isDemoToken(data.access_token))
           setIsAuthenticated(true)
         }
       })
@@ -108,6 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     saveToken(token)
     setRole(r)
     setName(nameFromToken(token, r))
+    setIsDemoUser(isDemoToken(token))
     setIsAuthenticated(true)
     setForcePasswordChange(fpc)
   }
@@ -116,14 +128,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearToken()
     setIsAuthenticated(false)
     setForcePasswordChange(false)
+    setIsDemoUser(false)
+    setAvatar(null)
   }
 
   const clearForcePasswordChange = () => setForcePasswordChange(false)
 
+  // Charge le compteur de notifications et la photo de profil après connexion
   useEffect(() => {
     if (!isAuthenticated) return
     getNotificationCount()
       .then(d => setNotifCount(d.count))
+      .catch(() => {})
+    getMe()
+      .then(u => setAvatar(u.profile_picture ?? null))
       .catch(() => {})
     const id = setInterval(() => {
       getNotificationCount()
@@ -135,8 +153,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      role, setRole, name, initials: initials(name), notifCount, setNotifCount,
-      isAuthenticated, forcePasswordChange,
+      role, setRole, name, initials: initials(name), avatar, setAvatar,
+      notifCount, setNotifCount,
+      isAuthenticated, forcePasswordChange, isDemoUser,
       loginWithToken, logout, clearForcePasswordChange,
     }}>
       {children}

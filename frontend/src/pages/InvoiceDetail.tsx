@@ -10,6 +10,8 @@ import PageSpinner from '../components/ui/PageSpinner'
 const TERMINAL = new Set(['EXPORTED', 'JOURNALED', 'JOURNALING', 'PAID', 'COLLECTED'])
 const PENDING  = new Set(['RECEIVED', 'EXTRACTING', 'EXTRACTED', 'CLASSIFYING', 'CLASSIFIED', 'VALIDATING', 'VALIDATED', 'FLAGGED', 'EXPORTING'])
 
+const confColor = (c: number) => c >= 0.8 ? '#1D9E76' : c >= 0.5 ? '#F0A500' : '#C0391B'
+
 
 export default function InvoiceDetail() {
   const { role, initials } = useAuth()

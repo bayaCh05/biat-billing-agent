@@ -36,7 +36,7 @@ const ALL_NAV = [
 
 export default function Sidebar() {
   const navigate = useNavigate()
-  const { name, initials, role, logout } = useAuth()
+  const { name, initials, role, avatar, logout } = useAuth()
 
   const visibleNav = ALL_NAV.filter(item => {
     const allowed = ROLE_PATHS[role]
@@ -97,10 +97,23 @@ export default function Sidebar() {
         <NavLink
           to="/profile"
           title="Mon profil"
-          className="shrink-0 flex items-center justify-center rounded-full text-white text-xs font-bold hover:opacity-80 hover:ring-2 hover:ring-white/30 transition-all"
-          style={{ width: 30, height: 30, background: avatarBg }}
+          className="shrink-0 rounded-full hover:opacity-80 hover:ring-2 hover:ring-white/30 transition-all overflow-hidden"
+          style={{ width: 30, height: 30 }}
         >
-          {initials}
+          {avatar ? (
+            <img
+              src={avatar}
+              alt="Photo de profil"
+              className="w-full h-full object-cover rounded-full"
+            />
+          ) : (
+            <span
+              className="flex items-center justify-center w-full h-full rounded-full text-white text-xs font-bold"
+              style={{ background: avatarBg }}
+            >
+              {initials}
+            </span>
+          )}
         </NavLink>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold text-white truncate">{name}</p>

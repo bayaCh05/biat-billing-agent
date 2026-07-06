@@ -83,6 +83,7 @@ function MarkPaidModal({ inst, onClose, onDone }: {
     setSaving(true)
     setError('')
     try {
+      console.log('Marking paid:', inst.id)
       await apiFetch(`/payments/installments/${inst.id}/mark-paid`, {
         method: 'PATCH',
         body: JSON.stringify({ paid_amount: parseFloat(amount), paid_date: paidDate }),

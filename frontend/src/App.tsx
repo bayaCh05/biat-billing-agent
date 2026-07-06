@@ -28,7 +28,6 @@ import InscriptionPage from './pages/admin/InscriptionPage'
 import HabilitationsPage from './pages/admin/HabilitationsPage'
 import AuditPage from './pages/AuditPage'
 import EcheancierPage from './pages/EcheancierPage'
-import NotificationsPage from './pages/NotificationsPage'
 import { useAuth, roleHome } from './context/AuthContext'
 import { ROLE_PATHS } from './config/roles'
 
@@ -45,8 +44,11 @@ function AuthGuard() {
 }
 
 function PasswordChangeGuard() {
-  const { forcePasswordChange } = useAuth()
+  const { forcePasswordChange, isDemoUser, role } = useAuth()
   const location = useLocation()
+  if (isDemoUser && location.pathname === '/changer-mot-de-passe') {
+    return <Navigate to={roleHome(role)} replace />
+  }
   if (forcePasswordChange && location.pathname !== '/changer-mot-de-passe') {
     return <Navigate to="/changer-mot-de-passe" replace />
   }
@@ -100,7 +102,6 @@ export default function App() {
                 <Route path="/ai-activity"    element={<AIActivityPage />} />
                 <Route path="/security"       element={<SecurityPage />} />
                 <Route path="/audit"            element={<AuditPage />} />
-                <Route path="/notifications"    element={<NotificationsPage />} />
                 <Route path="/admin/inscription"   element={<InscriptionPage />} />
                 <Route path="/admin/habilitations" element={<HabilitationsPage />} />
               </Route>

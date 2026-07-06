@@ -33,3 +33,4 @@ class UserORM(Base):
     last_failed_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_login_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    profile_picture: Mapped[str | None] = mapped_column(Text, nullable=True)

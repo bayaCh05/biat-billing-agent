@@ -1,8 +1,8 @@
 """Payment installments — list with joined invoice info + mark-paid."""
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -13,6 +13,7 @@ from api.auth import get_current_user, require_role
 from api.deps import get_session
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+_log = logging.getLogger(__name__)
 
 _VIEW = Depends(require_role("Comptable", "Direction", "Admin"))
 _EDIT = Depends(require_role("Comptable", "Admin"))
@@ -159,17 +160,25 @@ def mark_paid(
     session: Session = Depends(get_session),
     _=_EDIT,
 ):
-    from src.storage.orm_models_payments import PaymentInstallmentORM
-
-    inst = session.get(PaymentInstallmentORM, UUID(installment_id))
-    if not inst:
+    _log.info("Marking installment paid: %s", installment_id)
+    row = session.execute(text(
+        "SELECT id, status FROM payment_installments WHERE id = :id"
+    ), {"id": installment_id}).mappings().first()
+    if not row:
         raise HTTPException(404, "Échéance introuvable.")
-    if inst.status == "PAID":
+    if row["status"] == "PAID":
         raise HTTPException(400, "Échéance déjà marquée comme payée.")
 
-    inst.status = "PAID"
-    inst.paid_amount = body.paid_amount
-    inst.paid_date = date.fromisoformat(body.paid_date)
-    inst.updated_at = datetime.now(timezone.utc)
+    session.execute(text(
+        "UPDATE payment_installments "
+        "SET status = :status, paid_amount = :paid_amount, paid_date = :paid_date, updated_at = :updated_at "
+        "WHERE id = :id"
+    ), {
+        "id": installment_id,
+        "status": "PAID",
+        "paid_amount": body.paid_amount,
+        "paid_date": body.paid_date,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    })
     session.commit()
     return {"id": installment_id, "status": "PAID", "paid_amount": body.paid_amount}
