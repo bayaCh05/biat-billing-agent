@@ -128,10 +128,17 @@ def resource_history(
     ),
 )
 def verify_integrity(
+    limit: int = 5000,
     _: dict = Depends(require_role("Admin")),
     session: Session = Depends(get_session),
 ):
-    rows = session.execute(select(AuditLogORM).order_by(AuditLogORM.created_at)).scalars().all()
+    rows = (
+        session.execute(
+            select(AuditLogORM).order_by(AuditLogORM.created_at.desc()).limit(limit)
+        )
+        .scalars()
+        .all()
+    )
 
     valid = 0
     null_hash_entries = []
