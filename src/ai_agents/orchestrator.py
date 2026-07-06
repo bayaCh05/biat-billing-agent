@@ -78,6 +78,11 @@ class AIOrchestrator:
             agent2 = ClassificationAgent(self._c.coder, self._c.classifier, self._c.cost_catalog)
             result2 = agent2.run({"invoice": invoice, "degraded_mode": degraded})
 
+            if not result2.success:
+                step2.status = "failed"
+                step2.summary = result2.error
+                return self._fail(invoice, "ERROR", start, degraded)
+
             invoice.status = InvoiceStatus.CLASSIFIED
             self._c.repository.save(invoice)
             step2.status = "done"
@@ -90,8 +95,8 @@ class AIOrchestrator:
         except Exception as exc:
             step2.status = "failed"
             step2.summary = str(exc)
-            invoice.status = InvoiceStatus.CLASSIFIED
-            self._c.repository.save(invoice)
+            logger.error("classification_agent_error invoice=%s: %s", invoice.id, exc)
+            return self._fail(invoice, "ERROR", start, degraded)
 
         # ── Step 3: Anomaly detection ─────────────────────────────────────────
         step3 = PipelineStep(step_number=3, agent_name="AnomalyAgent", status="running")
@@ -135,8 +140,12 @@ class AIOrchestrator:
         except Exception as exc:
             step3.status = "failed"
             step3.summary = str(exc)
-            invoice.status = InvoiceStatus.VALIDATED
-            self._c.repository.save(invoice)
+            logger.error("anomaly_agent_error invoice=%s: %s", invoice.id, exc)
+            step4 = PipelineStep(step_number=4, agent_name="AccountingAgent",
+                                 status="skipped",
+                                 summary="Bloqué — échec de la détection d'anomalies")
+            self._steps.append(step4)
+            return self._fail(invoice, "ERROR", start, degraded)
 
         # ── Step 4: Accounting ────────────────────────────────────────────────
         step4 = PipelineStep(step_number=4, agent_name="AccountingAgent", status="running")
@@ -169,11 +178,6 @@ class AIOrchestrator:
             step4.summary = str(exc)
             invoice.status = InvoiceStatus.JOURNALED
             self._c.repository.save(invoice)
-
-        total_calls = sum(
-            getattr(a, "_call_count", 0)
-            for a in []  # agents are local, counts are in step results
-        )
 
         return OrchestratorResult(
             invoice_id=str(invoice.id),
