@@ -8,6 +8,7 @@ const KPI_EMPTY: KpiData = {
   total_invoices: 0, total_amount_ttc: 0,
   auto_approved: 0, auto_approval_rate: 0,
   flagged: 0, pending_review: 0, by_status: {},
+  exposed_amount_ttc: 0, blocked_amount_ttc: 0,
 }
 const BUDGET_EMPTY: BudgetSummary = {
   year: new Date().getFullYear(), through_month: new Date().getMonth() + 1,
