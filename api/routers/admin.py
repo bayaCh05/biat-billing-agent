@@ -105,7 +105,15 @@ def create_user(
     ))
     session.commit()
     session.refresh(user)
-    return {"user_id": str(user.id), "email": user.email, "temp_password": temp_pw}
+
+    from src.services.email_service import send_temp_password_email
+    try:
+        send_temp_password_email(user.email, temp_pw, user.prenom)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("Impossible d'envoyer l'email de bienvenue : %s", exc)
+
+    return {"user_id": str(user.id), "email": user.email}
 
 
 @router.get(
@@ -264,4 +272,12 @@ def reset_password(
         user_agent=_ua(request),
     ))
     session.commit()
-    return {"temp_password": temp_pw}
+
+    from src.services.email_service import send_temp_password_email
+    try:
+        send_temp_password_email(user.email, temp_pw, user.prenom)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("Impossible d'envoyer l'email de réinitialisation : %s", exc)
+
+    return {"message": f"Mot de passe réinitialisé. Les nouvelles informations ont été envoyées à {user.email}."}

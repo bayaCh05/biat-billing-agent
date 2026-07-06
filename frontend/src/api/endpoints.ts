@@ -161,7 +161,7 @@ export const listAdminUsers = () =>
   apiFetch<AdminUser[]>('/admin/users')
 
 export const createAdminUser = (body: { nom: string; prenom: string; email: string; role: string; departement: string }) =>
-  apiFetch<{ user_id: string; email: string; temp_password: string }>('/admin/users', {
+  apiFetch<{ user_id: string; email: string }>('/admin/users', {
     method: 'POST',
     body: JSON.stringify(body),
   })
@@ -170,7 +170,7 @@ export const updateAdminUser = (id: string, body: { role?: string; is_active?: b
   apiFetch<AdminUser>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 
 export const resetAdminUserPassword = (id: string) =>
-  apiFetch<{ temp_password: string }>(`/admin/users/${id}/reset-password`, { method: 'POST' })
+  apiFetch<{ message: string }>(`/admin/users/${id}/reset-password`, { method: 'POST' })
 
 // ── Project (single) ──────────────────────────────────────────────────────────
 

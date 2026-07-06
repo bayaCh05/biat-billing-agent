@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { UserPlus, RefreshCw, Ban, Copy, CheckCircle } from 'lucide-react'
+import { UserPlus, RefreshCw, Ban, CheckCircle, Mail } from 'lucide-react'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
@@ -26,8 +26,7 @@ export default function InscriptionPage() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [createdResult, setCreatedResult] = useState<{ email: string; temp_password: string } | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [createdResult, setCreatedResult] = useState<{ email: string } | null>(null)
   const [error, setError] = useState('')
 
   const [form, setForm] = useState({ nom: '', prenom: '', email: '', role: 'Comptable', departement: 'DSI' })
@@ -46,7 +45,7 @@ export default function InscriptionPage() {
     setSubmitting(true)
     try {
       const res = await createAdminUser(form)
-      setCreatedResult({ email: res.email, temp_password: res.temp_password })
+      setCreatedResult({ email: res.email })
       setForm({ nom: '', prenom: '', email: '', role: 'Comptable', departement: 'DSI' })
       await load()
     } catch (err) {
@@ -66,17 +65,9 @@ export default function InscriptionPage() {
   async function handleReset(user: AdminUser) {
     try {
       const res = await resetAdminUserPassword(user.id)
-      alert(`Nouveau mot de passe temporaire pour ${user.email} :\n\n${res.temp_password}\n\nCommuniquez ce mot de passe à l'utilisateur.`)
+      alert(res.message)
       await load()
     } catch { /* ignore */ }
-  }
-
-  function copyPassword() {
-    if (createdResult) {
-      navigator.clipboard.writeText(createdResult.temp_password)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }
   }
 
   const label = 'block text-xs font-medium mb-1'
@@ -105,19 +96,12 @@ export default function InscriptionPage() {
                 <div className="rounded-xl p-4 border" style={{ background: '#EFF4FA', borderColor: '#D5E8F5' }}>
                   <p className="text-xs text-gray-500 mb-1">Email</p>
                   <p className="font-mono text-sm font-semibold">{createdResult.email}</p>
-                  <p className="text-xs text-gray-500 mt-3 mb-1">Mot de passe temporaire</p>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-base font-bold tracking-widest" style={{ color: '#1A3A5C' }}>
-                      {createdResult.temp_password}
-                    </span>
-                    <button onClick={copyPassword} className="text-gray-400 hover:text-gray-600 transition-colors">
-                      {copied ? <CheckCircle size={14} style={{ color: '#1D9E76' }} /> : <Copy size={14} />}
-                    </button>
-                  </div>
                 </div>
-                <p className="text-xs" style={{ color: '#F0A500' }}>
-                  Communiquez ce mot de passe à l'utilisateur. Il devra le changer à sa première connexion.
-                </p>
+                <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm" style={{ background: '#FFF8E8', color: '#B07800' }}>
+                  <Mail size={14} />
+                  Les identifiants de connexion ont été envoyés à l'utilisateur par email.
+                  Il devra changer son mot de passe à la première connexion.
+                </div>
                 <Button variant="secondary" onClick={() => setCreatedResult(null)}>Créer un autre</Button>
               </div>
             ) : (
