@@ -1,15 +1,15 @@
 import { Fragment, useEffect, useState } from 'react'
 import {
-  ShieldAlert, Plus, AlertTriangle, CheckCircle2, Clock, X,
+  ShieldAlert, Plus, CheckCircle2, Clock, X,
   Sparkles, Loader2, ChevronDown, ChevronRight, FolderKanban,
 } from 'lucide-react'
 import {
-  listRisks, createRisk, updateRisk, closeRisk,
-  getRiskSummary, suggestMitigation,
+  createRisk, updateRisk, closeRisk,
+  suggestMitigation,
   getRisksParProjet,
 } from '../../api/endpoints'
 import type {
-  Risk, RiskSummary, NiveauCriticite, StatutRisque,
+  Risk, NiveauCriticite, StatutRisque,
   RisquesProjetGroupe,
 } from '../../types'
 
@@ -92,7 +92,7 @@ function CriticCount({ label, count, c }: { label: string; count: number; c: Niv
   )
 }
 
-// ── Risk row (shared between both tabs) ───────────────────────────────────────
+// ── Risk row ──────────────────────────────────────────────────────────────────
 
 function RiskRow({
   r, openEdit, handleClose,
@@ -141,80 +141,7 @@ function RiskRow({
 
 const TABLE_COLS = ['Titre', 'Type', 'Probabilité', 'Impact', 'Criticité', 'Statut', 'Échéance', 'Actions']
 
-// ── "Vue globale" tab ─────────────────────────────────────────────────────────
-
-function VueListe({
-  risks, loading, summary, openEdit, handleClose,
-}: {
-  risks: Risk[]
-  loading: boolean
-  summary: RiskSummary | null
-  openEdit: (r: Risk) => void
-  handleClose: (id: string) => void
-}) {
-  return (
-    <div className="space-y-4">
-      {/* Summary cards */}
-      {summary && (
-        <div className="grid grid-cols-4 gap-4">
-          {(['FAIBLE', 'MOYENNE', 'ELEVEE', 'CRITIQUE'] as NiveauCriticite[]).map(c => (
-            <div key={c} className="rounded-xl border p-4" style={{ borderColor: CRITICITE_COLOR[c], background: CRITICITE_BG[c] }}>
-              <p className="text-xs font-semibold mb-1" style={{ color: CRITICITE_COLOR[c] }}>{c}</p>
-              <p className="text-3xl font-bold" style={{ color: CRITICITE_COLOR[c] }}>{summary.by_criticite[c] ?? 0}</p>
-              <p className="text-xs mt-1" style={{ color: '#5D6D7E' }}>risques actifs</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Overdue alert */}
-      {summary && summary.overdue.length > 0 && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border" style={{ background: '#FDEDEC', borderColor: '#C0391B' }}>
-          <AlertTriangle size={18} style={{ color: '#C0391B', flexShrink: 0, marginTop: 2 }} />
-          <div>
-            <p className="text-sm font-semibold" style={{ color: '#C0391B' }}>
-              {summary.overdue.length} risque(s) avec échéance dépassée
-            </p>
-            <ul className="text-xs mt-1 space-y-0.5" style={{ color: '#922B21' }}>
-              {summary.overdue.map(o => (
-                <li key={o.id}>• {o.titre} — prévu le {fmtDate(o.date_echeance_mitigation)}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
-
-      {/* Table */}
-      {loading ? (
-        <p className="text-sm text-center py-10" style={{ color: '#5D6D7E' }}>Chargement…</p>
-      ) : risks.length === 0 ? (
-        <div className="text-center py-16">
-          <ShieldAlert size={40} style={{ color: '#C8D8E8', margin: '0 auto 12px' }} />
-          <p className="text-sm" style={{ color: '#5D6D7E' }}>Aucun risque enregistré.</p>
-        </div>
-      ) : (
-        <div className="rounded-xl border overflow-hidden" style={{ borderColor: '#E2EBF3' }}>
-          <table className="w-full text-sm">
-            <thead style={{ background: '#F5F8FC' }}>
-              <tr>
-                {TABLE_COLS.map(h => (
-                  <th key={h} className="text-left px-4 py-3 text-xs font-semibold" style={{ color: '#5D6D7E' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {risks.map(r => (
-                <RiskRow key={r.id} r={r} openEdit={openEdit} handleClose={handleClose} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── "Par projet" tab ──────────────────────────────────────────────────────────
+// ── "Par projet" view ─────────────────────────────────────────────────────────
 
 function VueParProjet({
   filterCriticite,
@@ -356,11 +283,6 @@ function VueParProjet({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function RisksPage() {
-  const [tab, setTab] = useState<'liste' | 'par-projet'>('liste')
-
-  const [risks, setRisks]     = useState<Risk[]>([])
-  const [summary, setSummary] = useState<RiskSummary | null>(null)
-  const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editRisk, setEditRisk]   = useState<Risk | null>(null)
   const [form, setForm]           = useState({ ...EMPTY_FORM })
@@ -369,33 +291,6 @@ export default function RisksPage() {
   const [filterCriticite, setFilterCriticite] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
   const [suggestingMitigation, setSuggestingMitigation] = useState(false)
-
-  const load = async () => {
-    setLoading(true)
-    try {
-      const [r, s] = await Promise.all([
-        listRisks({ statut: filterStatut || undefined, niveau_criticite: filterCriticite || undefined }),
-        getRiskSummary(),
-      ])
-      setRisks(r)
-      setSummary(s)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    let mounted = true
-    setLoading(true)
-    Promise.all([
-      listRisks({ statut: filterStatut || undefined, niveau_criticite: filterCriticite || undefined }),
-      getRiskSummary(),
-    ])
-      .then(([r, s]) => { if (mounted) { setRisks(r); setSummary(s) } })
-      .catch(() => { /* erreur silencieuse — load() principal gère les erreurs */ })
-      .finally(() => { if (mounted) setLoading(false) })
-    return () => { mounted = false }
-  }, [filterStatut, filterCriticite])
 
   const openCreate = () => { setEditRisk(null); setForm({ ...EMPTY_FORM }); setShowModal(true) }
 
@@ -434,7 +329,6 @@ export default function RisksPage() {
         await createRisk(payload)
       }
       setShowModal(false)
-      load()
       setReloadKey(k => k + 1)
     } finally {
       setSaving(false)
@@ -444,7 +338,6 @@ export default function RisksPage() {
   const handleClose = async (id: string) => {
     if (!confirm('Clôturer ce risque ?')) return
     await closeRisk(id)
-    load()
     setReloadKey(k => k + 1)
   }
 
@@ -470,26 +363,7 @@ export default function RisksPage() {
         </button>
       </div>
 
-      {/* Onglets */}
-      <div className="flex gap-1 p-1 rounded-xl" style={{ background: '#F0F4F8', width: 'fit-content' }}>
-        {([
-          { key: 'liste',      label: 'Vue globale' },
-          { key: 'par-projet', label: 'Par projet'  },
-        ] as const).map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
-            style={tab === key
-              ? { background: '#fff', color: '#1A3A5C', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }
-              : { color: '#5D6D7E' }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Filtres — visibles pour les deux onglets */}
+      {/* Filtres */}
       <div className="flex items-center gap-3">
         <select
           value={filterCriticite}
@@ -524,21 +398,13 @@ export default function RisksPage() {
         )}
       </div>
 
-      {/* Contenu des onglets */}
-      {tab === 'liste' ? (
-        <VueListe
-          risks={risks} loading={loading} summary={summary}
-          openEdit={openEdit} handleClose={handleClose}
-        />
-      ) : (
-        <VueParProjet
-          filterCriticite={filterCriticite}
-          filterStatut={filterStatut}
-          openEdit={openEdit}
-          handleClose={handleClose}
-          reloadKey={reloadKey}
-        />
-      )}
+      <VueParProjet
+        filterCriticite={filterCriticite}
+        filterStatut={filterStatut}
+        openEdit={openEdit}
+        handleClose={handleClose}
+        reloadKey={reloadKey}
+      />
 
       {/* Modal création / édition */}
       {showModal && (
