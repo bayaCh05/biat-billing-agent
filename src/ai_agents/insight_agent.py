@@ -160,4 +160,66 @@ class InsightAgent(BaseAgent):
         except Exception:
             pass
 
+        # Budget — n_over_budget, n_total, variance_pct
+        try:
+            from datetime import date as _date
+            from sqlalchemy import and_, func, select
+            from src.storage.orm_models import BudgetPlanORM, InvoiceORM
+
+            _now = _date.today()
+            _year = _now.year
+            _month = _now.month
+
+            entries = db.execute(
+                select(BudgetPlanORM).where(BudgetPlanORM.year == _year)
+            ).scalars().all()
+
+            budget_ytd: dict[str, float] = {
+                e.catalog_id: sum(float(m) for m in (e.monthly or [])[:_month])
+                for e in entries
+            }
+
+            actual_rows = db.execute(
+                select(
+                    InvoiceORM.cost_catalog_id,
+                    func.sum(InvoiceORM.amount_ht).label("total"),
+                )
+                .where(
+                    and_(
+                        InvoiceORM.status.in_(("VALIDATED", "EXPORTED", "PAID", "JOURNALED")),
+                        InvoiceORM.direction == "SUPPLIER",
+                        InvoiceORM.invoice_date >= _date(_year, 1, 1),
+                        InvoiceORM.invoice_date <= _now,
+                        InvoiceORM.cost_catalog_id.isnot(None),
+                    )
+                )
+                .group_by(InvoiceORM.cost_catalog_id)
+            ).all()
+            actual_ytd: dict[str, float] = {r[0]: float(r[1] or 0) for r in actual_rows}
+
+            total_budget = sum(budget_ytd.values())
+            total_actual = sum(actual_ytd.get(cid, 0.0) for cid in budget_ytd)
+
+            kpis["n_total"] = len(budget_ytd)
+            kpis["n_over_budget"] = sum(
+                1 for cid, b in budget_ytd.items() if actual_ytd.get(cid, 0.0) > b
+            )
+            kpis["variance_pct"] = (
+                round((total_actual - total_budget) / total_budget * 100, 1)
+                if total_budget else 0.0
+            )
+        except Exception:
+            pass
+
+        # Risques — n_overdue_mitigation
+        try:
+            row = db.execute(text(
+                "SELECT COUNT(*) FROM risques "
+                "WHERE date_echeance_mitigation < date('now') "
+                "AND statut NOT IN ('CLOTURE','MAITRISE')"
+            )).fetchone()
+            kpis["n_overdue_mitigation"] = row[0] if row else 0
+        except Exception:
+            pass
+
         return kpis
