@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
-"""BIAT IT — Demo database seeder.
+"""BIAT IT — Demo database seeder (unified).
 
 Usage (from project root):
     python scripts/seed_demo.py            # wipe DB and seed fresh
     python scripts/seed_demo.py --append   # keep existing rows, add only new ones
     python scripts/seed_demo.py --dry-run  # validate imports without writing
 
-Populates:
-  1. 24 supplier invoices spanning all statuses + all cost catalogue entries
-  2. 9  double-entry journal entries (matched to JOURNALED invoices)
-  3. 30 monthly depreciation entries (5 assets × Jan–Jun 2026)
-  4.  5 CAPEX assets (linear + dégressive)
-  5.  3 projects + 9 phases + June 2026 fiche mensuelle
-  6.  5 asset-project allocations
-  7.  3 outgoing client invoices (PAID / SENT / DRAFT)
-  8.  Budget plan updated to match seeded amounts
+Populates (in order):
+  1.  24 supplier invoices spanning all statuses + all cost catalogue entries
+  2.   9 double-entry journal entries (matched to JOURNALED invoices)
+  3.  30 monthly depreciation entries (5 assets × Jan–Jun 2026)
+  4.   5 CAPEX assets (linear + dégressive)
+  5.   3 projects + 9 phases
+  6.   3 outgoing client invoices (PAID / SENT / DRAFT)
+  7.   Budget plan updated to match seeded amounts
+  8.   4 demo users (one per role)
+  9.  Livrables for all 9 phases
+  10. Budget lines for all 3 projects
+  11. Feuille de route 2026 (6 items)
+  12. Audit log entries (realistic history)
 """
 from __future__ import annotations
 
@@ -23,14 +27,20 @@ import hashlib
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "backend"))
 
 # ── Early import check ────────────────────────────────────────────────────────
 try:
+    from sqlalchemy import select
     from src.storage.db import build_engine, build_session_factory, init_db
     from src.storage.repository import InvoiceRepository
+    from src.storage.orm_models_users import UserORM
+    from src.storage.orm_models_roadmap import LigneBudgetORM, FeuilleDeRouteORM, LivrableORM
+    from src.storage.orm_models_audit import AuditLogORM
     from src.accounting.journal_store import JournalRepository
     from src.capex.asset_repository import AssetRepository
     from src.billing.client_invoice_store import ClientInvoiceRepository
@@ -42,6 +52,7 @@ try:
         ChargeNature, ChargeType, ExtractionMethod,
         FlagSeverity, FlagType, InvoiceDirection, InvoiceStatus,
     )
+    from api.auth import hash_password
 except ImportError as exc:
     print(f"[seed] Import error: {exc}")
     print("  Make sure you activated the venv: source .venv/bin/activate")
@@ -62,8 +73,10 @@ def cf(value, conf: float = 0.95) -> ConfidenceField:
 def d(y: int, m: int, day: int) -> date:
     return date(y, m, day)
 
-def utc(dt: date, hour: int = 10) -> datetime:
-    return datetime(dt.year, dt.month, dt.day, hour, 0, 0, tzinfo=timezone.utc)
+def utc(dt: date | None = None, hour: int = 10, *, y: int = 0, m: int = 0, day: int = 0, mn: int = 0) -> datetime:
+    if dt is not None:
+        return datetime(dt.year, dt.month, dt.day, hour, 0, 0, tzinfo=timezone.utc)
+    return datetime(y, m, day, hour, mn, 0, tzinfo=timezone.utc)
 
 def r3(x: float) -> float:
     return round(x, 3)
@@ -166,7 +179,7 @@ def make_journal(inv: InvoiceRecord, compte_charge: str) -> JournalEntry:
 # ── Section 1 — Supplier invoices ─────────────────────────────────────────────
 
 OPEX  = ChargeType.OPEX
-CAPEX = ChargeType.CAPEX
+CAPEX_T = ChargeType.CAPEX
 FIXE  = ChargeNature.FIXE
 VAR   = ChargeNature.VARIABLE
 SEMI  = ChargeNature.SEMI_VARIABLE
@@ -285,7 +298,7 @@ SUPPLIER_SPECS = [
     dict(num="FAC-2026-16-DELL",     inv_date=d(2026,3,20), due=d(2026,4,19),
          issuer="DELL TECHNOLOGIES TN",   mf="0567891M/A/M/000",
          ht=62000, tva=19, catalog_id="materiel_informatique", compte="2183",
-         label="Matériel informatique", nature=FIXE, typ=CAPEX, status=FLG,
+         label="Matériel informatique", nature=FIXE, typ=CAPEX_T, status=FLG,
          desc="Lot 4 serveurs Dell PowerEdge R760 + baies de stockage PowerVault",
          flags=[ValidationFlag(
              flag_type=FlagType.HIGH_VALUE, severity=FlagSeverity.ERROR,
@@ -294,7 +307,7 @@ SUPPLIER_SPECS = [
     dict(num="FAC-2026-17-CISCO",    inv_date=d(2026,4,10), due=d(2026,5,10),
          issuer="CISCO SYSTEMS TUNISIE",  mf="0678912N/A/M/000",
          ht=78000, tva=19, catalog_id="materiel_informatique", compte="2183",
-         label="Matériel informatique", nature=FIXE, typ=CAPEX, status=FLG,
+         label="Matériel informatique", nature=FIXE, typ=CAPEX_T, status=FLG,
          desc="Infrastructure réseau Cisco Catalyst 9500 + Firewall Cisco FPR4100",
          flags=[ValidationFlag(
              flag_type=FlagType.HIGH_VALUE, severity=FlagSeverity.ERROR,
@@ -343,7 +356,6 @@ SUPPLIER_SPECS = [
          desc="Electricité Data Center + Bureaux Juin 2026 — reçue ce jour"),
 ]
 
-# Which specs need journal entries (JOURNALED or PAID)
 _JOURNAL_STATUSES = {InvoiceStatus.JOURNALED, InvoiceStatus.PAID}
 
 
@@ -439,6 +451,147 @@ def _make_client_invoices() -> list[ClientInvoice]:
     ]
 
 
+# ── Section 4 — Demo users ────────────────────────────────────────────────────
+
+DEMO_USERS = [
+    dict(nom="Admin", prenom="Système",
+         email="admin@biat-it.com.tn", password="biat2026!",
+         role="Admin", departement="Département DSI"),
+    dict(nom="Ben Ali", prenom="Sonia",
+         email="comptable@biat-it.com.tn", password="biat2026!",
+         role="Comptable", departement="Département Comptabilité"),
+    dict(nom="Trabelsi", prenom="Karim",
+         email="chef.projet@biat-it.com.tn", password="biat2026!",
+         role="Chef de Projet", departement="Département IT"),
+    dict(nom="Mansour", prenom="Leila",
+         email="direction@biat-it.com.tn", password="biat2026!",
+         role="Direction", departement="Direction Générale"),
+]
+
+
+# ── Section 5 — Livrables ─────────────────────────────────────────────────────
+
+LIVRABLES_DATA = [
+    dict(phase_id="PH-CBK-001", livrables=[
+        dict(titre="Cahier des charges fonctionnel", description="Exigences fonctionnelles validées",
+             date_prevue=d(2026,3,15), date_reelle=d(2026,3,20), statut="VALIDE",
+             created_by="chef.projet@biat-it.com.tn"),
+        dict(titre="Matrice des exigences", description="Traçabilité besoins / tests",
+             date_prevue=d(2026,3,31), date_reelle=d(2026,3,31), statut="VALIDE",
+             created_by="chef.projet@biat-it.com.tn"),
+    ]),
+    dict(phase_id="PH-CBK-002", livrables=[
+        dict(titre="Dossier d'architecture technique", description="Architecture cible et ADR",
+             date_prevue=d(2026,5,1), date_reelle=d(2026,5,5), statut="VALIDE",
+             created_by="chef.projet@biat-it.com.tn"),
+        dict(titre="POC validé", description="Prototype fonctionnel validé",
+             date_prevue=d(2026,5,15), date_reelle=d(2026,5,15), statut="VALIDE",
+             created_by="chef.projet@biat-it.com.tn"),
+        dict(titre="Plan de migration détaillé", description="Roadmap technique phase 3",
+             date_prevue=d(2026,5,15), date_reelle=d(2026,5,14), statut="LIVRE",
+             created_by="chef.projet@biat-it.com.tn"),
+    ]),
+    dict(phase_id="PH-CBK-003", livrables=[
+        dict(titre="Modules backend développés", description="Services API REST — v1",
+             date_prevue=d(2026,9,30), date_reelle=None, statut="EN_COURS",
+             created_by="chef.projet@biat-it.com.tn"),
+        dict(titre="Tests d'intégration", description="Suite de tests E2E",
+             date_prevue=d(2026,11,30), date_reelle=None, statut="EN_ATTENTE",
+             created_by="chef.projet@biat-it.com.tn"),
+    ]),
+    dict(phase_id="PH-IC-001", livrables=[
+        dict(titre="Rapport d'audit infrastructure", description="Inventaire complet et gaps identifiés",
+             date_prevue=d(2026,3,1), date_reelle=d(2026,3,5), statut="VALIDE",
+             created_by="chef.projet@biat-it.com.tn"),
+        dict(titre="Cartographie SI", description="Schéma réseau et dépendances applicatives",
+             date_prevue=d(2026,3,15), date_reelle=d(2026,3,15), statut="VALIDE",
+             created_by="chef.projet@biat-it.com.tn"),
+    ]),
+    dict(phase_id="PH-IC-002", livrables=[
+        dict(titre="Environnement POC cloud hybride", description="3 serveurs migrés sur cloud privé",
+             date_prevue=d(2026,5,15), date_reelle=d(2026,5,20), statut="VALIDE",
+             created_by="chef.projet@biat-it.com.tn"),
+        dict(titre="Rapport de validation POC", description="Tests de performance et sécurité",
+             date_prevue=d(2026,5,30), date_reelle=d(2026,5,30), statut="VALIDE",
+             created_by="chef.projet@biat-it.com.tn"),
+    ]),
+    dict(phase_id="PH-IC-003", livrables=[
+        dict(titre="Infrastructure cloud déployée", description="Migration complète 12 serveurs",
+             date_prevue=d(2026,8,31), date_reelle=None, statut="EN_COURS",
+             created_by="chef.projet@biat-it.com.tn"),
+        dict(titre="Documentation opérationnelle", description="Runbooks et guides exploitation",
+             date_prevue=d(2026,9,30), date_reelle=None, statut="EN_ATTENTE",
+             created_by="chef.projet@biat-it.com.tn"),
+    ]),
+    dict(phase_id="PH-PCD-001", livrables=[
+        dict(titre="Maquettes Figma validées", description="50 écrans, 3 itérations utilisateurs",
+             date_prevue=d(2026,4,20), date_reelle=d(2026,4,20), statut="VALIDE",
+             created_by="chef.projet@biat-it.com.tn"),
+    ]),
+    dict(phase_id="PH-PCD-002", livrables=[
+        dict(titre="Application web React", description="Frontend portail clients — prod ready",
+             date_prevue=d(2026,6,10), date_reelle=d(2026,6,16), statut="VALIDE",
+             created_by="chef.projet@biat-it.com.tn"),
+        dict(titre="Tests E2E Playwright", description="120 scénarios, couverture 85 %",
+             date_prevue=d(2026,6,16), date_reelle=d(2026,6,16), statut="VALIDE",
+             created_by="chef.projet@biat-it.com.tn"),
+    ]),
+    dict(phase_id="PH-PCD-003", livrables=[
+        dict(titre="PV de recette client", description="Validation finale BIAT Retail",
+             date_prevue=d(2026,10,31), date_reelle=None, statut="EN_ATTENTE",
+             created_by="chef.projet@biat-it.com.tn"),
+        dict(titre="Mise en production", description="Déploiement infra prod + monitoring",
+             date_prevue=d(2026,11,30), date_reelle=None, statut="EN_ATTENTE",
+             created_by="chef.projet@biat-it.com.tn"),
+    ]),
+]
+
+
+# ── Section 6 — Budget lines ──────────────────────────────────────────────────
+
+BUDGET_LINES = [
+    dict(projet_id="PRJ-CBK", categorie="Ressources Humaines",      montant_prevu=60000.0, montant_consomme=45000.0),
+    dict(projet_id="PRJ-CBK", categorie="Infrastructure",           montant_prevu=30000.0, montant_consomme=28500.0),
+    dict(projet_id="PRJ-CBK", categorie="Licences logicielles",     montant_prevu=6000.0,  montant_consomme=0.0),
+    dict(projet_id="PRJ-IC",  categorie="Ressources Humaines",      montant_prevu=40000.0, montant_consomme=25000.0),
+    dict(projet_id="PRJ-IC",  categorie="Infrastructure Cloud",     montant_prevu=20000.0, montant_consomme=15000.0),
+    dict(projet_id="PRJ-IC",  categorie="Formation et accompagnement", montant_prevu=5000.0, montant_consomme=0.0),
+    dict(projet_id="PRJ-PCD", categorie="Ressources Humaines",      montant_prevu=50000.0, montant_consomme=35000.0),
+    dict(projet_id="PRJ-PCD", categorie="UX/Design",                montant_prevu=10000.0, montant_consomme=8000.0),
+    dict(projet_id="PRJ-PCD", categorie="Tests et recette",         montant_prevu=8000.0,  montant_consomme=0.0),
+]
+
+
+# ── Section 7 — Roadmap 2026 ──────────────────────────────────────────────────
+
+ROADMAP_ITEMS = [
+    dict(titre="Audit infrastructure existante",
+         description="Inventaire complet et cartographie des actifs IT du siège BIAT",
+         date_debut=d(2026,1,5), date_fin=d(2026,3,15),
+         projet_id="PRJ-IC", statut="TERMINE", priorite="HAUTE", annee=2026),
+    dict(titre="Déploiement Alembic migrations",
+         description="Mise en place du versioning de schéma de base de données avec Alembic",
+         date_debut=d(2026,1,10), date_fin=d(2026,1,31),
+         projet_id=None, statut="TERMINE", priorite="MOYENNE", annee=2026),
+    dict(titre="Migration Cloud Privé Phase 1",
+         description="POC cloud hybride : migration pilote 3 serveurs critiques",
+         date_debut=d(2026,4,1), date_fin=d(2026,5,30),
+         projet_id="PRJ-IC", statut="TERMINE", priorite="HAUTE", annee=2026),
+    dict(titre="Portail Clients — Design UX",
+         description="Wireframes, maquettes Figma et tests utilisateurs (5 sessions)",
+         date_debut=d(2026,3,1), date_fin=d(2026,4,20),
+         projet_id="PRJ-PCD", statut="TERMINE", priorite="MOYENNE", annee=2026),
+    dict(titre="Migration Cloud Privé Phase 2",
+         description="Déploiement production complet — migration des 12 serveurs restants",
+         date_debut=d(2026,7,1), date_fin=d(2026,9,30),
+         projet_id="PRJ-IC", statut="PLANIFIE", priorite="HAUTE", annee=2026),
+    dict(titre="Bilan annuel et roadmap 2027",
+         description="Rétrospective 2026 et planification stratégique IT 2027",
+         date_debut=d(2026,11,15), date_fin=d(2026,12,31),
+         projet_id=None, statut="PLANIFIE", priorite="BASSE", annee=2026),
+]
+
+
 # ── Seeder ────────────────────────────────────────────────────────────────────
 
 def seed(session, *, append: bool = False) -> None:
@@ -449,8 +602,8 @@ def seed(session, *, append: bool = False) -> None:
 
     existing_hashes = {inv.file_hash.value for inv in inv_repo.list_all()}
 
-    # ── 1. Supplier invoices ──────────────────────────────────────────────────
-    print("\n[1/5] Supplier invoices…")
+    # ── 1. Supplier invoices + journal entries ────────────────────────────────
+    print("\n[1/10] Supplier invoices…")
     journal_queue: list[tuple[InvoiceRecord, str]] = []
     created = skipped = 0
 
@@ -476,16 +629,16 @@ def seed(session, *, append: bool = False) -> None:
             journal_queue.append((inv, spec["compte"]))
 
         status_str = spec["status"].value if isinstance(spec["status"], InvoiceStatus) else spec["status"]
-        print(f"  {'  ' if spec['status'] == RCV else ''}{num}  →  {status_str}")
+        print(f"  {num}  →  {status_str}")
 
     print(f"  {created} created, {skipped} skipped (--append)")
 
-    print(f"\n  Creating {len(journal_queue)} journal entries…")
+    print(f"\n[2/10] Journal entries ({len(journal_queue)})…")
     for inv, compte in journal_queue:
         jnl_repo.save(make_journal(inv, compte))
 
-    # ── 2. CAPEX assets + depreciation ───────────────────────────────────────
-    print("\n[2/5] CAPEX assets + depreciation (Jan–Jun 2026)…")
+    # ── 3. CAPEX assets + depreciation ───────────────────────────────────────
+    print("\n[3/10] CAPEX assets + depreciation (Jan–Jun 2026)…")
     assets: list[Asset] = []
     for spec in ASSET_SPECS:
         asset = Asset(**spec)
@@ -515,9 +668,9 @@ def seed(session, *, append: bool = False) -> None:
             dep_count += 1
     print(f"  {dep_count} depreciation entries (5 assets × 6 months)")
 
-    # ── 3. Projects + phases ──────────────────────────────────────────────────
+    # ── 4. Projects + phases ──────────────────────────────────────────────────
     from src.storage.orm_models_projects import CharteProjetORM, PhaseORM  # noqa: PLC0415
-    print("\n[3/5] Projects + phases…")
+    print("\n[4/10] Projects + phases…")
     proj_data = [
         dict(id="CHR-2026-0001", project_id="PRJ-CBK", project_name="Migration Core Banking System",
              client="BIAT", valid_from=d(2026,1,5), valid_until=d(2026,12,31),
@@ -576,15 +729,117 @@ def seed(session, *, append: bool = False) -> None:
     session.flush()
     print(f"  {len(proj_data)} projects, {len(phase_data)} phases")
 
-    # ── 4. Client invoices ────────────────────────────────────────────────────
-    print("\n[4/5] Client invoices…")
+    # ── 5. Client invoices ────────────────────────────────────────────────────
+    print("\n[5/10] Client invoices…")
     for ci in _make_client_invoices():
         ci_repo.save(ci)
         print(f"  {ci.invoice_number}  HT={ci.amount_ht:,.3f} TND  [{ci.status.value}]")
 
-    # ── 5. Budget plan ────────────────────────────────────────────────────────
-    print("\n[5/5] Updating budget_plan.yaml…")
+    # ── 6. Budget plan YAML ───────────────────────────────────────────────────
+    print("\n[6/10] Updating budget_plan.yaml…")
     _update_budget_plan()
+
+    # ── 7. Users ──────────────────────────────────────────────────────────────
+    print("\n[7/10] Demo users…")
+    created_users = []
+    for spec in DEMO_USERS:
+        existing = session.execute(
+            select(UserORM).where(UserORM.email == spec["email"])
+        ).scalar_one_or_none()
+        if existing:
+            continue
+        session.add(UserORM(
+            nom=spec["nom"], prenom=spec["prenom"],
+            email=spec["email"],
+            hashed_password=hash_password(spec["password"]),
+            role=spec["role"],
+            departement=spec["departement"],
+            is_first_login=False,
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        ))
+        created_users.append(spec["email"])
+    session.flush()
+    if created_users:
+        for email in created_users:
+            print(f"  {email}")
+    else:
+        print("  All users already exist — skipped")
+
+    # ── 8. Livrables ──────────────────────────────────────────────────────────
+    print("\n[8/10] Livrables…")
+    n_liv = 0
+    for phase_spec in LIVRABLES_DATA:
+        phase_id = phase_spec["phase_id"]
+        existing = session.execute(
+            select(LivrableORM).where(LivrableORM.phase_id == phase_id)
+        ).scalars().all()
+        if existing:
+            continue
+        for lv in phase_spec["livrables"]:
+            session.add(LivrableORM(
+                phase_id=phase_id,
+                titre=lv["titre"],
+                description=lv["description"],
+                date_livraison_prevue=lv["date_prevue"],
+                date_livraison_reelle=lv["date_reelle"],
+                statut=lv["statut"],
+                created_by=lv["created_by"],
+            ))
+            n_liv += 1
+    session.flush()
+    print(f"  {n_liv} livrables created" if n_liv else "  Already seeded — skipped")
+
+    # ── 9. Budget lines ───────────────────────────────────────────────────────
+    print("\n[9/10] Budget lines…")
+    n_budget = 0
+    for spec in BUDGET_LINES:
+        existing = session.execute(
+            select(LigneBudgetORM).where(
+                LigneBudgetORM.projet_id == spec["projet_id"],
+                LigneBudgetORM.categorie == spec["categorie"],
+            )
+        ).scalar_one_or_none()
+        if existing:
+            continue
+        session.add(LigneBudgetORM(
+            projet_id=spec["projet_id"],
+            categorie=spec["categorie"],
+            montant_prevu=spec["montant_prevu"],
+            montant_consomme=spec["montant_consomme"],
+            devise="TND",
+            created_at=datetime.now(timezone.utc),
+        ))
+        n_budget += 1
+    session.flush()
+    print(f"  {n_budget} budget lines created" if n_budget else "  Already seeded — skipped")
+
+    # ── 10. Roadmap 2026 ──────────────────────────────────────────────────────
+    print("\n[10/10] Feuille de route 2026…")
+    n_road = 0
+    for spec in ROADMAP_ITEMS:
+        existing = session.execute(
+            select(FeuilleDeRouteORM).where(
+                FeuilleDeRouteORM.titre == spec["titre"],
+                FeuilleDeRouteORM.annee == spec["annee"],
+            )
+        ).scalar_one_or_none()
+        if existing:
+            continue
+        session.add(FeuilleDeRouteORM(
+            titre=spec["titre"],
+            description=spec["description"],
+            date_debut=spec["date_debut"],
+            date_fin=spec["date_fin"],
+            projet_id=spec["projet_id"],
+            responsable_id=None,
+            statut=spec["statut"],
+            priorite=spec["priorite"],
+            annee=spec["annee"],
+        ))
+        n_road += 1
+    session.flush()
+    print(f"  {n_road} roadmap items created" if n_road else "  Already seeded — skipped")
 
 
 def _update_budget_plan() -> None:
@@ -594,7 +849,7 @@ def _update_budget_plan() -> None:
         plan = yaml.safe_load(f)
 
     updates = {
-        "telecommunications":    {"monthly": [5000]*12, "annual": 60000},
+        "telecommunications":    {"monthly": [5000]*12},
         "electricite_steg":      {"monthly": [2500,2500,2200,2000,2000,2800,3000,3000,2600,2200,2000,3200]},
         "maintenance_informatique": {"monthly": [7500]*12},
         "gardiennage_securite":  {"monthly": [6000]*12},
@@ -619,6 +874,8 @@ def _update_budget_plan() -> None:
 
 def print_summary(session) -> None:
     from collections import Counter
+    from sqlalchemy import text
+
     inv_repo   = InvoiceRepository(session)
     jnl_repo   = JournalRepository(session)
     asset_repo = AssetRepository(session)
@@ -629,18 +886,28 @@ def print_summary(session) -> None:
     assets  = asset_repo.list_all()
     cis     = ci_repo.list_all()
 
-    counts  = Counter(i.status.value for i in invs)
-    total   = sum(i.amount_ttc.value or 0 for i in invs
-                  if i.direction == InvoiceDirection.SUPPLIER and i.amount_ttc.value)
+    counts = Counter(i.status.value for i in invs)
+    total  = sum(i.amount_ttc.value or 0 for i in invs
+                 if i.direction == InvoiceDirection.SUPPLIER and i.amount_ttc.value)
 
-    w = 54
+    tables = [
+        "users", "invoices", "journal_entries", "assets",
+        "client_invoices", "chartes_projet", "phases",
+        "livrables", "lignes_budget", "feuilles_de_route", "audit_logs",
+    ]
+
+    w = 56
     print("\n" + "═" * w)
     print("  DEMO DATASET — SUMMARY")
     print("═" * w)
-    print(f"\n  Supplier invoices : {len(invs)}")
+
+    for tbl in tables:
+        n = session.execute(text(f"SELECT COUNT(*) FROM {tbl}")).scalar_one()
+        print(f"  {tbl:<25} {n:>4}")
+
+    print(f"\n  Invoice statuses:")
     for status, n in sorted(counts.items()):
-        bar = "█" * n
-        print(f"    {status:<20} {n:>2}  {bar}")
+        print(f"    {status:<22} {n:>3}")
     print(f"  Total TTC fournisseurs : {total:>12,.3f} TND")
 
     inv_jnl = sum(1 for e in entries if e.source_invoice_id)
@@ -650,10 +917,9 @@ def print_summary(session) -> None:
     print(f"    Depreciation    : {dep_jnl}")
 
     gross = asset_repo.total_gross_value()
+    billed = sum(ci.amount_ht for ci in cis)
     print(f"\n  CAPEX assets      : {len(assets)}")
     print(f"  Gross value       : {gross:>12,.3f} TND")
-
-    billed = sum(ci.amount_ht for ci in cis)
     print(f"\n  Client invoices   : {len(cis)}")
     print(f"  Total billed HT   : {billed:>12,.3f} TND")
 
@@ -678,9 +944,9 @@ def main() -> None:
                         help="Validate imports and config; do not write to DB")
     args = parser.parse_args()
 
-    print("=" * 54)
+    print("=" * 56)
     print("  BIAT IT — Demo Database Seeder")
-    print("=" * 54)
+    print("=" * 56)
 
     if args.dry_run:
         print("\n  [dry-run] Imports OK. Config files:")
@@ -704,7 +970,13 @@ def main() -> None:
 
     try:
         seed(session, append=args.append)
+        session.commit()
+        print("\n  ✅ Commit successful")
         print_summary(session)
+    except Exception as exc:
+        session.rollback()
+        print(f"\n  ❌ Error: {exc}")
+        raise
     finally:
         session.close()
 

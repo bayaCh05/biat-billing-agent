@@ -1,0 +1,299 @@
+"""BIAT IT Billing Agent — FastAPI REST layer.
+
+Start with:
+    uvicorn api.main:app --reload --port 8000
+"""
+from __future__ import annotations
+
+import logging
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+from api.auth import SECRET, get_current_user, seed_demo_users, validate_demo_users, refresh_demo_passwords
+from api.limiter import limiter
+from api.security.security_headers import SecurityHeadersMiddleware
+
+_log = logging.getLogger(__name__)
+
+from api.routers import invoices, review, journal, budget, capex, kpi, billing, nl_query, suivi, notifications, projects, payments
+from api.routers import auth as auth_router
+from api.routers import admin, users, roadmap, projet_budget, livrables, audit, risks, security as security_router
+from api.routers import ai as ai_router
+
+_PROTECTED = [Depends(get_current_user)]
+
+_TAGS: list[dict] = [
+    {"name": "auth",           "description": "Authentification et gestion des sessions JWT"},
+    {"name": "invoices",       "description": "Factures fournisseurs — pipeline OCR+LLM, révision humaine"},
+    {"name": "journal",        "description": "Journal comptable PCE tunisien — écritures en partie double"},
+    {"name": "assets",         "description": "Immobilisations CAPEX — registre et plan d'amortissement"},
+    {"name": "client-invoices","description": "Facturation client intra-groupe — génération et suivi"},
+    {"name": "projects",       "description": "Chartes de projet, phases et livrables"},
+    {"name": "budget",         "description": "Lignes budgétaires par projet — prévu vs consommé"},
+    {"name": "roadmap",        "description": "Feuille de route IT 2026 — jalons et priorités"},
+    {"name": "admin",          "description": "Gestion des utilisateurs et habilitations — ADMIN uniquement"},
+    {"name": "analytics",      "description": "Tableaux de bord, KPIs, suivi de trésorerie, requêtes NL"},
+    {"name": "notifications",  "description": "Notifications persistantes — alertes factures et budget"},
+    {"name": "risks",          "description": "Gestion des risques projet — matrice probabilité × impact"},
+]
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    _startup()
+    from api.scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
+    yield
+    stop_scheduler()
+
+
+def _startup() -> None:
+    # Validate demo user env vars
+    validate_demo_users()
+
+    # Seed demo accounts into the DB so login, reset link and password change
+    # all use the same backend path in local development.
+    try:
+        from api.deps import get_session_ctx
+
+        with get_session_ctx() as session:
+            seed_demo_users(session)
+            refresh_demo_passwords(session)
+    except Exception as exc:
+        _log.warning("Impossible de préparer les comptes démo en base : %s", exc)
+
+    # Warn if JWT secret is below recommended minimum length for HMAC-SHA256
+    if len(SECRET) < 32:
+        _log.warning(
+            "⚠️  JWT_SECRET est trop court (%d octets — minimum recommandé : 32). "
+            "Définir JWT_SECRET dans les variables d'environnement avant la mise en production.",
+            len(SECRET),
+        )
+
+    # Warn if AUDIT_HMAC_SECRET is missing (fallback sur JWT_SECRET = clés non séparées)
+    if not os.getenv("AUDIT_HMAC_SECRET", "").strip():
+        _log.warning(
+            "⚠️  AUDIT_HMAC_SECRET non défini — la clé HMAC de l'audit trail utilise JWT_SECRET "
+            "par défaut. Définir AUDIT_HMAC_SECRET séparément dans .env pour isoler les deux secrets."
+        )
+
+    # Warn if DB is not at the latest Alembic revision
+    db_url = os.getenv("DATABASE_URL", "sqlite:///./data/invoices.db")
+    if ":memory:" in db_url:
+        return
+
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        from sqlalchemy import create_engine, text
+
+        alembic_cfg = Config("alembic.ini")
+        alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+        script = ScriptDirectory.from_config(alembic_cfg)
+        head_rev = script.get_current_head()
+
+        engine = create_engine(db_url)
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT version_num FROM alembic_version LIMIT 1")
+            ).scalar_one_or_none()
+        engine.dispose()
+
+        if result != head_rev:
+            _log.warning(
+                "⚠️  Base de données en retard sur les migrations Alembic. "
+                "Révision actuelle : %s — Head : %s. "
+                "Exécuter : alembic upgrade head",
+                result, head_rev,
+            )
+        else:
+            _log.info("✓ Base de données à jour (révision %s).", result)
+    except Exception as exc:
+        _log.warning("Impossible de vérifier les migrations Alembic : %s", exc)
+
+    # Index PCE tunisien dans ChromaDB pour la classification RAG (Pass C)
+    try:
+        from api.deps import get_catalog
+        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+        catalog = get_catalog()
+        store   = PCEVectorStore.get()
+        if store.available:
+            store.initialize_pce(catalog.entries)
+            _log.info("✓ PCE vectorstore prêt (%d entrées indexées).", len(catalog.entries))
+        else:
+            _log.warning("⚠️  ChromaDB indisponible — classification RAG désactivée.")
+    except Exception as exc:
+        _log.warning("Impossible d'initialiser le vectorstore PCE : %s", exc)
+
+
+app = FastAPI(
+    title="BIAT IT Billing Agent API",
+    version="1.0.0",
+    description=(
+        "Système de facturation intelligent pour BIAT IT. "
+        "Automatisation OCR+LLM des factures fournisseurs, "
+        "génération d'écritures PCE tunisiennes, gestion CAPEX. "
+        "Toute l'inférence IA est locale via Ollama — aucune donnée n'est transmise au cloud."
+    ),
+    contact={"name": "BIAT IT", "email": "it@biat.com.tn"},
+    openapi_tags=_TAGS,
+    lifespan=_lifespan,
+)
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Trop de tentatives. Réessayez dans 60 secondes."},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+
+# Security headers on all responses
+app.add_middleware(SecurityHeadersMiddleware)
+
+# CORS: restrict to known frontend origins only
+_CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:5174,http://localhost:4173",
+    ).split(",")
+    if o.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    expose_headers=["X-Total-Count", "X-Request-ID"],
+    max_age=600,
+)
+
+
+# Auth endpoints — no token required
+app.include_router(auth_router.router, prefix="/api")
+
+# All other endpoints — JWT required
+app.include_router(invoices.router,      prefix="/api", dependencies=_PROTECTED)
+app.include_router(review.router,        prefix="/api", dependencies=_PROTECTED)
+app.include_router(journal.router,       prefix="/api", dependencies=_PROTECTED)
+app.include_router(budget.router,        prefix="/api", dependencies=_PROTECTED)
+app.include_router(capex.router,         prefix="/api", dependencies=_PROTECTED)
+app.include_router(kpi.router,           prefix="/api", dependencies=_PROTECTED)
+app.include_router(billing.router,       prefix="/api", dependencies=_PROTECTED)
+app.include_router(nl_query.router,      prefix="/api", dependencies=_PROTECTED)
+app.include_router(suivi.router,         prefix="/api", dependencies=_PROTECTED)
+app.include_router(payments.router,      prefix="/api", dependencies=_PROTECTED)
+app.add_api_route(
+    "/api/installments/{installment_id}/mark-paid",
+    payments.mark_paid,
+    methods=["PATCH"],
+    tags=["payments"],
+    dependencies=_PROTECTED,
+)
+app.include_router(notifications.router, prefix="/api", dependencies=_PROTECTED)
+app.include_router(projects.router,        prefix="/api", dependencies=_PROTECTED)
+app.include_router(admin.router,           prefix="/api", dependencies=_PROTECTED)
+app.include_router(users.router,           prefix="/api", dependencies=_PROTECTED)
+app.include_router(roadmap.router,         prefix="/api", dependencies=_PROTECTED)
+app.include_router(projet_budget.router,   prefix="/api", dependencies=_PROTECTED)
+app.include_router(livrables.router,       prefix="/api", dependencies=_PROTECTED)
+app.include_router(audit.router,           prefix="/api", dependencies=_PROTECTED)
+app.include_router(kpi.analytics_router,   prefix="/api", dependencies=_PROTECTED)
+app.include_router(risks.router,            prefix="/api", dependencies=_PROTECTED)
+app.include_router(ai_router.router,        prefix="/api", dependencies=_PROTECTED)
+app.include_router(security_router.router,  prefix="/api", dependencies=_PROTECTED)
+
+
+@app.get("/api/health", tags=["admin"])
+def health():
+    from datetime import datetime, timezone
+    status = "ok"
+    components: dict = {}
+
+    # Database check
+    try:
+        from api.deps import get_engine
+        from sqlalchemy import text
+        engine = get_engine()
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        components["database"] = "ok"
+    except Exception:
+        components["database"] = "error"
+        status = "degraded"
+
+    # Ollama check
+    try:
+        from src.ai_agents.ollama_client import OllamaClient
+        components["ollama"] = "ok" if OllamaClient.get().is_available() else "unavailable"
+    except Exception:
+        components["ollama"] = "unavailable"
+
+    # Scheduler check
+    try:
+        from api.scheduler import get_scheduler
+        sched = get_scheduler()
+        components["scheduler"] = "ok" if (sched and sched.running) else "stopped"
+    except Exception:
+        components["scheduler"] = "unknown"
+
+    return {
+        "status": status,
+        "version": "1.0.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "components": components,
+    }
+
+
+@app.get("/api/health/live", tags=["admin"], summary="Liveness probe")
+def health_live():
+    """Kubernetes liveness : l'application est démarrée et répond."""
+    return {"status": "ok"}
+
+
+@app.get("/api/health/ready", tags=["admin"], summary="Readiness probe")
+def health_ready():
+    """Kubernetes readiness : l'application peut recevoir du trafic (DB disponible)."""
+    try:
+        from api.deps import get_engine
+        from sqlalchemy import text as _text
+        with get_engine().connect() as conn:
+            conn.execute(_text("SELECT 1"))
+        return {"status": "ready"}
+    except Exception:
+        from fastapi import Response
+        return Response(
+            content='{"status":"not_ready","reason":"database_unavailable"}',
+            status_code=503,
+            media_type="application/json",
+        )
+
+
+# ── Serve React SPA (production / Docker) ─────────────────────────────────────
+# Only mounted when the compiled dist/ directory is present.
+# In local dev the Vite dev server handles the frontend separately.
+_DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
+
+if _DIST.exists():
+    app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str) -> FileResponse:  # noqa: ARG001
+        return FileResponse(str(_DIST / "index.html"))
