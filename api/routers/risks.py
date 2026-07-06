@@ -110,7 +110,7 @@ def _log_audit(session: Session, user: dict, action: str, resource_id: str, deta
             resource_type="RISK",
             resource_id=resource_id,
             entity_id=resource_id,
-            status="OK",
+            status="SUCCESS",
             detail=detail,
         )
         session.add(log)
@@ -146,6 +146,55 @@ def list_risks(
 def risk_summary(session: Session = Depends(get_session)):
     from src.services.risk_service import get_risk_summary
     return get_risk_summary(session)
+
+
+@router.get("/par-projet", summary="Risques groupés par projet")
+def risks_par_projet(
+    session: Session = Depends(get_session),
+    _: None = _VIEW,
+):
+    """Pour chaque projet ayant au moins un risque : nom du projet, comptes
+    par criticité et liste complète. Filtrage statut/criticité côté client.
+    Projets triés par criticité maximale décroissante."""
+    from src.storage.orm_models_extra import RisqueORM
+    from src.storage.orm_models_projects import CharteProjetORM
+    from sqlalchemy import select
+
+    # Tous les risques liés à un projet
+    risks = session.execute(
+        select(RisqueORM)
+        .where(RisqueORM.projet_id.isnot(None))
+        .order_by(RisqueORM.projet_id, RisqueORM.created_at.desc())
+    ).scalars().all()
+
+    # Noms de projets depuis la charte
+    chartes = session.execute(select(CharteProjetORM)).scalars().all()
+    proj_names: dict[str, str] = {c.project_id: c.project_name for c in chartes}
+
+    grouped: dict[str, list] = {}
+    for r in risks:
+        grouped.setdefault(r.projet_id, []).append(r)
+
+    result = []
+    for projet_id, proj_risks in grouped.items():
+        by_criticite: dict[str, int] = {"FAIBLE": 0, "MOYENNE": 0, "ELEVEE": 0, "CRITIQUE": 0}
+        for r in proj_risks:
+            by_criticite[r.niveau_criticite] = by_criticite.get(r.niveau_criticite, 0) + 1
+        result.append({
+            "projet_id": projet_id,
+            "project_name": proj_names.get(projet_id, projet_id),
+            "total": len(proj_risks),
+            "by_criticite": by_criticite,
+            "risks": [_to_out(r) for r in proj_risks],
+        })
+
+    # Projets les plus critiques en premier
+    _order = {"CRITIQUE": 3, "ELEVEE": 2, "MOYENNE": 1, "FAIBLE": 0}
+    result.sort(
+        key=lambda g: max((_order.get(c, 0) * n) for c, n in g["by_criticite"].items()),
+        reverse=True,
+    )
+    return result
 
 
 @router.get("/roadmap/{feuille_route_id}", response_model=list[RisqueOut])
