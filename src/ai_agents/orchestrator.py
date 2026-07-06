@@ -15,8 +15,10 @@ from sqlalchemy.orm import Session
 
 from src.ai_agents.models import OrchestratorResult, PipelineStep
 from src.ai_agents.ollama_client import OllamaClient
+from src.models.audit import AuditLogCreate
 from src.models.enums import InvoiceStatus
 from src.models.invoice import InvoiceRecord
+from src.services.audit_service import log_action
 
 if TYPE_CHECKING:
     from src.agent.pipeline import PipelineComponents
@@ -58,6 +60,12 @@ class AIOrchestrator:
                 step1.summary = result.error
                 return self._fail(invoice, "EXTRACTION_FAILED", start, degraded)
 
+            self._audit_ai(
+                "AI_EXTRACT", str(invoice.id),
+                f"method={result.output.get('extraction_method','?')} "
+                f"conf={result.output.get('min_confidence', 0):.2f} "
+                f"review={result.output.get('human_review_required', False)}",
+            )
             invoice.status = InvoiceStatus.EXTRACTED
             self._c.repository.save(invoice)
             step1.status = "done"
@@ -83,6 +91,13 @@ class AIOrchestrator:
                 step2.summary = result2.error
                 return self._fail(invoice, "ERROR", start, degraded)
 
+            self._audit_ai(
+                "AI_CLASSIFY", str(invoice.id),
+                f"catalog={result2.output.get('catalog_id','?')} "
+                f"compte={result2.output.get('compte','?')} "
+                f"pass={result2.output.get('pass_used','?')} "
+                f"conf={result2.output.get('classification_confidence', 0):.2f}",
+            )
             invoice.status = InvoiceStatus.CLASSIFIED
             self._c.repository.save(invoice)
             step2.status = "done"
@@ -116,6 +131,13 @@ class AIOrchestrator:
             step3.duration_ms = result3.duration_ms
             n_flags = result3.output.get("anomaly_count", 0)
             step3.summary = f"{n_flags} anomalie(s)" if n_flags else "Aucune anomalie"
+
+            self._audit_ai(
+                "AI_ANOMALY", str(invoice.id),
+                f"flags={n_flags} "
+                f"errors={result3.output.get('error_count', 0)} "
+                f"types={','.join(result3.output.get('flag_types', []))}",
+            )
 
             if result3.output.get("requires_human_review"):
                 invoice.status = InvoiceStatus.FLAGGED
@@ -160,6 +182,13 @@ class AIOrchestrator:
             )
             result4 = agent4.run({"invoice": invoice, "db": self._db})
 
+            self._audit_ai(
+                "AI_JOURNAL", str(invoice.id),
+                f"entry={result4.output.get('journal_entry_id','?')} "
+                f"balanced={result4.output.get('is_balanced', False)} "
+                f"capex={result4.output.get('asset_created', False)} "
+                f"installments={result4.output.get('installments_created', 0)}",
+            )
             invoice.status = InvoiceStatus.JOURNALED
             self._c.repository.save(invoice)
             step4.status = "done"
@@ -226,6 +255,21 @@ class AIOrchestrator:
             return {"status": "error", "message": str(exc)}
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _audit_ai(self, action: str, resource_id: str, detail: str) -> None:
+        """Enregistre une décision IA dans l'audit HMAC. N'interrompt jamais le pipeline."""
+        try:
+            log_action(self._db, AuditLogCreate(
+                user_id="system:ai",
+                user_email="system:ai",
+                user_role="AI",
+                action=action,
+                resource_type="InvoiceRecord",
+                resource_id=resource_id,
+                detail=detail,
+            ))
+        except Exception as exc:
+            logger.warning("ai_audit_failed action=%s: %s", action, exc)
 
     def _fail(self, invoice: InvoiceRecord, status: str,
               start: float, degraded: bool) -> OrchestratorResult:
