@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from api.auth import SECRET, get_current_user, validate_demo_users
+from api.auth import SECRET, get_current_user, seed_demo_users, validate_demo_users, refresh_demo_passwords
 from api.limiter import limiter
 from api.security.security_headers import SecurityHeadersMiddleware
 
@@ -58,6 +58,17 @@ async def _lifespan(app: FastAPI):
 def _startup() -> None:
     # Validate demo user env vars
     validate_demo_users()
+
+    # Seed demo accounts into the DB so login, reset link and password change
+    # all use the same backend path in local development.
+    try:
+        from api.deps import get_session_ctx
+
+        with get_session_ctx() as session:
+            seed_demo_users(session)
+            refresh_demo_passwords(session)
+    except Exception as exc:
+        _log.warning("Impossible de préparer les comptes démo en base : %s", exc)
 
     # Warn if JWT secret is below recommended minimum length for HMAC-SHA256
     if len(SECRET) < 32:
@@ -100,6 +111,20 @@ def _startup() -> None:
             _log.info("✓ Base de données à jour (révision %s).", result)
     except Exception as exc:
         _log.warning("Impossible de vérifier les migrations Alembic : %s", exc)
+
+    # Index PCE tunisien dans ChromaDB pour la classification RAG (Pass C)
+    try:
+        from api.deps import get_catalog
+        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+        catalog = get_catalog()
+        store   = PCEVectorStore.get()
+        if store.available:
+            store.initialize_pce(catalog.entries)
+            _log.info("✓ PCE vectorstore prêt (%d entrées indexées).", len(catalog.entries))
+        else:
+            _log.warning("⚠️  ChromaDB indisponible — classification RAG désactivée.")
+    except Exception as exc:
+        _log.warning("Impossible d'initialiser le vectorstore PCE : %s", exc)
 
 
 app = FastAPI(
@@ -168,6 +193,13 @@ app.include_router(billing.router,       prefix="/api", dependencies=_PROTECTED)
 app.include_router(nl_query.router,      prefix="/api", dependencies=_PROTECTED)
 app.include_router(suivi.router,         prefix="/api", dependencies=_PROTECTED)
 app.include_router(payments.router,      prefix="/api", dependencies=_PROTECTED)
+app.add_api_route(
+    "/api/installments/{installment_id}/mark-paid",
+    payments.mark_paid,
+    methods=["PATCH"],
+    tags=["payments"],
+    dependencies=_PROTECTED,
+)
 app.include_router(notifications.router, prefix="/api", dependencies=_PROTECTED)
 app.include_router(projects.router,        prefix="/api", dependencies=_PROTECTED)
 app.include_router(admin.router,           prefix="/api", dependencies=_PROTECTED)
