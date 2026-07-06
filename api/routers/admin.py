@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from api.auth import generate_temp_password, get_current_user, hash_password, require_role
@@ -202,6 +202,18 @@ def update_user(
     if body.role is not None:
         user.role = body.role
     if body.is_active is not None:
+        if body.is_active is False and user.role == "Admin":
+            active_admins = session.execute(
+                select(func.count(UserORM.id)).where(
+                    UserORM.role == "Admin",
+                    UserORM.is_active == True,  # noqa: E712
+                )
+            ).scalar_one()
+            if active_admins <= 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Impossible de désactiver le dernier administrateur actif.",
+                )
         user.is_active = body.is_active
     if body.departement is not None:
         user.departement = body.departement
