@@ -41,6 +41,7 @@ interface Toast { id: number; msg: string; type: 'ok' | 'err' }
 
 export default function ReviewQueue() {
   const { role, initials } = useAuth()
+  const canApproveReject = role === 'Comptable' || role === 'Admin'
   const [items, setItems] = useState<InvoiceSummary[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
   const [acting, setActing] = useState<string | null>(null)
@@ -197,22 +198,26 @@ export default function ReviewQueue() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={() => approve(item.id)}
-                          disabled={acting === item.id}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold disabled:opacity-50"
-                          style={{ background: '#E8F5F0', color: '#1D9E76' }}
-                        >
-                          <CheckCircle size={11} /> Approuver
-                        </button>
-                        <button
-                          onClick={() => reject(item.id)}
-                          disabled={acting === item.id}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold disabled:opacity-50"
-                          style={{ background: '#FDECEA', color: '#C0391B' }}
-                        >
-                          <XCircle size={11} /> Rejeter
-                        </button>
+                        {canApproveReject && (
+                          <>
+                            <button
+                              onClick={() => approve(item.id)}
+                              disabled={acting === item.id}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold disabled:opacity-50"
+                              style={{ background: '#E8F5F0', color: '#1D9E76' }}
+                            >
+                              <CheckCircle size={11} /> Approuver
+                            </button>
+                            <button
+                              onClick={() => reject(item.id)}
+                              disabled={acting === item.id}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold disabled:opacity-50"
+                              style={{ background: '#FDECEA', color: '#C0391B' }}
+                            >
+                              <XCircle size={11} /> Rejeter
+                            </button>
+                          </>
+                        )}
                         <button
                           className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold"
                           style={{ background: '#EFF4FA', color: '#1A3A5C' }}

@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_role
 from api.deps import get_session
 from api.schemas import InvoiceSummary, ReviewActionRequest, ActionResultOut
 from src.models.audit import AuditLogCreate
@@ -15,6 +15,8 @@ from src.services.audit_service import log_action, _ip, _ua
 from src.storage.repository import InvoiceRepository
 
 router = APIRouter(prefix="/review", tags=["invoices"])
+
+_COMPTABLE_OR_ADMIN = Depends(require_role("Comptable", "Admin"))
 
 
 @router.get(
@@ -55,6 +57,7 @@ def approve(
     request: Request,
     body: ReviewActionRequest = ReviewActionRequest(),
     current_user: dict = Depends(get_current_user),
+    _: None = _COMPTABLE_OR_ADMIN,
     session: Session = Depends(get_session),
 ):
     repo = InvoiceRepository(session)
@@ -100,6 +103,7 @@ def reject(
     request: Request,
     body: ReviewActionRequest = ReviewActionRequest(),
     current_user: dict = Depends(get_current_user),
+    _: None = _COMPTABLE_OR_ADMIN,
     session: Session = Depends(get_session),
 ):
     repo = InvoiceRepository(session)
