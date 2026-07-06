@@ -43,6 +43,13 @@ class ExtractionAgent(BaseAgent):
             min_conf = self._min_confidence(invoice)
             method = invoice.extraction_method.value if invoice.extraction_method else "unknown"
 
+            if min_conf < 0.75:
+                invoice.human_review_required = True
+                logger.info(
+                    "extraction_low_confidence invoice=%s conf=%.2f → revue humaine requise",
+                    invoice.id, min_conf,
+                )
+
             return AgentResult(
                 agent_name=self.name,
                 success=True,

@@ -161,7 +161,7 @@ class AnomalyAgent(BaseAgent):
 
             if abs(term - median_days) > 15:
                 invoice.add_flag(ValidationFlag(
-                    flag_type=FlagType.SUSPICIOUS_AMOUNT,  # reuse closest flag
+                    flag_type=FlagType.PAYMENT_TERM_ANOMALY,
                     severity=FlagSeverity.WARNING,
                     field_name="due_date",
                     message=(

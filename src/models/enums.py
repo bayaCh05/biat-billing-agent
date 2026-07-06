@@ -48,6 +48,7 @@ class FlagType(str, Enum):
     NEAR_DUPLICATE = "NEAR_DUPLICATE"
     SUSPICIOUS_AMOUNT = "SUSPICIOUS_AMOUNT"
     HIGH_VALUE = "HIGH_VALUE"
+    PAYMENT_TERM_ANOMALY = "PAYMENT_TERM_ANOMALY"   # délai de paiement inhabituel
 
     # Classification
     UNKNOWN_DIRECTION = "UNKNOWN_DIRECTION"

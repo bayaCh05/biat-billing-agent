@@ -19,6 +19,19 @@ from src.ai_agents.ollama_client import OllamaClient
 
 logger = logging.getLogger(__name__)
 
+_VALID_TYPE_RISQUE = {"DELAI", "BUDGET", "TECHNIQUE", "RESSOURCE", "AUTRE"}
+_VALID_PROBABILITE = {"FAIBLE", "MOYENNE", "ELEVEE"}
+_VALID_IMPACT = {"FAIBLE", "MOYEN", "ELEVE", "CRITIQUE"}
+
+
+def _validated_enum(value: str | None, allowed: set[str], default: str) -> str:
+    """Valide une valeur LLM contre un ensemble autorisé — retourne default si invalide."""
+    if value and value.strip().upper() in allowed:
+        return value.strip().upper()
+    if value:
+        logger.warning("risk_enum_invalid value=%r allowed=%s → fallback=%s", value, allowed, default)
+    return default
+
 
 class RiskAgent(BaseAgent):
     name = "RiskAgent"
@@ -79,20 +92,22 @@ class RiskAgent(BaseAgent):
                 from uuid import uuid4
                 from src.services.risk_service import calculate_criticite
 
+                type_risque = _validated_enum(risk_data.get("type_risque"), _VALID_TYPE_RISQUE, "DELAI")
+                probabilite = _validated_enum(risk_data.get("probabilite"), _VALID_PROBABILITE, "MOYENNE")
+                impact = _validated_enum(risk_data.get("impact"), _VALID_IMPACT, "ELEVE")
+
                 risk = RisqueORM(
                     id=uuid4(),
                     titre=risk_data.get("titre", f"Retard: {item.titre}"),
                     description=f"Jalon en retard de {days_overdue} jours: {item.description}",
-                    type_risque=risk_data.get("type_risque", "DELAI"),
-                    probabilite=risk_data.get("probabilite", "MOYENNE"),
-                    impact=risk_data.get("impact", "ELEVE"),
-                    niveau_criticite=calculate_criticite(
-                        risk_data.get("probabilite", "MOYENNE"),
-                        risk_data.get("impact", "ELEVE"),
-                    ),
+                    type_risque=type_risque,
+                    probabilite=probabilite,
+                    impact=impact,
+                    niveau_criticite=calculate_criticite(probabilite, impact),
                     statut="IDENTIFIE",
                     plan_mitigation=risk_data.get("plan_mitigation", ""),
                     feuille_route_id=item.id,
+                    projet_id=item.projet_id,
                     created_by="system:ai",
                     date_identification=today,
                 )
