@@ -202,11 +202,16 @@ class AccountingAgent(BaseAgent):
         raw = OllamaClient.get().complete(prompt, temperature=0.0, max_tokens=5)
         if raw:
             import re
-            m = re.search(r"\d+", raw.strip())
+            # D'abord: réponse idéale = entier seul sur la ligne
+            m = re.search(r"^\s*(\d{1,2})\s*$", raw.strip())
+            if not m:
+                # Sinon: cherche un entier 1-20 entouré de séparateurs de mots
+                m = re.search(r"\b([1-9]|1\d|20)\b", raw)
             if m:
-                years = int(m.group(0))
+                years = int(m.group(1))
                 if 1 <= years <= 20:
                     return years, "AI"
+            logger.warning("amortization_parse_failed raw=%r → fallback 5 ans", raw[:80])
         return 5, "DEFAULT"
 
     # ── Payment schedule ──────────────────────────────────────────────────────

@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from src.ai_agents.ollama_client import OllamaClient
 from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
 
 logger = logging.getLogger(__name__)
+
+_MIN_SIMILARITY = float(os.getenv("RAG_MIN_SIMILARITY", "0.45"))
 
 
 class RAGClassifier:
@@ -26,8 +29,14 @@ class RAGClassifier:
             if descs:
                 query = f"{query} {descs}"
 
-        candidates = store.search_pce(query, n_results=3)
+        raw_candidates = store.search_pce(query, n_results=3)
+        candidates = [c for c in raw_candidates if c.get("similarity", 0.0) >= _MIN_SIMILARITY]
         if not candidates:
+            if raw_candidates:
+                logger.debug(
+                    "rag_all_candidates_below_threshold best=%.3f min=%.2f",
+                    raw_candidates[0].get("similarity", 0.0), _MIN_SIMILARITY,
+                )
             return None
 
         choices_text = "\n".join(
