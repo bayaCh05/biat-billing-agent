@@ -73,6 +73,37 @@ def _job_accounting_consistency() -> None:
         logger.error("weekly_consistency_check_error: %s", exc)
 
 
+_ML_RETRAIN_MIN_INVOICES = int(os.getenv("ML_RETRAIN_MIN_INVOICES", "50"))
+
+
+def _job_retrain_classifier() -> None:
+    """Réentraîne le modèle ML si ≥ ML_RETRAIN_MIN_INVOICES nouvelles factures VALIDATED/EXPORTED."""
+    try:
+        from api.deps import get_components
+        from src.models.enums import InvoiceStatus
+
+        components = get_components()
+        try:
+            repo = components.repository
+            counts = repo.count_by_status()
+            n_labelled = (
+                counts.get(InvoiceStatus.VALIDATED.value, 0)
+                + counts.get(InvoiceStatus.EXPORTED.value, 0)
+                + counts.get(InvoiceStatus.PAID.value, 0)
+                + counts.get(InvoiceStatus.JOURNALED.value, 0)
+            )
+            if n_labelled >= _ML_RETRAIN_MIN_INVOICES:
+                components.coder.ml_classifier.retrain_from_repo(repo)
+                logger.info("ml_weekly_retrain: trained on %d invoices", n_labelled)
+            else:
+                logger.info("ml_weekly_retrain: skipped (only %d labelled invoices, need %d)",
+                            n_labelled, _ML_RETRAIN_MIN_INVOICES)
+        finally:
+            components.close()
+    except Exception as exc:
+        logger.error("ml_weekly_retrain_error: %s", exc)
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler and _scheduler.running:
@@ -103,6 +134,14 @@ def start_scheduler() -> BackgroundScheduler:
         _job_accounting_consistency,
         "cron", day_of_week="mon", hour=6, minute=0,
         id="weekly_consistency",
+        replace_existing=True,
+        misfire_grace_time=7200,
+    )
+
+    _scheduler.add_job(
+        _job_retrain_classifier,
+        "cron", day_of_week="sun", hour=3, minute=0,
+        id="weekly_ml_retrain",
         replace_existing=True,
         misfire_grace_time=7200,
     )

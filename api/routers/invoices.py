@@ -5,7 +5,11 @@ import tempfile
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+import csv
+import io
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user, require_role
@@ -170,6 +174,60 @@ def list_invoices(
         except ValueError:
             raise HTTPException(400, f"Unknown status: {status}")
     return [InvoiceSummary.from_record(inv) for inv in invoices]
+
+
+@router.get(
+    "/export",
+    summary="Exporter les factures en CSV",
+    description="Exporte toutes les factures (ou filtrées par statut) en CSV — usage comptable et ERP.",
+    response_class=StreamingResponse,
+)
+def export_invoices_csv(
+    status: str | None = Query(None, description="Filtrer par statut (optionnel)"),
+    limit: int = Query(5000, description="Nombre maximum de lignes"),
+    session: Session = Depends(get_session),
+):
+    repo = InvoiceRepository(session)
+    invoices = repo.list_all(limit=limit)
+    if status:
+        try:
+            s = InvoiceStatus(status)
+            invoices = [i for i in invoices if i.status == s]
+        except ValueError:
+            raise HTTPException(400, f"Unknown status: {status}")
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    writer.writerow([
+        "id", "statut", "direction", "fournisseur", "num_facture", "date_facture",
+        "montant_ht", "taux_tva", "montant_tva", "montant_ttc", "devise",
+        "compte_pce", "libelle_pce", "revue_humaine", "date_reception",
+    ])
+    for inv in invoices:
+        writer.writerow([
+            str(inv.id),
+            inv.status.value,
+            inv.direction.value,
+            inv.issuer_name.value or "",
+            inv.invoice_number.value or "",
+            inv.invoice_date.value.isoformat() if inv.invoice_date.value else "",
+            inv.amount_ht.value or "",
+            inv.tva_rate.value or "",
+            inv.tva_amount.value or "",
+            inv.amount_ttc.value or "",
+            inv.currency,
+            inv.accounting_compte or "",
+            inv.accounting_label or "",
+            "oui" if inv.human_review_required else "non",
+            inv.received_at.isoformat(),
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=factures.csv"},
+    )
 
 
 @router.get(

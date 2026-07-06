@@ -1,9 +1,12 @@
 """Journal entries endpoints."""
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from api.deps import get_session
@@ -57,3 +60,48 @@ def list_entries(
             ],
         ))
     return result
+
+
+@router.get(
+    "/export",
+    summary="Exporter le journal en CSV",
+    description="Exporte les écritures comptables en CSV — compatible ERP et Excel.",
+    response_class=StreamingResponse,
+)
+def export_journal_csv(
+    start: date | None = Query(None),
+    end: date | None = Query(None),
+    limit: int = Query(5000),
+    session: Session = Depends(get_session),
+):
+    repo = JournalRepository(session)
+    if start and end:
+        entries = repo.get_by_date_range(start, end)
+    else:
+        entries = repo.list_entries(limit=limit)
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    writer.writerow([
+        "reference", "date_ecriture", "description",
+        "compte", "libelle_ligne", "debit", "credit", "source_facture_id",
+    ])
+    for entry in entries:
+        for line in entry.lines:
+            writer.writerow([
+                entry.reference,
+                entry.date_ecriture.isoformat(),
+                entry.description,
+                line.compte or "",
+                line.libelle or "",
+                round(float(line.debit or 0), 3),
+                round(float(line.credit or 0), 3),
+                str(entry.source_invoice_id) if entry.source_invoice_id else "",
+            ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=journal.csv"},
+    )

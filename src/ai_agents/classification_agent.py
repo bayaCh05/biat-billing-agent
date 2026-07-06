@@ -134,14 +134,22 @@ class ClassificationAgent(BaseAgent):
             else (invoice.raw_extracted_text or "")[:80]
         )
 
-        prompt = (
-            f'Une facture tunisienne de "{issuer}" pour "{top_item}" '
-            f"a été classifiée:\n"
-            f"Catégorie: {catalog_label}\nCompte PCE: {compte}\n\n"
-            f"En UNE phrase courte en français, explique pourquoi cette classification "
-            f"est correcte selon le PCE tunisien. Cite les mots clés qui ont guidé ce choix. "
-            f"Maximum 150 caractères."
-        )
+        try:
+            from src.ai_agents.prompt_loader import PromptLoader
+            prompt = PromptLoader.get().format(
+                "classification_explain",
+                issuer=issuer, top_item=top_item,
+                catalog_label=catalog_label, compte=compte,
+            )
+        except Exception:
+            prompt = (
+                f'Une facture tunisienne de "{issuer}" pour "{top_item}" '
+                f"a été classifiée:\n"
+                f"Catégorie: {catalog_label}\nCompte PCE: {compte}\n\n"
+                f"En UNE phrase courte en français, explique pourquoi cette classification "
+                f"est correcte selon le PCE tunisien. Cite les mots clés qui ont guidé ce choix. "
+                f"Maximum 150 caractères."
+            )
         self._call_count += 1
         raw = OllamaClient.get().complete(prompt, temperature=0.1, max_tokens=80)
         return (raw or "").strip()[:200]

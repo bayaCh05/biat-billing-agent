@@ -30,6 +30,22 @@ _AUTH_MODE       = os.getenv("AUTH_MODE", "local").lower()
 _LDAP_USER_DOMAIN = os.getenv("LDAP_USER_DOMAIN", "biat.local")
 
 
+def _validate_password_strength(password: str) -> None:
+    """Lève HTTP 422 si le mot de passe ne respecte pas la politique de sécurité.
+
+    Règles : min 8 caractères, au moins 1 majuscule, 1 chiffre, 1 caractère spécial.
+    """
+    import re
+    if len(password) < 8:
+        raise HTTPException(422, "Le mot de passe doit contenir au moins 8 caractères.")
+    if not re.search(r"[A-Z]", password):
+        raise HTTPException(422, "Le mot de passe doit contenir au moins une lettre majuscule.")
+    if not re.search(r"\d", password):
+        raise HTTPException(422, "Le mot de passe doit contenir au moins un chiffre.")
+    if not re.search(r"[^A-Za-z0-9]", password):
+        raise HTTPException(422, "Le mot de passe doit contenir au moins un caractère spécial.")
+
+
 def _should_use_ldap(email: str) -> bool:
     if _AUTH_MODE == "local":
         return False
@@ -118,13 +134,35 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     )
 
 
+_MAX_ACTIVE_SESSIONS = int(os.getenv("MAX_ACTIVE_SESSIONS", "5"))
+
+
 def _register_active_token(jti: str, user_id: str, expires_at: datetime,
                             ip: str | None, ua: str | None, db: Session) -> None:
+    from sqlalchemy import select as sa_select
     from src.storage.orm_models_auth import ActiveTokenORM
+
+    # Révoquer les sessions les plus anciennes si le seuil est atteint
+    now = datetime.now(timezone.utc)
+    active = db.execute(
+        sa_select(ActiveTokenORM)
+        .where(
+            ActiveTokenORM.user_id == str(user_id),
+            ActiveTokenORM.revoked.is_(False),
+            ActiveTokenORM.expires_at > now,
+        )
+        .order_by(ActiveTokenORM.created_at.asc())
+    ).scalars().all()
+
+    if len(active) >= _MAX_ACTIVE_SESSIONS:
+        # Révoquer les plus anciennes pour rester sous le seuil
+        for old in active[: len(active) - _MAX_ACTIVE_SESSIONS + 1]:
+            old.revoked = True
+
     db.merge(ActiveTokenORM(
         jti=jti,
         user_id=str(user_id),
-        created_at=datetime.now(timezone.utc),
+        created_at=now,
         expires_at=expires_at,
         ip_address=ip,
         user_agent=(ua or "")[:100],
@@ -580,8 +618,7 @@ def change_password(
     email = current_user.get("email")
     if not email:
         raise HTTPException(400, "Changement de mot de passe non disponible pour les comptes de démonstration.")
-    if len(body.new_password) < 8:
-        raise HTTPException(422, "Le mot de passe doit contenir au moins 8 caractères.")
+    _validate_password_strength(body.new_password)
 
     user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
     if user:
@@ -687,8 +724,7 @@ def confirm_otp(
     email = current_user.get("email")
     if not email:
         raise HTTPException(400, "Non disponible pour les comptes de démonstration.")
-    if len(body.new_password) < 8:
-        raise HTTPException(422, "Le mot de passe doit contenir au moins 8 caractères.")
+    _validate_password_strength(body.new_password)
 
     user_id = current_user.get("sub", "")
 
@@ -810,8 +846,7 @@ def reset_password(
 ):
     from src.services.password_verification_service import verify_reset_token, verify_demo_reset_token
 
-    if len(body.new_password) < 8:
-        raise HTTPException(422, "Le mot de passe doit contenir au moins 8 caractères.")
+    _validate_password_strength(body.new_password)
 
     user = verify_reset_token(session, body.token)
     if user:

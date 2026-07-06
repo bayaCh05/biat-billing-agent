@@ -458,7 +458,7 @@ class TestResetTokenReplay:
             # Premier usage : doit réussir
             r1 = client.post("/api/auth/reset-password", json={
                 "token": token,
-                "new_password": "nouveauPass99",
+                "new_password": "NouveauPass99!",
             })
             assert r1.status_code == 200, r1.text
             assert r1.json()["success"] is True
@@ -466,11 +466,12 @@ class TestResetTokenReplay:
             # Deuxième usage avec le même token : doit échouer (token consommé)
             r2 = client.post("/api/auth/reset-password", json={
                 "token": token,
-                "new_password": "autrePass99",
+                "new_password": "AutrePass99!",
             })
             assert r2.status_code == 400, r2.text
         finally:
             # Restaure le mot de passe d'origine pour ne pas casser les autres tests
-            from api.routers.auth import USERS
+            from api.routers.auth import USERS, DEMO_AUTH_STATE
             if demo_email in USERS:
                 USERS[demo_email]["password"] = original_password
+            DEMO_AUTH_STATE.pop(demo_email, None)

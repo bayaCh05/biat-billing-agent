@@ -1,0 +1,110 @@
+# Prompts Ollama — BIAT IT Billing Agent
+#
+# Référence centrale des templates utilisés par les agents IA.
+# tested_with_model : modèle avec lequel chaque prompt a été validé.
+# Changer de modèle → revalider les prompts marqués avec ce champ.
+#
+# Variables dynamiques : notées {variable} — injectées par chaque agent.
+# Utiliser PromptLoader (src/ai_agents/prompt_loader.py) pour charger et formater.
+
+tested_with_model: qwen2.5:3b
+
+prompts:
+
+  # ── ClassificationAgent ──────────────────────────────────────────────────────
+
+  classification_explain:
+    description: "Explication en une phrase de la classification PCE d'une facture"
+    temperature: 0.1
+    max_tokens: 80
+    template: |
+      Une facture tunisienne de "{issuer}" pour "{top_item}" a été classifiée:
+      Catégorie: {catalog_label}
+      Compte PCE: {compte}
+
+      En UNE phrase courte en français, explique pourquoi cette classification
+      est correcte selon le PCE tunisien. Cite les mots clés qui ont guidé ce choix.
+      Maximum 150 caractères.
+
+  # ── AccountingAgent ──────────────────────────────────────────────────────────
+
+  accounting_explain_entry:
+    description: "Explication de l'écriture comptable générée"
+    temperature: 0.1
+    max_tokens: 100
+    template: |
+      Tu es expert-comptable tunisien (PCE).
+      Facture de {issuer} pour {amount} TND TTC.
+
+      Écriture comptable générée:
+      {lines_text}
+
+      Explique en 2 phrases en français pourquoi cette écriture est correcte
+      selon le PCE tunisien. Mentionne le principe comptable appliqué.
+      Maximum 200 caractères.
+
+  accounting_amortization_duration:
+    description: "Durée d'amortissement PCE pour un actif CAPEX"
+    temperature: 0.1
+    max_tokens: 10
+    template: |
+      Droit comptable tunisien — PCE.
+      Quelle est la durée d'amortissement standard en années pour:
+      "{description}" (catégorie: {catalog_label})?
+
+      Réponds UNIQUEMENT avec un entier entre 1 et 20.
+      Références: matériel informatique→3-5ans, serveur→5ans, logiciel→3ans,
+      véhicule→5ans, mobilier→10ans, bâtiment→20ans.
+
+  # ── RiskAgent ────────────────────────────────────────────────────────────────
+
+  risk_generate_from_milestone:
+    description: "Générer un risque projet depuis un jalon en retard"
+    temperature: 0.2
+    max_tokens: 200
+    template: |
+      Un jalon IT est en retard:
+      Titre: {titre}
+      Date prévue: {date_fin}
+      Retard: {days_overdue} jours
+
+      Génère un risque projet en JSON strict (sans texte supplémentaire):
+      {{"titre": "", "type_risque": "DELAI|BUDGET|TECHNIQUE|RESSOURCE|AUTRE",
+      "probabilite": "FAIBLE|MOYENNE|ELEVEE",
+      "impact": "FAIBLE|MOYEN|ELEVE|CRITIQUE",
+      "plan_mitigation": "3 actions numérotées"}}
+
+  risk_draft_mitigation:
+    description: "Proposer 3 actions de mitigation pour un risque"
+    temperature: 0.3
+    max_tokens: 200
+    template: |
+      Risque IT à mitiger:
+      Type: {type_risque} | Probabilité: {probabilite} | Impact: {impact}
+      Description: {titre}
+
+      Propose exactement 3 actions de mitigation concrètes et actionnables en français.
+      Format:
+      1. [action]
+      2. [action]
+      3. [action]
+      Maximum 150 mots total.
+
+  # ── InsightAgent ─────────────────────────────────────────────────────────────
+
+  insight_health_summary:
+    description: "Résumé exécutif de la situation financière pour la Direction"
+    temperature: 0.3
+    max_tokens: 200
+    template: |
+      Tu es assistant de direction financière de BIAT IT.
+      Rédige un résumé exécutif EN 3 PHRASES MAXIMUM.
+
+      Situation actuelle:
+      - Factures: {pending_count} en attente, {rejection_rate}% rejetées ce mois
+      - Budget: {n_over_budget} lignes dépassées / {n_total}, écart global {variance_pct:+.1f}%
+      - Roadmap 2026: {pct_done}% complétée, {n_overdue_milestones} jalons en retard
+      - Risques: {n_critique} critiques actifs, {n_overdue_mitigation} plans de mitigation en retard
+
+      Commence par: "Satisfaisant" | "Vigilance requise" | "Situation critique"
+      Puis les 2 points les plus importants. Sois factuel et direct.

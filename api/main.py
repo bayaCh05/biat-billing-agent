@@ -262,6 +262,30 @@ def health():
     }
 
 
+@app.get("/api/health/live", tags=["admin"], summary="Liveness probe")
+def health_live():
+    """Kubernetes liveness : l'application est démarrée et répond."""
+    return {"status": "ok"}
+
+
+@app.get("/api/health/ready", tags=["admin"], summary="Readiness probe")
+def health_ready():
+    """Kubernetes readiness : l'application peut recevoir du trafic (DB disponible)."""
+    try:
+        from api.deps import get_engine
+        from sqlalchemy import text as _text
+        with get_engine().connect() as conn:
+            conn.execute(_text("SELECT 1"))
+        return {"status": "ready"}
+    except Exception:
+        from fastapi import Response
+        return Response(
+            content='{"status":"not_ready","reason":"database_unavailable"}',
+            status_code=503,
+            media_type="application/json",
+        )
+
+
 # ── Serve React SPA (production / Docker) ─────────────────────────────────────
 # Only mounted when the compiled dist/ directory is present.
 # In local dev the Vite dev server handles the frontend separately.
