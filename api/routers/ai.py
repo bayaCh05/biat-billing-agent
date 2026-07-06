@@ -172,7 +172,9 @@ def retrain_model(
             components.coder.ml_classifier.retrain_from_repo(components.repository)
             return {"status": "ok", "message": "Modèle ML réentraîné avec succès."}
         except Exception as exc:
-            raise HTTPException(500, detail=str(exc))
+            import logging
+            logging.getLogger(__name__).error("retrain_model_error: %s", exc)
+            raise HTTPException(500, detail="Erreur interne lors du réentraînement du modèle ML.")
     finally:
         components.close()
 
