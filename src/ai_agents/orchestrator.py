@@ -176,8 +176,8 @@ class AIOrchestrator:
         except Exception as exc:
             step4.status = "failed"
             step4.summary = str(exc)
-            invoice.status = InvoiceStatus.JOURNALED
-            self._c.repository.save(invoice)
+            logger.error("accounting_agent_error invoice=%s: %s", invoice.id, exc)
+            return self._fail(invoice, "ERROR", start, degraded)
 
         return OrchestratorResult(
             invoice_id=str(invoice.id),
