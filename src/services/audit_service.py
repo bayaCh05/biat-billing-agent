@@ -16,10 +16,21 @@ surrounding business operation so either both succeed or both fail.
 """
 from __future__ import annotations
 
+import os
+
 from sqlalchemy.orm import Session
 
 from src.models.audit import AuditLogCreate
 from src.storage.orm_models_audit import AuditLogORM
+
+# IPs des proxies de confiance depuis lesquels X-Forwarded-For est accepté.
+# Format : liste d'IPs séparées par des virgules (ex: "10.0.0.1,10.0.0.2").
+# Si vide (défaut), X-Forwarded-For est ignoré et l'IP directe est utilisée.
+_TRUSTED_PROXIES: frozenset[str] = frozenset(
+    ip.strip()
+    for ip in os.getenv("TRUSTED_PROXY_IPS", "").split(",")
+    if ip.strip()
+)
 
 
 def log_action(session: Session, entry: AuditLogCreate) -> None:
@@ -50,14 +61,17 @@ def log_action(session: Session, entry: AuditLogCreate) -> None:
 
 
 def _ip(request) -> str | None:
-    """Extract client IP from a FastAPI Request (handles X-Forwarded-For)."""
+    """Extrait l'IP client — n'accepte X-Forwarded-For que depuis des proxies de confiance."""
     if request is None:
         return None
-    forwarded = (request.headers or {}).get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
     client = getattr(request, "client", None)
-    return client.host if client else None
+    direct_ip = client.host if client else None
+    # N'utiliser X-Forwarded-For que si la requête arrive d'un proxy connu
+    if _TRUSTED_PROXIES and direct_ip in _TRUSTED_PROXIES:
+        forwarded = (request.headers or {}).get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return direct_ip
 
 
 def _ua(request) -> str | None:
