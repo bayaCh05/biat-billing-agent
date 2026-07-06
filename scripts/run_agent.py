@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 # Make src importable when running from project root
+sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.agent.config_loader import build_agent

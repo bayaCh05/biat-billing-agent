@@ -12,10 +12,11 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 # Allow running from project root
+sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.storage.db import build_engine, build_session_factory, init_db
-from src.storage.orm_models_extra import RisqueORM, FeuilleDeRouteORM
+from src.storage.orm_models_roadmap import RisqueORM, FeuilleDeRouteORM
 from src.services.risk_service import calculate_criticite
 
 RISKS = [

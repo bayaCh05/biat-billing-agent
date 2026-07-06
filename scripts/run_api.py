@@ -8,10 +8,12 @@ Usage:
 import sys
 from pathlib import Path
 
-# Ensure project root is on sys.path so `api` and `src` are importable
+# Ensure project root and backend/ are on sys.path so `api` and `src` are importable
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+BACKEND = ROOT / "backend"
+for p in (str(BACKEND), str(ROOT)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 import uvicorn
 
