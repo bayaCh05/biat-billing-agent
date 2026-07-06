@@ -159,6 +159,8 @@ export interface KpiData {
   flagged: number
   pending_review: number
   by_status: Record<string, number>
+  exposed_amount_ttc: number
+  blocked_amount_ttc: number
 }
 
 // ── Billing ───────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../api/client'
-import type { KpiData, BudgetSummary, Asset, InvoiceSummary } from '../types'
+import type { KpiData, BudgetSummary, Asset } from '../types'
 import { formatTND } from '../utils/formatters'
 import PageSpinner from '../components/ui/PageSpinner'
 
@@ -81,7 +81,6 @@ export default function KPIDashboard() {
   const [kpi, setKpi] = useState<KpiData>(KPI_EMPTY)
   const [budget, setBudget] = useState<BudgetSummary>(BUDGET_EMPTY)
   const [assets, setAssets] = useState<Asset[]>([])
-  const [invoices, setInvoices] = useState<InvoiceSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
 
@@ -92,7 +91,6 @@ export default function KPIDashboard() {
       apiFetch<KpiData>('/kpi', { signal }).then(setKpi),
       apiFetch<BudgetSummary>('/budget/summary', { signal }).then(setBudget),
       apiFetch<Asset[]>('/assets', { signal }).then(setAssets),
-      apiFetch<InvoiceSummary[]>('/invoices', { signal }).then(setInvoices),
     ])
       .catch(err => { if (err.name !== 'AbortError') setError(true) })
       .finally(() => setLoading(false))
@@ -110,14 +108,10 @@ export default function KPIDashboard() {
 
   const grossCapex = assets.reduce((s, a) => s + a.acquisition_cost_ht, 0) || 3140000
 
-  // Amounts derived from the invoices list — no hardcoded values
-  const flaggedInvoices = invoices.filter(i => i.status === 'FLAGGED')
-  const exposedAmount = flaggedInvoices.reduce((s, i) => s + (i.amount_ttc ?? 0), 0)
   const dupCount = kpi.by_status?.DUPLICATE ?? 0
   const suspCount = kpi.by_status?.SUSPECTED_DUPLICATE ?? 0
-  const blockedAmount = invoices
-    .filter(i => i.flags.some(f => f.flag_type === 'DUPLICATE' || f.flag_type === 'SUSPECTED_DUPLICATE'))
-    .reduce((s, i) => s + (i.amount_ttc ?? 0), 0)
+  const exposedAmount = kpi.exposed_amount_ttc
+  const blockedAmount = kpi.blocked_amount_ttc
 
   // Linear amortisation YTD: cost / life * (months elapsed / 12)
   const monthsElapsed = now.getMonth() + 1

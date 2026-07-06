@@ -34,7 +34,7 @@ _DIRECTION_COMPTABLE = Depends(require_role("Admin", "Direction", "Comptable"))
 def get_kpi(session: Session = Depends(get_session)):
     from src.storage.orm_models import InvoiceORM
 
-    # Single aggregation query: totals + FLAGGED + pending review counts
+    # Single aggregation query: totals + FLAGGED + pending review counts + montants exposés
     agg = session.execute(
         select(
             func.count(InvoiceORM.id).label("total"),
@@ -54,6 +54,9 @@ def get_kpi(session: Session = Depends(get_session)):
                     else_=0,
                 )
             ).label("pending"),
+            func.sum(
+                case((InvoiceORM.status == "FLAGGED", InvoiceORM.amount_ttc), else_=0)
+            ).label("exposed_ttc"),
         )
     ).first()
 
@@ -70,6 +73,18 @@ def get_kpi(session: Session = Depends(get_session)):
     _TERMINAL = [InvoiceStatus.EXPORTED, InvoiceStatus.JOURNALED, InvoiceStatus.PAID, InvoiceStatus.COLLECTED]
     total_processed, auto_approved = repo.count_auto_approved(statuses=_TERMINAL)
 
+    # Montant bloqué : factures avec un flag DUPLICATE/SUSPECTED_DUPLICATE non résolu
+    from src.storage.orm_models import ValidationFlagORM
+    blocked_row = session.execute(
+        select(func.sum(InvoiceORM.amount_ttc))
+        .join(ValidationFlagORM, ValidationFlagORM.invoice_id == InvoiceORM.id)
+        .where(
+            ValidationFlagORM.flag_type.in_(["DUPLICATE", "SUSPECTED_DUPLICATE"]),
+            ValidationFlagORM.resolved == False,  # noqa: E712
+        )
+        .group_by()
+    ).scalar_one_or_none()
+
     total = int(agg.total or 0)
     return KpiOut(
         total_invoices=total,
@@ -79,6 +94,8 @@ def get_kpi(session: Session = Depends(get_session)):
         flagged=int(agg.flagged or 0),
         pending_review=int(agg.pending or 0),
         by_status=by_status,
+        exposed_amount_ttc=round(float(agg.exposed_ttc or 0), 3),
+        blocked_amount_ttc=round(float(blocked_row or 0), 3),
     )
 
 

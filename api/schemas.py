@@ -277,6 +277,9 @@ class KpiOut(BaseModel):
     flagged: int
     pending_review: int
     by_status: dict[str, int]
+    # Montants agrégés pour les cartes de risque du dashboard
+    exposed_amount_ttc: float = 0.0
+    blocked_amount_ttc: float = 0.0
 
 
 # ── Billing ───────────────────────────────────────────────────────────────────
