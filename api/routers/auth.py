@@ -1,6 +1,7 @@
 """Authentication endpoints — login, refresh, logout, OTP, password reset."""
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -10,14 +11,32 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.auth import USERS, get_current_user, hash_password, verify_password
+from api.auth import DEMO_AUTH_STATE, USERS, get_current_user, hash_password, verify_password
 from api.deps import get_session
 from api.limiter import limiter, limit
 from api.security import jwt_handler, account_lockout
 from src.models.audit import AuditLogCreate
 from src.services.audit_service import log_action, _ip, _ua
 
+_log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# ── Mode d'authentification ───────────────────────────────────────────────────
+# AUTH_MODE=local   → authentification locale uniquement (comportement par défaut)
+# AUTH_MODE=ldap    → LDAP uniquement pour tous les utilisateurs
+# AUTH_MODE=hybrid  → LDAP pour les emails @<LDAP_USER_DOMAIN>, local pour les autres
+_AUTH_MODE       = os.getenv("AUTH_MODE", "local").lower()
+_LDAP_USER_DOMAIN = os.getenv("LDAP_USER_DOMAIN", "biat.local")
+
+
+def _should_use_ldap(email: str) -> bool:
+    if _AUTH_MODE == "local":
+        return False
+    if _AUTH_MODE == "ldap":
+        return True
+    # hybrid : seulement pour le domaine LDAP configuré
+    return email.endswith(f"@{_LDAP_USER_DOMAIN}")
 
 _REFRESH_COOKIE = "biat_refresh"
 _REFRESH_DAYS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))
@@ -50,13 +69,9 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
-class RequestOtpRequest(BaseModel):
-    new_password: str
-    current_password: str | None = None
-
 
 class ConfirmOtpRequest(BaseModel):
-    otp_code: str
+    otp_code: str | None = None   # optional: skipped for demo accounts
     new_password: str
     current_password: str | None = None
 
@@ -70,7 +85,26 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class RevokeSessionRequest(BaseModel):
+    jti_prefix: str
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _is_demo_account(user_id: str, email: str) -> bool:
+    """True for demo/test accounts that cannot receive real emails."""
+    return user_id.startswith("demo:") or "biat-it.tn" in email
+
+
+def _mask_email(email: str) -> str:
+    try:
+        local, domain = email.split("@", 1)
+        if len(local) <= 2:
+            return f"{local[0]}***@{domain}"
+        return f"{local[0]}***{local[-1]}@{domain}"
+    except Exception:
+        return "***@***"
+
 
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     response.set_cookie(
@@ -128,6 +162,90 @@ def login(
     ip = _ip(request)
     ua = _ua(request)
 
+    # ── Authentification LDAP (si AUTH_MODE=ldap|hybrid) ──────────────────────
+    if _should_use_ldap(email):
+        from src.services.ldap_service import authenticate_ldap
+
+        ldap_result = authenticate_ldap(email, body.password)
+        if ldap_result is None:
+            log_action(session, AuditLogCreate(
+                user_email=email, action="LOGIN_FAILURE", resource_type="User",
+                status="FAILURE", detail=f"Échec LDAP depuis {ip}",
+                ip_address=ip, user_agent=ua,
+            ))
+            session.commit()
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Email ou mot de passe incorrect.")
+
+        role = ldap_result.get("role") or "Comptable"
+
+        # Provisioning automatique : crée le compte local si inexistant
+        db_user = session.execute(
+            select(UserORM).where(UserORM.email == email)
+        ).scalar_one_or_none()
+
+        if db_user is None:
+            db_user = UserORM(
+                nom=ldap_result.get("sn") or email.split("@")[0].capitalize(),
+                prenom=ldap_result.get("givenName") or "LDAP",
+                email=email,
+                # Mot de passe aléatoire — l'utilisateur s'authentifie toujours via LDAP
+                hashed_password=hash_password(secrets.token_hex(32)),
+                role=role,
+                departement="IT",
+                is_first_login=False,
+                is_active=True,
+            )
+            session.add(db_user)
+            session.flush()
+            _log.info("Compte provisionné depuis LDAP : %s (%s)", email, role)
+        else:
+            if not db_user.is_active:
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Compte désactivé.")
+            # Le rôle LDAP fait autorité — mise à jour si nécessaire
+            if role and db_user.role != role:
+                db_user.role = role
+
+        account_lockout.record_success(db_user, session)
+        db_user.last_login_ip = ip
+
+        access_token = jwt_handler.create_access_token(
+            user_id=str(db_user.id),
+            role=db_user.role,
+            email=db_user.email,
+            extra={
+                "nom": db_user.nom,
+                "prenom": db_user.prenom,
+                "departement": db_user.departement,
+                "force_password_change": False,
+                "auth_method": "ldap",
+            },
+        )
+        refresh_token = jwt_handler.create_refresh_token(user_id=str(db_user.id))
+
+        acc_payload = jwt_handler.decode_token_raw(access_token) or {}
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=jwt_handler.ACCESS_TOKEN_EXPIRE_HOURS)
+        _register_active_token(
+            acc_payload.get("jti", ""), str(db_user.id), expires_at, ip, ua, session
+        )
+
+        log_action(session, AuditLogCreate(
+            user_id=str(db_user.id), user_email=db_user.email, user_role=db_user.role,
+            action="LOGIN_SUCCESS", resource_type="User", resource_id=str(db_user.id),
+            status="SUCCESS", detail=f"Connexion LDAP depuis {ip}",
+            ip_address=ip, user_agent=ua,
+        ))
+        session.commit()
+        _set_refresh_cookie(response, refresh_token)
+
+        return LoginResponse(
+            access_token=access_token,
+            role=db_user.role,
+            user_id=str(db_user.id),
+            force_password_change=False,
+            is_first_login=False,
+        )
+
+    # ── Authentification locale ────────────────────────────────────────────────
     db_user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
 
     if db_user:
@@ -230,6 +348,8 @@ def login(
             access_token=access_token,
             role=demo["role"],
             user_id=f"demo:{email}",
+            force_password_change=DEMO_AUTH_STATE.get(email, {}).get("is_first_login", False),
+            is_first_login=DEMO_AUTH_STATE.get(email, {}).get("is_first_login", False),
         )
 
     log_action(session, AuditLogCreate(
@@ -404,14 +524,14 @@ def list_sessions(
 )
 def revoke_session(
     request: Request,
-    body: dict,
+    body: RevokeSessionRequest,
     current_user: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
     from src.storage.orm_models_auth import ActiveTokenORM
     from sqlalchemy import select as sa_select
 
-    jti_prefix = (body.get("jti_prefix") or "").strip()
+    jti_prefix = body.jti_prefix.strip()
     if len(jti_prefix) < 8:
         raise HTTPException(400, "jti_prefix doit faire au moins 8 caractères.")
 
@@ -464,69 +584,93 @@ def change_password(
         raise HTTPException(422, "Le mot de passe doit contenir au moins 8 caractères.")
 
     user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(404, "Utilisateur non trouvé.")
-    if not verify_password(body.current_password, user.hashed_password):
-        raise HTTPException(400, "Mot de passe actuel incorrect.")
+    if user:
+        if not verify_password(body.current_password, user.hashed_password):
+            raise HTTPException(400, "Mot de passe actuel incorrect.")
 
-    user.hashed_password = hash_password(body.new_password)
-    user.is_first_login = False
+        user.hashed_password = hash_password(body.new_password)
+        user.is_first_login = False
 
-    # Revoke current access token so user must re-login
-    jti = current_user.get("jti")
-    if jti:
-        jwt_handler.revoke_token(jti, "password_change", str(user.id), session)
+        # Revoke current access token so user must re-login
+        jti = current_user.get("jti")
+        if jti:
+            jwt_handler.revoke_token(jti, "password_change", str(user.id), session)
 
-    log_action(session, AuditLogCreate(
-        user_id=str(user.id), user_email=user.email, user_role=user.role,
-        action="PASSWORD_CHANGED", resource_type="User", resource_id=str(user.id),
-        status="SUCCESS", detail="Mot de passe changé (direct)",
-        ip_address=_ip(request), user_agent=_ua(request),
-    ))
-    session.commit()
-    return {"message": "Mot de passe modifié avec succès."}
+        log_action(session, AuditLogCreate(
+            user_id=str(user.id), user_email=user.email, user_role=user.role,
+            action="PASSWORD_CHANGED", resource_type="User", resource_id=str(user.id),
+            status="SUCCESS", detail="Mot de passe changé (direct)",
+            ip_address=_ip(request), user_agent=_ua(request),
+        ))
+        session.commit()
+        return {"message": "Mot de passe modifié avec succès."}
+
+    if email in USERS:
+        if not secrets.compare_digest(body.current_password, USERS[email]["password"]):
+            raise HTTPException(400, "Mot de passe actuel incorrect.")
+        USERS[email]["password"] = body.new_password
+        DEMO_AUTH_STATE.setdefault(email, {})["is_first_login"] = False
+        log_action(session, AuditLogCreate(
+            user_email=email, user_role=USERS[email]["role"],
+            action="PASSWORD_CHANGED", resource_type="User", resource_id=email,
+            status="SUCCESS", detail="Mot de passe démo changé (direct)",
+            ip_address=_ip(request), user_agent=_ua(request),
+        ))
+        session.commit()
+        return {"message": "Mot de passe modifié avec succès."}
+
+    raise HTTPException(404, "Utilisateur non trouvé.")
 
 
 @router.post("/change-password/request-otp", summary="Demander un OTP")
 @limiter.limit(limit("3/minute"))
 def request_otp(
     request: Request,
-    body: RequestOtpRequest,
     current_user: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
+    """Generate and email a 6-digit OTP. Demo accounts skip email entirely."""
     from src.storage.orm_models_users import UserORM
     from src.services.password_verification_service import generate_otp
 
     email = current_user.get("email")
     if not email:
         raise HTTPException(400, "Non disponible pour les comptes de démonstration.")
-    if len(body.new_password) < 8:
-        raise HTTPException(422, "Le mot de passe doit contenir au moins 8 caractères.")
 
-    user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(404, "Utilisateur non trouvé.")
-    if body.current_password and not verify_password(body.current_password, user.hashed_password):
+    user_id = current_user.get("sub", "")
+
+    # Demo accounts cannot receive real emails — skip OTP entirely
+    if _is_demo_account(user_id, email):
         log_action(session, AuditLogCreate(
-            user_id=str(user.id), user_email=user.email, user_role=user.role,
-            action="OTP_REQUESTED", resource_type="User", resource_id=str(user.id),
-            status="FAILURE", detail="Mot de passe actuel incorrect",
+            user_email=email, action="OTP_REQUESTED", resource_type="User",
+            status="SUCCESS", detail="OTP ignoré — compte de démonstration",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
         session.commit()
-        raise HTTPException(400, "Mot de passe actuel incorrect.")
+        return {
+            "skip_otp": True,
+            "message": "Compte de démonstration — vérification email ignorée.",
+            "masked_email": _mask_email(email),
+        }
 
-    purpose = "FIRST_LOGIN" if user.is_first_login else "VOLUNTARY_CHANGE"
-    generate_otp(session, user, purpose)
-    log_action(session, AuditLogCreate(
-        user_id=str(user.id), user_email=user.email, user_role=user.role,
-        action="OTP_REQUESTED", resource_type="User", resource_id=str(user.id),
-        status="SUCCESS", detail=f"OTP demandé (purpose={purpose})",
-        ip_address=_ip(request), user_agent=_ua(request),
-    ))
-    session.commit()
-    return {"message": "Code de vérification envoyé par email."}
+    user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
+    if user:
+        purpose = "FIRST_LOGIN" if user.is_first_login else "VOLUNTARY_CHANGE"
+        generate_otp(session, user, purpose)
+        log_action(session, AuditLogCreate(
+            user_id=str(user.id), user_email=user.email, user_role=user.role,
+            action="OTP_REQUESTED", resource_type="User", resource_id=str(user.id),
+            status="SUCCESS", detail=f"OTP demandé (purpose={purpose})",
+            ip_address=_ip(request), user_agent=_ua(request),
+        ))
+        session.commit()
+        return {
+            "skip_otp": False,
+            "message": "Code de vérification envoyé par email.",
+            "masked_email": _mask_email(email),
+        }
+
+    raise HTTPException(404, "Utilisateur non trouvé.")
 
 
 @router.post("/change-password/confirm", summary="Confirmer changement via OTP")
@@ -546,40 +690,74 @@ def confirm_otp(
     if len(body.new_password) < 8:
         raise HTTPException(422, "Le mot de passe doit contenir au moins 8 caractères.")
 
-    user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
-    if not user:
+    user_id = current_user.get("sub", "")
+
+    # Demo accounts: skip OTP — just update the password directly
+    if _is_demo_account(user_id, email):
+        user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
+        if user:
+            user.hashed_password = hash_password(body.new_password)
+            user.is_first_login = False
+            log_action(session, AuditLogCreate(
+                user_id=str(user.id), user_email=user.email, user_role=user.role,
+                action="PASSWORD_CHANGED", resource_type="User", resource_id=str(user.id),
+                status="SUCCESS", detail="Mot de passe changé (compte démo — sans OTP)",
+                ip_address=_ip(request), user_agent=_ua(request),
+            ))
+            session.commit()
+            return {"success": True, "message": "Mot de passe modifié avec succès."}
+        if email in USERS:
+            USERS[email]["password"] = body.new_password
+            DEMO_AUTH_STATE.setdefault(email, {})["is_first_login"] = False
+            log_action(session, AuditLogCreate(
+                user_email=email, user_role=USERS[email].get("role", ""),
+                action="PASSWORD_CHANGED", resource_type="User", resource_id=email,
+                status="SUCCESS", detail="Mot de passe démo changé (sans OTP)",
+                ip_address=_ip(request), user_agent=_ua(request),
+            ))
+            session.commit()
+            return {"success": True, "message": "Mot de passe modifié avec succès."}
         raise HTTPException(404, "Utilisateur non trouvé.")
-    if body.current_password and not verify_password(body.current_password, user.hashed_password):
+
+    # Real users: verify OTP
+    user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
+    if user:
+        if body.current_password and not verify_password(body.current_password, user.hashed_password):
+            log_action(session, AuditLogCreate(
+                user_id=str(user.id), user_email=user.email, user_role=user.role,
+                action="OTP_VERIFIED", resource_type="User", resource_id=str(user.id),
+                status="FAILURE", detail="Mot de passe actuel incorrect",
+                ip_address=_ip(request), user_agent=_ua(request),
+            ))
+            session.commit()
+            raise HTTPException(400, "Mot de passe actuel incorrect.")
+
+        if not body.otp_code:
+            raise HTTPException(400, "Code OTP requis pour les comptes réels.")
+
+        valid = verify_otp(session, user.id, body.otp_code)
+        if not valid:
+            log_action(session, AuditLogCreate(
+                user_id=str(user.id), user_email=user.email, user_role=user.role,
+                action="OTP_VERIFIED", resource_type="User", resource_id=str(user.id),
+                status="FAILURE", detail="Code OTP invalide ou expiré",
+                ip_address=_ip(request), user_agent=_ua(request),
+            ))
+            session.commit()
+            raise HTTPException(400, "Code incorrect ou expiré. Demandez un nouveau code.")
+
+        user.hashed_password = hash_password(body.new_password)
+        user.is_first_login = False
         log_action(session, AuditLogCreate(
             user_id=str(user.id), user_email=user.email, user_role=user.role,
-            action="OTP_VERIFIED", resource_type="User", resource_id=str(user.id),
-            status="FAILURE", detail="Mot de passe actuel incorrect",
+            action="PASSWORD_CHANGED", resource_type="User", resource_id=str(user.id),
+            status="SUCCESS", detail="Mot de passe changé via OTP",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
         session.commit()
-        raise HTTPException(400, "Mot de passe actuel incorrect.")
+        return {"success": True, "message": "Mot de passe modifié avec succès."}
 
-    valid = verify_otp(session, user.id, body.otp_code)
-    if not valid:
-        log_action(session, AuditLogCreate(
-            user_id=str(user.id), user_email=user.email, user_role=user.role,
-            action="OTP_VERIFIED", resource_type="User", resource_id=str(user.id),
-            status="FAILURE", detail="Code OTP invalide ou expiré",
-            ip_address=_ip(request), user_agent=_ua(request),
-        ))
-        session.commit()
-        raise HTTPException(400, "Code incorrect ou expiré. Demandez un nouveau code.")
-
-    user.hashed_password = hash_password(body.new_password)
-    user.is_first_login = False
-    log_action(session, AuditLogCreate(
-        user_id=str(user.id), user_email=user.email, user_role=user.role,
-        action="PASSWORD_CHANGED", resource_type="User", resource_id=str(user.id),
-        status="SUCCESS", detail="Mot de passe changé via OTP",
-        ip_address=_ip(request), user_agent=_ua(request),
-    ))
-    session.commit()
-    return {"success": True, "message": "Mot de passe modifié avec succès."}
+    raise HTTPException(404, "Utilisateur non trouvé.")
 
 
 @router.post("/forgot-password", summary="Demander un lien de réinitialisation")
@@ -590,7 +768,7 @@ def forgot_password(
     session: Session = Depends(get_session),
 ):
     from src.storage.orm_models_users import UserORM
-    from src.services.password_verification_service import generate_reset_link
+    from src.services.password_verification_service import generate_reset_link, generate_demo_reset_link
 
     email = body.email.lower().strip()
     user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
@@ -601,6 +779,14 @@ def forgot_password(
             user_id=str(user.id), user_email=user.email, user_role=user.role,
             action="PASSWORD_RESET_REQUESTED", resource_type="User", resource_id=str(user.id),
             status="SUCCESS", detail="Lien de réinitialisation envoyé",
+            ip_address=_ip(request), user_agent=_ua(request),
+        ))
+    elif email in USERS:
+        generate_demo_reset_link(email, "FORGOT_PASSWORD")
+        log_action(session, AuditLogCreate(
+            user_email=email, user_role=USERS[email]["role"],
+            action="PASSWORD_RESET_REQUESTED", resource_type="User", resource_id=email,
+            status="SUCCESS", detail="Lien de réinitialisation démo envoyé",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
     else:
@@ -622,22 +808,35 @@ def reset_password(
     body: ResetPasswordRequest,
     session: Session = Depends(get_session),
 ):
-    from src.services.password_verification_service import verify_reset_token
+    from src.services.password_verification_service import verify_reset_token, verify_demo_reset_token
 
     if len(body.new_password) < 8:
         raise HTTPException(422, "Le mot de passe doit contenir au moins 8 caractères.")
 
     user = verify_reset_token(session, body.token)
-    if not user:
-        raise HTTPException(400, "Lien invalide ou expiré. Faites une nouvelle demande.")
+    if user:
+        user.hashed_password = hash_password(body.new_password)
+        user.is_first_login = False
+        log_action(session, AuditLogCreate(
+            user_id=str(user.id), user_email=user.email, user_role=user.role,
+            action="PASSWORD_RESET_COMPLETED", resource_type="User", resource_id=str(user.id),
+            status="SUCCESS", detail="Mot de passe réinitialisé via lien",
+            ip_address=_ip(request), user_agent=_ua(request),
+        ))
+        session.commit()
+        return {"success": True, "message": "Mot de passe réinitialisé avec succès."}
 
-    user.hashed_password = hash_password(body.new_password)
-    user.is_first_login = False
-    log_action(session, AuditLogCreate(
-        user_id=str(user.id), user_email=user.email, user_role=user.role,
-        action="PASSWORD_RESET_COMPLETED", resource_type="User", resource_id=str(user.id),
-        status="SUCCESS", detail="Mot de passe réinitialisé via lien",
-        ip_address=_ip(request), user_agent=_ua(request),
-    ))
-    session.commit()
-    return {"success": True, "message": "Mot de passe réinitialisé avec succès."}
+    demo_email = verify_demo_reset_token(body.token)
+    if demo_email and demo_email in USERS:
+        USERS[demo_email]["password"] = body.new_password
+        DEMO_AUTH_STATE.setdefault(demo_email, {})["is_first_login"] = False
+        log_action(session, AuditLogCreate(
+            user_email=demo_email, user_role=USERS[demo_email]["role"],
+            action="PASSWORD_RESET_COMPLETED", resource_type="User", resource_id=demo_email,
+            status="SUCCESS", detail="Mot de passe démo réinitialisé via lien",
+            ip_address=_ip(request), user_agent=_ua(request),
+        ))
+        session.commit()
+        return {"success": True, "message": "Mot de passe réinitialisé avec succès."}
+
+    raise HTTPException(400, "Lien invalide ou expiré. Faites une nouvelle demande.")
