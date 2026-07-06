@@ -78,6 +78,13 @@ def _startup() -> None:
             len(SECRET),
         )
 
+    # Warn if AUDIT_HMAC_SECRET is missing (fallback sur JWT_SECRET = clés non séparées)
+    if not os.getenv("AUDIT_HMAC_SECRET", "").strip():
+        _log.warning(
+            "⚠️  AUDIT_HMAC_SECRET non défini — la clé HMAC de l'audit trail utilise JWT_SECRET "
+            "par défaut. Définir AUDIT_HMAC_SECRET séparément dans .env pour isoler les deux secrets."
+        )
+
     # Warn if DB is not at the latest Alembic revision
     db_url = os.getenv("DATABASE_URL", "sqlite:///./data/invoices.db")
     if ":memory:" in db_url:
