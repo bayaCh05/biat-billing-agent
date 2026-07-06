@@ -47,10 +47,6 @@ dependencies = [
     # PDF generation (client invoices)
     "fpdf2>=2.8",
 
-    # Web interface
-    "streamlit>=1.35",
-    "plotly>=5.0",
-
     # REST API
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
@@ -68,6 +64,9 @@ dependencies = [
 
     # MIME type detection
     "python-magic>=0.4",
+
+    # Authentification LDAP (serveur d'annuaire d'entreprise)
+    "ldap3>=2.9",
 ]
 
 [project.optional-dependencies]

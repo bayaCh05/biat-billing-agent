@@ -2,7 +2,7 @@ import { apiFetch, apiUpload } from './client'
 
 import type {
   Invoice, InvoiceSummary, JournalEntry, BudgetSummary,
-  Asset, KpiData, ClientTemplate, ClientInvoice, NLQueryResult, SuiviSnapshot,
+  Asset, KpiData, ClientTemplate, ClientInvoice, NLQueryResult,
   Project, ProjectPhase,
   UserMe, AdminUser,
   LigneBudget, BudgetSynthese,
@@ -15,7 +15,7 @@ import type {
   BudgetPlanEntry,
   AccountSpendItem,
   AnalyticsKPIs,
-  Risk, RiskSummary, RoadmapItemWithRisks,
+  Risk, RiskSummary, RoadmapItemWithRisks, RisquesProjetGroupe,
 } from '../types'
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
@@ -125,11 +125,6 @@ export const nlQuery = (question: string) =>
     body: JSON.stringify({ question }),
   })
 
-// ── Suivi ────────────────────────────────────────────────────────────────────
-
-export const getSuiviSnapshot = () =>
-  apiFetch<SuiviSnapshot>('/suivi/snapshot')
-
 // ── Notifications ─────────────────────────────────────────────────────────────
 
 export const getNotificationCount = () =>
@@ -157,14 +152,8 @@ export const listProjectPhases = (project_id: string) =>
 export const getMe = () =>
   apiFetch<UserMe>('/users/me')
 
-export const updateMe = (body: { nom?: string; prenom?: string; departement?: string }) =>
-  apiFetch<UserMe>('/users/me', { method: 'PATCH', body: JSON.stringify(body) })
-
-export const changePassword = (current_password: string, new_password: string) =>
-  apiFetch<{ message: string }>('/auth/change-password', {
-    method: 'PATCH',
-    body: JSON.stringify({ current_password, new_password }),
-  })
+export const updateAvatar = (avatar: string) =>
+  apiFetch<UserMe>('/users/me/avatar', { method: 'PATCH', body: JSON.stringify({ avatar }) })
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 
@@ -196,9 +185,6 @@ export const listProjetBudget = (projetId: string) =>
 export const createLigneBudget = (projetId: string, body: { categorie: string; montant_prevu: number; devise?: string }) =>
   apiFetch<LigneBudget>(`/projets/${projetId}/budget`, { method: 'POST', body: JSON.stringify(body) })
 
-export const updateLigneBudget = (ligneId: string, body: { categorie?: string; montant_prevu?: number }) =>
-  apiFetch<LigneBudget>(`/projet-budget/${ligneId}`, { method: 'PATCH', body: JSON.stringify(body) })
-
 export const deleteLigneBudget = (ligneId: string) =>
   apiFetch<void>(`/projet-budget/${ligneId}`, { method: 'DELETE' })
 
@@ -206,9 +192,6 @@ export const getBudgetSynthese = (projetId: string) =>
   apiFetch<BudgetSynthese>(`/projets/${projetId}/budget/synthese`)
 
 // ── Roadmap ───────────────────────────────────────────────────────────────────
-
-export const listRoadmap = (annee = 2026) =>
-  apiFetch<RoadmapItem[]>(`/roadmap?annee=${annee}`)
 
 export const listRoadmapWithRisks = (annee = 2026) =>
   apiFetch<RoadmapItemWithRisks[]>(`/roadmap/with-risks?annee=${annee}`)
@@ -280,9 +263,6 @@ export const listAuditLogs = (params: {
   return apiFetch<AuditLog[]>(`/audit/logs${qs ? '?' + qs : ''}`)
 }
 
-export const getResourceHistory = (resourceType: string, resourceId: string) =>
-  apiFetch<AuditLog[]>(`/audit/logs/${resourceType}/${resourceId}`)
-
 // ── Risks ─────────────────────────────────────────────────────────────────────
 
 export const listRisks = (params: {
@@ -308,6 +288,9 @@ export const getRisksForRoadmap = (feuilleRouteId: string) =>
 
 export const getRisksForProject = (projetId: string) =>
   apiFetch<Risk[]>(`/risks/projet/${projetId}`)
+
+export const getRisksParProjet = () =>
+  apiFetch<RisquesProjetGroupe[]>('/risks/par-projet')
 
 export const createRisk = (body: {
   titre: string
@@ -343,16 +326,16 @@ export const closeRisk = (id: string) =>
 
 // ── Password verification (OTP + reset link) ─────────────────────────────────
 
-export const requestOtp = (newPassword: string, currentPassword?: string) =>
-  apiFetch<{ message: string }>('/auth/change-password/request-otp', {
+export const requestOtp = () =>
+  apiFetch<{ message: string; masked_email?: string; skip_otp?: boolean }>('/auth/change-password/request-otp', {
     method: 'POST',
-    body: JSON.stringify({ new_password: newPassword, current_password: currentPassword ?? null }),
+    body: JSON.stringify({}),
   })
 
-export const confirmOtp = (otpCode: string, newPassword: string, currentPassword?: string) =>
+export const confirmOtp = (otpCode: string | null, newPassword: string, currentPassword?: string) =>
   apiFetch<{ success: boolean; message: string }>('/auth/change-password/confirm', {
     method: 'POST',
-    body: JSON.stringify({ otp_code: otpCode, new_password: newPassword, current_password: currentPassword ?? null }),
+    body: JSON.stringify({ otp_code: otpCode ?? null, new_password: newPassword, current_password: currentPassword ?? null }),
   })
 
 export const forgotPassword = (email: string) =>
@@ -366,11 +349,6 @@ export const resetPassword = (token: string, newPassword: string) =>
     method: 'POST',
     body: JSON.stringify({ token, new_password: newPassword }),
   })
-
-// ── Health ────────────────────────────────────────────────────────────────────
-
-export const checkHealth = () =>
-  apiFetch<{ status: string }>('/health')
 
 // ── AI ────────────────────────────────────────────────────────────────────────
 
@@ -435,14 +413,6 @@ export const getAIActivity = () =>
 
 export const scanRoadmapRisks = () =>
   apiFetch<{ items_scanned: number; risks_created: number; items_skipped: number }>('/ai/scan-roadmap-risks', { method: 'POST' })
-
-export const correctClassification = (invoiceId: string, body: {
-  cost_catalog_id: string; accounting_compte: string; invoice_text?: string
-}) =>
-  apiFetch<{ invoice_id: string; corrected_compte: string; feedback_count: number; retrain_triggered: boolean }>(
-    `/ai/invoices/${invoiceId}/classification`,
-    { method: 'PATCH', body: JSON.stringify(body) }
-  )
 
 // ── Security ──────────────────────────────────────────────────────────────────
 
