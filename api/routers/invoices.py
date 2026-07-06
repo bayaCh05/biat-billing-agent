@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_role
 from api.deps import get_session, get_components
 from api.schemas import InvoiceOut, InvoiceSummary, ActionResultOut
 from src.models.enums import InvoiceStatus
@@ -18,6 +18,8 @@ from src.utils.file_utils import sha256
 from api.limiter import limiter, limit
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
+
+_COMPTABLE_OR_ADMIN = Depends(require_role("Comptable", "Admin"))
 
 
 @router.post(
@@ -210,6 +212,7 @@ def get_invoice(
 def update_status(
     invoice_id: str,
     new_status: str,
+    _: None = _COMPTABLE_OR_ADMIN,
     session: Session = Depends(get_session),
 ):
     repo = InvoiceRepository(session)
