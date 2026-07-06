@@ -58,6 +58,15 @@ class ClassificationAgent(BaseAgent):
                 pass_used = self._try_rag_pass(invoice)
                 conf = 0.5  # RAG result is lower confidence
 
+            # Revue humaine si la confiance est sous le seuil configurable
+            if conf < _CONF_THRESHOLD:
+                invoice.human_review_required = True
+                logger.info(
+                    "classification_low_confidence invoice=%s conf=%.2f "
+                    "threshold=%.2f → revue humaine requise",
+                    invoice.id, conf, _CONF_THRESHOLD,
+                )
+
             # Classification explanation via Ollama
             reason = ""
             if invoice.cost_catalog_id and not degraded and OllamaClient.get().is_available():
