@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import ReviewQueue from '../pages/ReviewQueue'
+import ReviewQueue from '../pages/factures/ReviewQueue'
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({ role: 'Comptable', initials: 'BC', name: 'Baya C.' }),

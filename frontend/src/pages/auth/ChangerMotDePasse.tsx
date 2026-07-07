@@ -1,7 +1,8 @@
 import { useRef, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { KeyRound, Eye, EyeOff, CheckCircle, Mail } from 'lucide-react'
-import { useAuth, roleHome } from '../../context/AuthContext'
+import { useAuth } from '../../context/AuthContext'
+import { roleHome } from '../../config/navigation'
 import { requestOtp, confirmOtp } from '../../api/endpoints'
 import { getToken } from '../../api/client'
 

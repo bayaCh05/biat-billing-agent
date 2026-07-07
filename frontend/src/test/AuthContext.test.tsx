@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { AuthProvider, useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/AuthContext'
+import { AuthProvider } from '../context/AuthProvider'
 
 vi.mock('../api/endpoints', () => ({
   getNotificationCount: vi.fn().mockResolvedValue({ count: 5 }),

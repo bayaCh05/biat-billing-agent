@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuth, roleHome, type UserRole } from '../../context/AuthContext'
+import { useAuth, type UserRole } from '../../context/AuthContext'
+import { roleHome } from '../../config/navigation'
 import { apiLogin } from '../../api/client'
 
 export default function Login() {

@@ -28,7 +28,8 @@ import InscriptionPage from './pages/admin/InscriptionPage'
 import HabilitationsPage from './pages/admin/HabilitationsPage'
 import Audit from './pages/transversal/Audit'
 import Echeancier from './pages/comptabilite/Echeancier'
-import { useAuth, roleHome } from './context/AuthContext'
+import { useAuth } from './context/AuthContext'
+import { roleHome } from './config/navigation'
 import { ROLE_PATHS } from './config/roles'
 
 function HomeRedirect() {

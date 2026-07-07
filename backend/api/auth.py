@@ -7,19 +7,18 @@ import string
 from pathlib import Path
 
 import bcrypt
+from dotenv import load_dotenv
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-# Load .env file if present (dev convenience — production uses real env vars)
-_env_path = Path(__file__).resolve().parent.parent / ".env"
-if _env_path.exists():
-    for _line in _env_path.read_text().splitlines():
-        _line = _line.strip()
-        if _line and not _line.startswith("#") and "=" in _line:
-            _k, _v = _line.split("=", 1)
-            # Strip inline comments (e.g. KEY=value  # comment → value)
-            _v = _v.split("#")[0].strip()
-            os.environ.setdefault(_k.strip(), _v)
+# Load .env files before importing modules that read secrets at import time.
+# External environment variables keep priority; repo-root .env is the canonical
+# local file, and backend/.env remains supported as a fallback.
+_ROOT_DIR = Path(__file__).resolve().parents[2]
+_BACKEND_DIR = Path(__file__).resolve().parents[1]
+for _env_path in (_ROOT_DIR / ".env", _BACKEND_DIR / ".env"):
+    if _env_path.exists():
+        load_dotenv(_env_path, override=False)
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer

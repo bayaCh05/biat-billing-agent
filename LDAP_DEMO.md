@@ -15,6 +15,8 @@ d'authentification et présenter la fonctionnalité au superviseur.
 
 ## 1. Lancer le serveur LDAP mock
 
+Depuis la racine du dépôt (`/Users/mac/Documents/internship_biat`), exécuter :
+
 ```bash
 docker compose -f docker/ldap/docker-compose.yml up -d
 ```
@@ -30,7 +32,7 @@ docker compose -f docker/ldap/docker-compose.yml ps
 **Interface web phpLDAPadmin (optionnel) :**
 - URL : http://localhost:8081
 - Login DN : `cn=admin,dc=biat,dc=local`
-- Mot de passe : `admin_secret`
+- Mot de passe : `admin_secret` (pas `admin_password`)
 
 ---
 

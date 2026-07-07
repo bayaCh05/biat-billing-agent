@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
-import { LogOut, KeyRound, CheckCircle, Eye, EyeOff, Monitor, RefreshCw, Camera, AlertCircle } from 'lucide-react'
+import { LogOut, CheckCircle, Monitor, RefreshCw, Camera, AlertCircle } from 'lucide-react'
 import { getSessions, revokeSession, logoutApi, updateAvatar, type ActiveSession } from '../../api/endpoints'
 
 const ROLE_COLOR: Record<string, string> = {

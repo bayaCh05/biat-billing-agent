@@ -3,11 +3,19 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import jwt
 from fastapi import HTTPException, status
+from dotenv import load_dotenv
 from sqlalchemy.orm import Session
+
+_ROOT_DIR = Path(__file__).resolve().parents[3]
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+for _env_path in (_ROOT_DIR / ".env", _BACKEND_DIR / ".env"):
+    if _env_path.exists():
+        load_dotenv(_env_path, override=False)
 
 
 SECRET = os.getenv("JWT_SECRET", "biat_local_only_secret_2026")

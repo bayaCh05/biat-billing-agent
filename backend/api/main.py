@@ -119,19 +119,28 @@ def _startup() -> None:
     except Exception as exc:
         _log.warning("Impossible de vérifier les migrations Alembic : %s", exc)
 
-    # Index PCE tunisien dans ChromaDB pour la classification RAG (Pass C)
-    try:
-        from api.deps import get_catalog
-        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
-        catalog = get_catalog()
-        store   = PCEVectorStore.get()
-        if store.available:
-            store.initialize_pce(catalog.entries)
-            _log.info("✓ PCE vectorstore prêt (%d entrées indexées).", len(catalog.entries))
-        else:
-            _log.warning("⚠️  ChromaDB indisponible — classification RAG désactivée.")
-    except Exception as exc:
-        _log.warning("Impossible d'initialiser le vectorstore PCE : %s", exc)
+    # Index PCE tunisien dans ChromaDB pour la classification RAG (Pass C).
+    # Désactivé par défaut pour éviter de télécharger/charger le modèle
+    # sentence-transformers à chaque reload local.
+    if os.getenv("PCE_VECTORSTORE_AUTO_INDEX", "false").lower() == "true":
+        try:
+            from api.deps import get_catalog
+            from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+            catalog = get_catalog()
+            store   = PCEVectorStore.get()
+            if store.available:
+                entries = catalog.all_entries()
+                store.initialize_pce(entries)
+                _log.info("✓ PCE vectorstore prêt (%d entrées indexées).", len(entries))
+            else:
+                _log.warning("⚠️  ChromaDB indisponible — classification RAG désactivée.")
+        except Exception as exc:
+            _log.warning("Impossible d'initialiser le vectorstore PCE : %s", exc)
+    else:
+        _log.info(
+            "Indexation PCE vectorstore ignorée au démarrage "
+            "(PCE_VECTORSTORE_AUTO_INDEX=false)."
+        )
 
 
 app = FastAPI(
