@@ -1,0 +1,59 @@
+# Annuaire mock BIAT IT — utilisateurs de test
+# Format LDIF standard (RFC 2849)
+# departmentNumber : 100=DIRECTION 200=CHEF_PROJET 300=COMPTABLE 900=ADMIN
+
+dn: uid=admin,ou=users,dc=biat,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+cn: Administrateur Système
+sn: Système
+givenName: Administrateur
+uid: admin
+mail: admin@biat.local
+userPassword: admin2026
+departmentNumber: 900
+
+dn: uid=mtrabelsi,ou=users,dc=biat,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+cn: Mohamed Trabelsi
+sn: Trabelsi
+givenName: Mohamed
+uid: mtrabelsi
+mail: mtrabelsi@biat.local
+userPassword: biat2026
+departmentNumber: 200
+
+dn: uid=abenali,ou=users,dc=biat,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+cn: Amira Ben Ali
+sn: Ben Ali
+givenName: Amira
+uid: abenali
+mail: abenali@biat.local
+userPassword: biat2026
+departmentNumber: 300
+
+dn: uid=kbouaziz,ou=users,dc=biat,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+# Valeur cn encodée en base64 : "Karim Bouaziz"
+cn:: S2FyaW0gQm91YXppeg==
+sn: Bouaziz
+givenName: Karim
+uid: kbouaziz
+mail: kbouaziz@biat.local
+userPassword: biat2026
+departmentNumber: 100
+
+dn: uid=smansour,ou=users,dc=biat,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+cn: Sonia Mansour
+sn: Mansour
+givenName: Sonia
+uid: smansour
+mail: smansour@biat.local
+userPassword: biat2026
+departmentNumber: 300

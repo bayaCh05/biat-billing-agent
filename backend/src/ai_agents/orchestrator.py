@@ -33,6 +33,8 @@ class AIOrchestrator:
         self._c = components
         self._db = db
         self._steps: list[PipelineStep] = []
+        from src.storage.repository import InvoiceRepository
+        self._repo = InvoiceRepository(db)
 
     def process_invoice(self, invoice: InvoiceRecord) -> OrchestratorResult:
         """Run a pre-loaded InvoiceRecord through the full AI pipeline.
@@ -67,7 +69,7 @@ class AIOrchestrator:
                 f"review={result.output.get('human_review_required', False)}",
             )
             invoice.status = InvoiceStatus.EXTRACTED
-            self._c.repository.save(invoice)
+            self._repo.save(invoice)
             step1.status = "done"
             step1.duration_ms = result.duration_ms
             step1.summary = result.explanation
@@ -99,7 +101,7 @@ class AIOrchestrator:
                 f"conf={result2.output.get('classification_confidence', 0):.2f}",
             )
             invoice.status = InvoiceStatus.CLASSIFIED
-            self._c.repository.save(invoice)
+            self._repo.save(invoice)
             step2.status = "done"
             step2.duration_ms = result2.duration_ms
             step2.summary = (
@@ -142,7 +144,7 @@ class AIOrchestrator:
             if result3.output.get("requires_human_review"):
                 invoice.status = InvoiceStatus.FLAGGED
                 invoice.human_review_required = True
-                self._c.repository.save(invoice)
+                self._repo.save(invoice)
                 step4 = PipelineStep(step_number=4, agent_name="AccountingAgent",
                                      status="skipped", summary="En attente de révision humaine")
                 self._steps.append(step4)
@@ -157,7 +159,7 @@ class AIOrchestrator:
                 )
 
             invoice.status = InvoiceStatus.VALIDATED
-            self._c.repository.save(invoice)
+            self._repo.save(invoice)
 
         except Exception as exc:
             step3.status = "failed"
@@ -190,7 +192,7 @@ class AIOrchestrator:
                 f"installments={result4.output.get('installments_created', 0)}",
             )
             invoice.status = InvoiceStatus.JOURNALED
-            self._c.repository.save(invoice)
+            self._repo.save(invoice)
             step4.status = "done"
             step4.duration_ms = result4.duration_ms
             balanced = "équilibrée" if result4.output.get("is_balanced") else "DÉSÉQUILIBRÉE"
@@ -236,7 +238,7 @@ class AIOrchestrator:
 
     def generate_health_summary(self, db: Session) -> dict:
         from src.ai_agents.insight_agent import InsightAgent
-        agent = InsightAgent(self._c.repository.session.get_bind())
+        agent = InsightAgent(self._db.get_bind())
         result = agent.run({"task": "health_summary", "db": db})
         return result.output
 
@@ -275,7 +277,7 @@ class AIOrchestrator:
               start: float, degraded: bool) -> OrchestratorResult:
         invoice.status = InvoiceStatus(status)
         try:
-            self._c.repository.save(invoice)
+            self._repo.save(invoice)
         except Exception:
             pass
         return OrchestratorResult(
@@ -288,6 +290,8 @@ class AIOrchestrator:
         )
 
     def _embed_invoice(self, invoice: InvoiceRecord) -> None:
+        if not os.getenv("PCE_VECTORSTORE_AUTO_INDEX", "false").lower() == "true":
+            return
         try:
             from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
             store = PCEVectorStore.get()

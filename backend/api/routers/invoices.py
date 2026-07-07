@@ -9,7 +9,7 @@ import csv
 import io
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user, require_role
@@ -76,6 +76,10 @@ async def upload_invoice(
         tmp.write(content)
         tmp_path = tmp.name
 
+    # Persist a copy so the PDF can be served later
+    uploads_dir = Path("data/uploads")
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
     log_action(session, AuditLogCreate(
         action="INVOICE_UPLOADED", resource_type="InvoiceRecord", status="SUCCESS",
         detail=f"type={file_info['detected_type']} size={file_info['file_size_bytes']}B",
@@ -117,6 +121,10 @@ async def upload_invoice(
 
     try:
         file_hash = sha256(tmp_path)
+        persistent_path = str(uploads_dir / f"{file_hash}{suffix}")
+        import shutil
+        shutil.copy2(tmp_path, persistent_path)
+
         existing = repo.get_by_hash(file_hash)
 
         if existing:
@@ -124,13 +132,13 @@ async def upload_invoice(
             existing.retry_count = 0
             existing.last_error = None
             existing.flags = []
-            existing.raw_file_path = tmp_path
+            existing.raw_file_path = persistent_path
             repo.save(existing)
             invoice = existing
         else:
             invoice = InvoiceRecord(
                 file_hash=file_hash,
-                raw_file_path=tmp_path,
+                raw_file_path=persistent_path,
                 status=InvoiceStatus.RECEIVED,
             )
             repo.save(invoice)
@@ -403,3 +411,23 @@ def get_pipeline_status(
         "human_review_required": inv.human_review_required,
         "journal_entry": journal_entry,
     }
+
+
+@router.get(
+    "/{invoice_id}/pdf",
+    summary="Télécharger le PDF original de la facture",
+)
+def get_invoice_pdf(
+    invoice_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: dict = Depends(get_current_user),
+):
+    repo = InvoiceRepository(session)
+    inv = repo.get_by_id(invoice_id)
+    if not inv:
+        raise HTTPException(404, "Facture introuvable")
+    path = Path(inv.raw_file_path) if inv.raw_file_path else None
+    if not path or not path.exists():
+        raise HTTPException(404, "Fichier PDF non disponible")
+    media = "application/pdf" if path.suffix.lower() == ".pdf" else "application/octet-stream"
+    return FileResponse(str(path), media_type=media, filename=path.name)

@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react'
 import { Download } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import StatusChip from '../../components/ui/StatusChip'
-import { listInvoices, getInvoice } from '../../api/endpoints'
+import { listInvoices, getInvoice, getPipelineStatus } from '../../api/endpoints'
+import type { PipelineJournalEntry } from '../../api/endpoints'
 import type { InvoiceSummary, Invoice, InvoiceDirection } from '../../types'
 import { formatTND, formatDate } from '../../utils/formatters'
 import { useAuth } from '../../context/AuthContext'
 import PageSpinner from '../../components/ui/PageSpinner'
+const API_BASE = import.meta.env.VITE_API_URL as string
 
 const TERMINAL = new Set(['EXPORTED', 'JOURNALED', 'JOURNALING', 'PAID', 'COLLECTED'])
 const PENDING  = new Set(['RECEIVED', 'EXTRACTING', 'EXTRACTED', 'CLASSIFYING', 'CLASSIFIED', 'VALIDATING', 'VALIDATED', 'FLAGGED', 'EXPORTING'])
@@ -15,6 +18,7 @@ const confColor = (c: number) => c >= 0.8 ? '#1D9E76' : c >= 0.5 ? '#F0A500' : '
 
 export default function InvoiceDetail() {
   const { role, initials } = useAuth()
+  const navigate = useNavigate()
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([])
   const [tab, setTab] = useState<'all' | 'supplier' | 'client'>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -22,6 +26,9 @@ export default function InvoiceDetail() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+  const [journalEntry, setJournalEntry] = useState<PipelineJournalEntry | null>(null)
+  const [showJournal, setShowJournal] = useState(false)
+  const [pdfError, setPdfError] = useState(false)
 
   useEffect(() => {
     listInvoices()
@@ -31,13 +38,37 @@ export default function InvoiceDetail() {
   }, [])
 
   useEffect(() => {
-    if (!selectedId) { setDetail(null); return }
+    if (!selectedId) { setDetail(null); setJournalEntry(null); setShowJournal(false); setPdfError(false); return }
     setDetailLoading(true)
+    setJournalEntry(null); setShowJournal(false); setPdfError(false)
     getInvoice(selectedId)
       .then(setDetail)
       .catch(() => setDetail(null))
       .finally(() => setDetailLoading(false))
   }, [selectedId])
+
+  async function handleViewPdf() {
+    if (!selectedId) return
+    const token = localStorage.getItem('access_token')
+    const url = `${API_BASE}/invoices/${selectedId}/pdf`
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) { setPdfError(true); return }
+    const blob = await res.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    window.open(objectUrl, '_blank')
+  }
+
+  async function handleViewJournal() {
+    if (!selectedId) return
+    if (showJournal) { setShowJournal(false); return }
+    const status = await getPipelineStatus(selectedId).catch(() => null)
+    if (status?.journal_entry) {
+      setJournalEntry(status.journal_entry)
+      setShowJournal(true)
+    } else {
+      navigate('/journal')
+    }
+  }
 
   if (loading || error) return <PageSpinner loading={loading} error={error} />
 
@@ -261,14 +292,60 @@ export default function InvoiceDetail() {
                   </div>
                 )}
 
+                {pdfError && (
+                  <p className="text-xs mt-2 text-center" style={{ color: '#C0391B' }}>PDF non disponible pour cette facture</p>
+                )}
+
                 <div className="flex gap-2 mt-5">
-                  <button className="flex-1 py-2 rounded-lg text-xs font-semibold text-white" style={{ background: '#1A3A5C' }}>
+                  <button
+                    onClick={handleViewPdf}
+                    className="flex-1 py-2 rounded-lg text-xs font-semibold text-white"
+                    style={{ background: '#1A3A5C' }}
+                  >
                     📄 Voir PDF
                   </button>
-                  <button className="flex-1 py-2 rounded-lg text-xs font-semibold" style={{ background: '#EFF4FA', color: '#1A3A5C' }}>
+                  <button
+                    onClick={handleViewJournal}
+                    className="flex-1 py-2 rounded-lg text-xs font-semibold"
+                    style={{ background: '#EFF4FA', color: '#1A3A5C' }}
+                  >
                     📒 Voir écriture
                   </button>
                 </div>
+
+                {showJournal && journalEntry && (
+                  <div className="mt-4 rounded-lg border p-3 text-xs space-y-2" style={{ borderColor: '#D5E8F5', background: '#F8FAFC' }}>
+                    <p className="font-semibold" style={{ color: '#1A1A2E' }}>
+                      {journalEntry.reference} — {journalEntry.date_ecriture}
+                    </p>
+                    <p style={{ color: '#5D6D7E' }}>{journalEntry.description}</p>
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr style={{ color: '#5D6D7E' }}>
+                          <th className="text-left py-1">Compte</th>
+                          <th className="text-right py-1">Débit</th>
+                          <th className="text-right py-1">Crédit</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {journalEntry.lines?.map((l, i) => (
+                          <tr key={i} style={{ borderTop: '1px solid #EFF4FA' }}>
+                            <td className="py-0.5" style={{ color: '#1A1A2E' }}>{l.compte}</td>
+                            <td className="text-right py-0.5" style={{ color: '#1A3A5C' }}>{l.debit > 0 ? formatTND(l.debit) : '—'}</td>
+                            <td className="text-right py-0.5" style={{ color: '#1D9E76' }}>{l.credit > 0 ? formatTND(l.credit) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <button
+                      onClick={() => navigate('/journal')}
+                      className="text-xs underline"
+                      style={{ color: '#1A3A5C' }}
+                    >
+                      Voir tout le journal →
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
