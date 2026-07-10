@@ -177,6 +177,15 @@ class SyncMongoInvoiceRepository:
             query["_id"] = {"$ne": str(exclude_id)}
         return [self._to_pydantic(d) for d in self._coll.find(query)]
 
+    def get_by_status(self, status: InvoiceStatus) -> list[InvoiceRecord]:
+        return [self._to_pydantic(d) for d in self._coll.find({"status": status.value})]
+
+    def count_by_status(self) -> dict[str, int]:
+        """Return {status_value: count} — same shape as the SQLAlchemy
+        InvoiceRepository.count_by_status() used by scheduler.py/ai.py."""
+        rows = self._coll.aggregate([{"$group": {"_id": "$status", "count": {"$sum": 1}}}])
+        return {row["_id"]: row["count"] for row in rows}
+
     def get_historical_amounts(self, issuer_tax_id: str) -> list[float]:
         query = {
             "issuer_tax_id": issuer_tax_id,

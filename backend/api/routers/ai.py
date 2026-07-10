@@ -169,7 +169,11 @@ def retrain_model(
     components = get_components()
     try:
         try:
-            components.coder.ml_classifier.retrain_from_repo(components.repository)
+            # Mongo, not components.repository (SQLAlchemy) — invoices uploaded
+            # through the real API path only ever land in Mongo; see
+            # scheduler.py::_job_retrain_classifier for the same fix.
+            from src.storage.sync_mongo_repository import SyncMongoInvoiceRepository
+            components.coder.ml_classifier.retrain_from_repo(SyncMongoInvoiceRepository())
             return {"status": "ok", "message": "Modèle ML réentraîné avec succès."}
         except Exception as exc:
             import logging
