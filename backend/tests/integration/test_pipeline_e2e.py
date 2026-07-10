@@ -442,8 +442,13 @@ class TestLifecycleE2E:
         process_invoice(invoice, components)
 
         saved = repository.get_by_id(invoice.id)
-        if saved.status not in (InvoiceStatus.EXPORTED, InvoiceStatus.VALIDATED):
-            pytest.skip(f"Invoice in unexpected status {saved.status} — check validation flags")
+        # JOURNALED is the real happy-path terminal status since pipeline.py's
+        # post_journal() stage was added (EXPORTED -> JOURNALING -> JOURNALED) —
+        # this used to be a conditional pytest.skip() that silently no-opped on
+        # every run once that stage started firing, never exercising mark_paid.
+        assert saved.status in (InvoiceStatus.EXPORTED, InvoiceStatus.VALIDATED, InvoiceStatus.JOURNALED), (
+            f"Invoice in unexpected status {saved.status} — check validation flags"
+        )
 
         # Manually move to EXPORTED for this test
         saved.status = InvoiceStatus.EXPORTED
