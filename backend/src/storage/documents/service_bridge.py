@@ -12,6 +12,7 @@ Usage dans une route FastAPI :
 """
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import re
@@ -2260,15 +2261,15 @@ async def log_audit_event_native(entry) -> None:
     audit_service.log_action(), pour les événements auth/admin/security (Lot 6).
 
     Prend un AuditLogCreate déjà construit (src.models.audit) pour minimiser
-    le delta aux points d'appel — mêmes champs que log_action(), sans row_hash
-    (la chaîne d'intégrité HMAC reste spécifique à SQLite — voir
-    api/routers/audit.py::verify_integrity, question de conception séparée).
+    le delta aux points d'appel — mêmes champs que log_action(), avec un
+    row_hash HMAC réel (voir api/security/audit_integrity.py::compute_row_hash_from_doc
+    — même formule que SQLite, appliquée à ce document avant insertion).
     """
     try:
+        from api.security.audit_integrity import compute_row_hash_from_doc
         from src.storage.documents.audit_log import AuditLogDocument
 
-        coll = AuditLogDocument.get_pymongo_collection()
-        await coll.insert_one({
+        doc = {
             "_id": str(uuid4()),
             "created_at": datetime.now(timezone.utc),
             "user_id": entry.user_id,
@@ -2285,10 +2286,63 @@ async def log_audit_event_native(entry) -> None:
             "user_agent": entry.user_agent,
             "status": entry.status,
             "detail": entry.detail,
-            "row_hash": None,
-        })
+        }
+        doc["row_hash"] = compute_row_hash_from_doc(doc)
+
+        coll = AuditLogDocument.get_pymongo_collection()
+        await coll.insert_one(doc)
     except Exception as exc:
         logger.debug("log_audit_event_native: écriture Mongo échouée — %s", exc)
+
+
+async def verify_integrity_native(limit: int = 5000) -> dict | None:
+    """Équivalent Mongo-natif de api/routers/audit.py::verify_integrity() —
+    recalcule le HMAC de chaque document audit_logs stocké dans Mongo.
+
+    Retourne None si Mongo est indisponible (l'appelant se limite alors au
+    résultat SQLite). Ce n'est PAS une vérification de chaîne — chaque
+    document est vérifié indépendamment, comme côté SQLite (voir
+    audit_integrity.py pour le détail de cette décision de conception).
+    """
+    try:
+        from api.security.audit_integrity import compute_row_hash_from_doc
+        from src.storage.documents.audit_log import AuditLogDocument
+
+        coll = AuditLogDocument.get_pymongo_collection()
+        rows = await coll.find().sort("created_at", -1).limit(limit).to_list(length=limit)
+    except Exception as exc:
+        logger.debug("verify_integrity_native: MongoDB indisponible — %s", exc)
+        return None
+
+    valid = 0
+    null_hash_entries: list[dict] = []
+    tampered: list[dict] = []
+    for doc in rows:
+        stored = doc.get("row_hash")
+        created_at = doc.get("created_at")
+        entry_summary = {
+            "id": str(doc.get("_id")),
+            "created_at": created_at.isoformat() if created_at else "",
+            "action": doc.get("action"),
+        }
+        if not stored:
+            null_hash_entries.append(entry_summary)
+            valid += 1
+            continue
+        expected = compute_row_hash_from_doc(doc)
+        if hmac.compare_digest(expected, stored):
+            valid += 1
+        else:
+            tampered.append(entry_summary)
+
+    total = len(rows)
+    return {
+        "total_checked": total,
+        "valid": valid,
+        "null_hash_count": len(null_hash_entries),
+        "tampered_count": len(tampered),
+        "tampered_entries": tampered,
+    }
 
 
 async def _create_audit_log_native(
@@ -2298,10 +2352,10 @@ async def _create_audit_log_native(
     (pas de secours SQLite — cohérent avec le reste du Lot 2 en écriture native).
     """
     try:
+        from api.security.audit_integrity import compute_row_hash_from_doc
         from src.storage.documents.audit_log import AuditLogDocument
 
-        coll = AuditLogDocument.get_pymongo_collection()
-        await coll.insert_one({
+        doc = {
             "_id": str(uuid4()),
             "created_at": datetime.now(timezone.utc),
             "user_id": user.get("sub", ""),
@@ -2318,8 +2372,11 @@ async def _create_audit_log_native(
             "user_agent": None,
             "status": "SUCCESS",
             "detail": detail,
-            "row_hash": None,
-        })
+        }
+        doc["row_hash"] = compute_row_hash_from_doc(doc)
+
+        coll = AuditLogDocument.get_pymongo_collection()
+        await coll.insert_one(doc)
     except Exception as exc:
         logger.debug("_create_audit_log_native: écriture Mongo échouée — %s", exc)
 
