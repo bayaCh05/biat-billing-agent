@@ -9,7 +9,6 @@ from uuid import uuid4
 import jwt
 from fastapi import HTTPException, status
 from dotenv import load_dotenv
-from sqlalchemy.orm import Session
 
 _ROOT_DIR = Path(__file__).resolve().parents[3]
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -97,47 +96,46 @@ def decode_token_raw(token: str) -> dict | None:
         return None
 
 
-def verify_access_token(token: str, db: Session | None = None) -> dict | None:
+async def verify_access_token(token: str) -> dict | None:
     payload = decode_token_raw(token)
     if not payload:
         return None
     if payload.get("type") != "access":
         return None
-    if db is not None:
-        jti = payload.get("jti")
-        if jti and _is_token_revoked(jti, db):
-            return None
+    jti = payload.get("jti")
+    if jti and await is_token_revoked(jti):
+        return None
     return payload
 
 
-def verify_refresh_token(token: str, db: Session | None = None) -> dict | None:
+async def verify_refresh_token(token: str) -> dict | None:
     payload = decode_token_raw(token)
     if not payload:
         return None
     if payload.get("type") != "refresh":
         return None
-    if db is not None:
-        jti = payload.get("jti")
-        if jti and _is_token_revoked(jti, db):
-            return None
+    jti = payload.get("jti")
+    if jti and await is_token_revoked(jti):
+        return None
     return payload
 
 
-def _is_token_revoked(jti: str, db: Session) -> bool:
-    from src.storage.orm_models_auth import RevokedTokenORM
-    return db.get(RevokedTokenORM, jti) is not None
+async def is_token_revoked(jti: str) -> bool:
+    from src.storage.documents.revoked_token import RevokedTokenDocument
+    return await RevokedTokenDocument.get(jti) is not None
 
 
-def revoke_token(jti: str, reason: str, user_id: str | None, db: Session) -> None:
-    from src.storage.orm_models_auth import RevokedTokenORM
-    existing = db.get(RevokedTokenORM, jti)
-    if not existing:
-        db.add(RevokedTokenORM(
-            jti=jti,
-            revoked_at=datetime.now(timezone.utc),
-            reason=reason,
-            user_id=user_id,
-        ))
+async def revoke_token(jti: str, reason: str, user_id: str | None) -> None:
+    from src.storage.documents.revoked_token import RevokedTokenDocument
+    existing = await RevokedTokenDocument.get(jti)
+    if existing is None:
+        coll = RevokedTokenDocument.get_pymongo_collection()
+        await coll.insert_one({
+            "_id": jti,
+            "reason": reason,
+            "user_id": user_id,
+            "revoked_at": datetime.now(timezone.utc),
+        })
 
 
 # Legacy compatibility — wraps create_access_token for old callers

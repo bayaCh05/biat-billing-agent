@@ -2487,7 +2487,13 @@ async def revoke_token_native(jti: str, reason: str, user_id: str | None) -> Non
     from src.storage.documents.revoked_token import RevokedTokenDocument
     existing = await RevokedTokenDocument.get(jti)
     if existing is None:
-        await RevokedTokenDocument(id=jti, reason=reason, user_id=str(user_id) if user_id else None).insert()
+        coll = RevokedTokenDocument.get_pymongo_collection()
+        await coll.insert_one({
+            "_id": jti,
+            "reason": reason,
+            "user_id": str(user_id) if user_id else None,
+            "revoked_at": datetime.now(timezone.utc),
+        })
 
 
 async def generate_otp_native(user_doc, purpose: str) -> str:

@@ -13,6 +13,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from api.security.jwt_handler import revoke_token
 from src.storage.documents.service_bridge import revoke_all_user_tokens_native
 
 
@@ -82,3 +83,51 @@ class TestRevokeAllUserTokensNative:
         assert count == 0
         mock_revoke.assert_not_awaited()
         mock_get_coll.assert_not_called()  # nothing to bulk-update
+
+
+class TestJwtHandlerRevokeToken:
+    """The actual blocklist write revoke_all_user_tokens_native() calls per
+    token — verify_access_token() checks RevokedTokenDocument, so this is
+    what actually invalidates a JWT (not ActiveTokenDocument.revoked alone).
+    Uses get_pymongo_collection()+insert_one, not Document(...).insert() —
+    the latter requires Beanie to be initialized just to construct the
+    object, which is both untestable here and inconsistent with every other
+    write in this codebase (see CLAUDE.md)."""
+
+    def test_inserts_into_blocklist_when_not_already_revoked(self):
+        coll = MagicMock()
+        coll.insert_one = AsyncMock()
+        with (
+            patch(
+                "src.storage.documents.revoked_token.RevokedTokenDocument.get",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.storage.documents.revoked_token.RevokedTokenDocument.get_pymongo_collection",
+                return_value=coll,
+            ),
+        ):
+            asyncio.run(revoke_token("jti-1", "logout", "user-1"))
+
+        coll.insert_one.assert_awaited_once()
+        doc = coll.insert_one.call_args[0][0]
+        assert doc["_id"] == "jti-1"
+        assert doc["reason"] == "logout"
+        assert doc["user_id"] == "user-1"
+
+    def test_is_idempotent_when_already_revoked(self):
+        coll = MagicMock()
+        coll.insert_one = AsyncMock()
+        with (
+            patch(
+                "src.storage.documents.revoked_token.RevokedTokenDocument.get",
+                new=AsyncMock(return_value=SimpleNamespace(id="jti-1")),
+            ),
+            patch(
+                "src.storage.documents.revoked_token.RevokedTokenDocument.get_pymongo_collection",
+                return_value=coll,
+            ),
+        ):
+            asyncio.run(revoke_token("jti-1", "logout", "user-1"))
+
+        coll.insert_one.assert_not_awaited()
