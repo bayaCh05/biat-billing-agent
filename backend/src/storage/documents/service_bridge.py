@@ -1118,54 +1118,6 @@ async def get_budget_plan_entries_mongo(year: int) -> list | None:
         return None
 
 
-async def seed_budget_plan_from_yaml_mirrored(session, year: int, yaml_path) -> None:
-    """Comme budget._seed_from_yaml(), avec miroir Mongo additif.
-
-    SQLAlchemy reste la source de vérité pour la décision "déjà seedé pour
-    cette année ?" — seules les lignes réellement créées sont répliquées.
-    """
-    import yaml as _yaml
-    from sqlalchemy import select
-    from src.storage.orm_models import BudgetPlanORM
-
-    existing = session.execute(
-        select(BudgetPlanORM).where(BudgetPlanORM.year == year).limit(1)
-    ).scalar_one_or_none()
-    if existing:
-        return
-
-    data = _yaml.safe_load(yaml_path.read_text())
-    created: list[BudgetPlanORM] = []
-    for entry in data.get("entries", []):
-        row = BudgetPlanORM(
-            catalog_id=entry["catalog_id"], year=year, label=entry["label"],
-            monthly=[float(v) for v in entry["monthly"]], note=entry.get("note"),
-        )
-        session.add(row)
-        created.append(row)
-    session.commit()
-
-    try:
-        # pymongo brut plutôt que Document.insert() : voir la note dans
-        # _ensure_invoice_notification_mirrored() sur le format des _id UUID.
-        from uuid import uuid4
-        from src.storage.documents.budget_plan import BudgetPlanDocument
-        coll = BudgetPlanDocument.get_pymongo_collection()
-        docs = [
-            {
-                "_id": str(uuid4()),
-                "catalog_id": row.catalog_id, "year": row.year, "label": row.label,
-                "monthly": row.monthly, "note": row.note,
-                "updated_at": row.updated_at or datetime.now(timezone.utc),
-            }
-            for row in created
-        ]
-        if docs:
-            await coll.insert_many(docs)
-    except Exception as exc:
-        logger.debug("seed_budget_plan_from_yaml_mirrored: miroir Mongo échoué — %s", exc)
-
-
 # ── Étape 5, Lot 5 : invoices / billing / payments (lecture seule) ──────────
 
 async def list_invoices_mongo(limit: int) -> list | None:
@@ -2224,7 +2176,8 @@ async def delete_budget_plan_entry_native(catalog_id: str, year: int, user: dict
 
 
 async def seed_budget_plan_from_yaml_native(year: int, yaml_path) -> None:
-    """Comme seed_budget_plan_from_yaml_mirrored(), mais Mongo exclusif."""
+    """Seed les lignes du plan budgétaire depuis le YAML si l'année n'est pas
+    encore présente en base — Mongo exclusif, aucun secours SQLAlchemy."""
     import yaml as _yaml
     from src.storage.documents.budget_plan import BudgetPlanDocument
 
