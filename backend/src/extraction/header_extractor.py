@@ -182,9 +182,6 @@ class HeaderExtractor:
 
         Confidence when used: 0.85.
         """
-        logger.debug("header_raw_text_sample",
-                     text_sample=text[:500].replace("\n", " | "))
-
         for pattern in self._INV_PATTERNS:
             m = re.search(pattern, text)
             if m:

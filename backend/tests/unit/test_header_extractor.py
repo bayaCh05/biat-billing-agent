@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
+from unittest.mock import patch
 
 import pytest
 
@@ -363,3 +364,39 @@ class TestIssuerAdditional:
         # All lines start with skip prefixes or are exact keywords — None acceptable
         result = hx.extract(text)
         assert result['issuer_name'] is None or isinstance(result['issuer_name'], str)
+
+
+class TestNoRawTextInDebugLogs:
+    """Post-audit follow-up (item 3/4): invoice text must never be dumped at
+    DEBUG level — _extract_invoice_number() used to log up to 500 raw chars
+    of OCR'd invoice text (issuer, amounts, tax IDs — real bank data)."""
+
+    def test_extract_invoice_number_does_not_log_raw_text(self, hx):
+        text = "TECHNOVA SOLUTIONS SARL — CONFIDENTIAL MF 1472583D\nFACTURE N° FAC-2026-0089\n"
+
+        with patch("src.extraction.header_extractor.logger") as mock_logger:
+            hx._extract_invoice_number(text)
+
+        for call in mock_logger.debug.call_args_list:
+            assert "text_sample" not in call.kwargs
+            for value in call.kwargs.values():
+                assert "CONFIDENTIAL" not in str(value)
+                assert "TECHNOVA" not in str(value)
+
+    def test_extract_does_not_log_raw_text(self, hx):
+        # "SECRETMARKER" sits in the invoice body, never in the extracted
+        # issuer_name/invoice_number/date fields — so it must never appear in
+        # ANY debug log, unlike the (legitimate, lower-sensitivity) logging of
+        # the already-structured extracted field values themselves.
+        text = (
+            "TECHNOVA SOLUTIONS SARL\nFACTURE N° FAC-2026-0089\n"
+            "Montant HT: SECRETMARKER 1,000.000 TND\n"
+        )
+
+        with patch("src.extraction.header_extractor.logger") as mock_logger:
+            hx.extract(text)
+
+        for call in mock_logger.debug.call_args_list:
+            assert "text_sample" not in call.kwargs
+            for value in call.kwargs.values():
+                assert "SECRETMARKER" not in str(value)
