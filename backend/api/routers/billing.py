@@ -6,6 +6,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from api.auth import require_role
 from api.deps import get_session, get_config
 from api.schemas import ClientTemplateOut, ClientInvoiceOut, GenerateInvoiceRequest, GeneratedInvoiceOut
 from src.billing.template_loader import TemplateLoader
@@ -14,6 +15,8 @@ from src.billing.invoice_numbering import InvoiceNumberer
 from src.billing.client_invoice_store import ClientInvoiceRepository
 
 router = APIRouter(prefix="/billing", tags=["client-invoices"])
+
+_COMPTABLE_CHEF = Depends(require_role("Comptable", "Chef de Projet"))
 
 
 @router.get(
@@ -26,7 +29,7 @@ router = APIRouter(prefix="/billing", tags=["client-invoices"])
     ),
     response_description="Liste des modèles disponibles pour la génération de factures",
 )
-def list_templates(cfg: dict = Depends(get_config)):
+def list_templates(_: dict = _COMPTABLE_CHEF, cfg: dict = Depends(get_config)):
     loader = TemplateLoader(cfg["billing"]["templates_file"])
     result = []
     for tpl in loader.list_templates():
@@ -58,9 +61,15 @@ def list_templates(cfg: dict = Depends(get_config)):
     ),
     response_description="Liste des factures client avec montants HT, TVA, TTC et dates",
 )
-def list_client_invoices(session: Session = Depends(get_session)):
-    repo = ClientInvoiceRepository(session)
-    invoices = repo.list_all()
+async def list_client_invoices(_: dict = _COMPTABLE_CHEF, session: Session = Depends(get_session)):
+    from src.storage.documents.service_bridge import list_client_invoices_mongo
+
+    mongo_invoices = await list_client_invoices_mongo()
+    if mongo_invoices is not None:
+        invoices = mongo_invoices
+    else:
+        repo = ClientInvoiceRepository(session)
+        invoices = repo.list_all()
     return [
         ClientInvoiceOut(
             invoice_number=inv.invoice_number,
@@ -90,17 +99,19 @@ def list_client_invoices(session: Session = Depends(get_session)):
     response_description="Facture générée avec son numéro et montants",
     responses={404: {"description": "Modèle de facturation non trouvé"}},
 )
-def generate_invoice(
+async def generate_invoice(
     body: GenerateInvoiceRequest,
-    session: Session = Depends(get_session),
+    _: dict = _COMPTABLE_CHEF,
     cfg: dict = Depends(get_config),
 ):
+    from src.storage.sync_mongo_repository import SyncMongoClientInvoiceRepository
+
     loader = TemplateLoader(cfg["billing"]["templates_file"])
     tpl = next((t for t in loader.list_templates() if t.id == body.template_id), None)
     if not tpl:
         raise HTTPException(404, f"Template {body.template_id} not found")
 
-    repo = ClientInvoiceRepository(session)
+    repo = SyncMongoClientInvoiceRepository()
     numberer = InvoiceNumberer(repo)
     builder = InvoiceBuilder(loader=loader, numberer=numberer)
 

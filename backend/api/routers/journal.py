@@ -9,11 +9,14 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from api.auth import require_role
 from api.deps import get_session
 from api.schemas import JournalEntryOut, JournalLineOut
 from src.accounting.journal_store import JournalRepository
 
 router = APIRouter(prefix="/journal", tags=["journal"])
+
+_COMPTABLE = Depends(require_role("Comptable"))
 
 
 @router.get(
@@ -28,17 +31,22 @@ router = APIRouter(prefix="/journal", tags=["journal"])
     ),
     response_description="Liste d'écritures avec leurs lignes débit/crédit",
 )
-def list_entries(
+async def list_entries(
     start: date | None = None,
     end: date | None = None,
     limit: int = 200,
+    _: dict = _COMPTABLE,
     session: Session = Depends(get_session),
 ):
-    repo = JournalRepository(session)
-    if start and end:
-        entries = repo.get_by_date_range(start, end)
-    else:
-        entries = repo.list_entries(limit=limit)
+    from src.storage.documents.service_bridge import list_journal_entries_mongo
+
+    entries = await list_journal_entries_mongo(start, end, limit)
+    if entries is None:
+        repo = JournalRepository(session)
+        if start and end:
+            entries = repo.get_by_date_range(start, end)
+        else:
+            entries = repo.list_entries(limit=limit)
 
     result = []
     for entry in entries:
@@ -68,17 +76,22 @@ def list_entries(
     description="Exporte les écritures comptables en CSV — compatible ERP et Excel.",
     response_class=StreamingResponse,
 )
-def export_journal_csv(
+async def export_journal_csv(
     start: date | None = Query(None),
     end: date | None = Query(None),
     limit: int = Query(5000),
+    _: dict = _COMPTABLE,
     session: Session = Depends(get_session),
 ):
-    repo = JournalRepository(session)
-    if start and end:
-        entries = repo.get_by_date_range(start, end)
-    else:
-        entries = repo.list_entries(limit=limit)
+    from src.storage.documents.service_bridge import list_journal_entries_mongo
+
+    entries = await list_journal_entries_mongo(start, end, limit)
+    if entries is None:
+        repo = JournalRepository(session)
+        if start and end:
+            entries = repo.get_by_date_range(start, end)
+        else:
+            entries = repo.list_entries(limit=limit)
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)

@@ -3,10 +3,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from api.auth import require_role
 from api.deps import get_engine, get_config
 from api.schemas import NLQueryRequest, NLQueryResult
 
 router = APIRouter(prefix="/nl-query", tags=["analytics"])
+
+_COMPTABLE_DIRECTION = Depends(require_role("Comptable", "Direction"))
 
 
 @router.post(
@@ -23,6 +26,7 @@ router = APIRouter(prefix="/nl-query", tags=["analytics"])
 )
 def nl_query(
     body: NLQueryRequest,
+    _: dict = _COMPTABLE_DIRECTION,
     engine=Depends(get_engine),
     cfg: dict = Depends(get_config),
 ):

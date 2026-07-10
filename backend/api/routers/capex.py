@@ -3,17 +3,17 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from api.auth import get_current_user
+from api.auth import require_role
 from api.deps import get_session
 from api.schemas import AssetOut, AssetCreateRequest
 from src.capex.asset_repository import AssetRepository
-from src.models.audit import AuditLogCreate
-from src.services.audit_service import log_action, _ip, _ua
 
 router = APIRouter(prefix="/assets", tags=["assets"])
+
+_COMPTABLE_DIRECTION = Depends(require_role("Comptable", "Direction"))
 
 
 @router.get(
@@ -27,12 +27,18 @@ router = APIRouter(prefix="/assets", tags=["assets"])
     ),
     response_description="Liste des immobilisations avec méthode et état d'amortissement",
 )
-def list_assets(
+async def list_assets(
     include_fully_depreciated: bool = True,
     session: Session = Depends(get_session),
 ):
-    repo = AssetRepository(session)
-    assets = repo.list_all(include_fully_depreciated=include_fully_depreciated)
+    from src.storage.documents.service_bridge import list_assets_mongo
+
+    mongo_assets = await list_assets_mongo(include_fully_depreciated)
+    if mongo_assets is not None:
+        assets = mongo_assets
+    else:
+        repo = AssetRepository(session)
+        assets = repo.list_all(include_fully_depreciated=include_fully_depreciated)
     today = date.today()
     return [
         AssetOut(
@@ -62,45 +68,13 @@ def list_assets(
     ),
     response_description="Immobilisation créée avec son état d'amortissement au jour J",
 )
-def create_asset(
+async def create_asset(
     body: AssetCreateRequest,
-    request: Request,
-    current_user: dict = Depends(get_current_user),
-    session: Session = Depends(get_session),
+    current_user: dict = _COMPTABLE_DIRECTION,
 ):
-    from src.models.asset import Asset
+    from src.storage.documents.service_bridge import create_asset_native
 
-    asset = Asset(
-        designation=body.designation,
-        compte_immobilisation=body.compte_immobilisation,
-        compte_amortissement=body.compte_amortissement,
-        acquisition_date=body.acquisition_date,
-        acquisition_cost_ht=body.acquisition_cost_ht,
-        useful_life_years=body.useful_life_years,
-        depreciation_method=body.depreciation_method,
-    )
-    repo = AssetRepository(session)
-    repo.save(asset)
-
-    log_action(session, AuditLogCreate(
-        user_id=current_user.get("sub"),
-        user_email=current_user.get("email"),
-        user_role=current_user.get("role"),
-        action="CREATE",
-        resource_type="Asset",
-        resource_id=str(asset.id),
-        after_value={
-            "designation": asset.designation,
-            "compte": asset.compte_immobilisation,
-            "cost_ht": asset.acquisition_cost_ht,
-            "useful_life_years": asset.useful_life_years,
-            "method": str(asset.depreciation_method),
-        },
-        status="SUCCESS",
-        ip_address=_ip(request),
-        user_agent=_ua(request),
-    ))
-    session.commit()
+    asset = await create_asset_native(body, current_user)
 
     today = date.today()
     return AssetOut(

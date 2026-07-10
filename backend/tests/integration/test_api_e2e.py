@@ -488,6 +488,78 @@ class TestBilling:
         assert r.status_code == 401
 
 
+# ── Fix 3 role guards — security audit (previously JWT-only, no RBAC) ────────
+
+class TestFix3RoleGuards:
+    """GET /journal, POST /assets, POST /nl-query and /billing/* previously
+    only required a valid JWT — any authenticated role could call them. Each
+    now requires a specific role set; a role outside that set must get 403."""
+
+    def test_journal_direction_forbidden(self):
+        # Comptable only
+        token = _login("directeur@biat-it.tn", "biat2026")
+        r = client.get("/api/journal", headers=_auth(token))
+        assert r.status_code == 403, r.text
+
+    def test_journal_comptable_allowed(self):
+        token = _login("comptable@biat-it.tn", "biat2026")
+        r = client.get("/api/journal", headers=_auth(token))
+        assert r.status_code == 200, r.text
+
+    def test_journal_export_chef_forbidden(self):
+        token = _login("chef@biat-it.tn", "biat2026")
+        r = client.get("/api/journal/export", headers=_auth(token))
+        assert r.status_code == 403, r.text
+
+    def test_create_asset_chef_forbidden(self):
+        # Comptable, Direction only
+        token = _login("chef@biat-it.tn", "biat2026")
+        r = client.post("/api/assets", headers=_auth(token), json={
+            "designation": "Serveur test",
+            "compte_immobilisation": "2183",
+            "compte_amortissement": "28183",
+            "acquisition_date": "2026-01-01",
+            "acquisition_cost_ht": 1000.0,
+            "useful_life_years": 3,
+        })
+        assert r.status_code == 403, r.text
+
+    def test_create_asset_direction_rbac_passes(self):
+        # RBAC OK for Direction — asserting != 403 is what matters here
+        token = _login("directeur@biat-it.tn", "biat2026")
+        r = client.post("/api/assets", headers=_auth(token), json={
+            "designation": "Serveur test",
+            "compte_immobilisation": "2183",
+            "compte_amortissement": "28183",
+            "acquisition_date": "2026-01-01",
+            "acquisition_cost_ht": 1000.0,
+            "useful_life_years": 3,
+        })
+        assert r.status_code != 403, r.text
+
+    def test_nl_query_chef_forbidden(self):
+        # Comptable, Direction only
+        token = _login("chef@biat-it.tn", "biat2026")
+        r = client.post("/api/nl-query", headers=_auth(token), json={"question": "Total des factures ?"})
+        assert r.status_code == 403, r.text
+
+    def test_nl_query_comptable_rbac_passes(self):
+        token = _login("comptable@biat-it.tn", "biat2026")
+        r = client.post("/api/nl-query", headers=_auth(token), json={"question": "Total des factures ?"})
+        assert r.status_code != 403, r.text
+
+    def test_billing_direction_forbidden(self):
+        # Comptable, Chef de Projet only — Direction is NOT in this set
+        token = _login("directeur@biat-it.tn", "biat2026")
+        r = client.get("/api/billing/invoices", headers=_auth(token))
+        assert r.status_code == 403, r.text
+
+    def test_billing_chef_allowed(self):
+        token = _login("chef@biat-it.tn", "biat2026")
+        r = client.get("/api/billing/invoices", headers=_auth(token))
+        assert r.status_code == 200, r.text
+
+
 # ── Review RBAC — M1a ─────────────────────────────────────────────────────────
 
 class TestReviewRBAC:
