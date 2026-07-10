@@ -4,13 +4,14 @@ from __future__ import annotations
 import base64
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from api.deps import get_session
+from api.limiter import limiter, limit
 
 _log = logging.getLogger(__name__)
 
@@ -129,14 +130,17 @@ def update_me(
     description=(
         "Reçoit une image encodée en base64 (format data URI complet : "
         "`data:image/jpeg;base64,...`). Taille maximale après décodage : 2 Mo. "
-        "Non disponible pour les comptes démo."
+        "Non disponible pour les comptes démo. Limité à 10 requêtes par minute."
     ),
     responses={
         400: {"description": "Format d'image invalide"},
         413: {"description": "Image trop grande (max 2 Mo)"},
+        429: {"description": "Trop de tentatives — réessayer dans 60 secondes"},
     },
 )
+@limiter.limit(limit("10/minute"))
 def update_avatar(
+    request: Request,
     body: AvatarUpdateRequest,
     current_user: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
