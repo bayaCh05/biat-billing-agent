@@ -22,6 +22,9 @@ def compute_row_hash(log) -> str:
         # different string and causes false "tampered" positives on every verification.
         if getattr(dt, "tzinfo", None) is not None:
             dt = dt.replace(tzinfo=None)
+        # Normalise à la milliseconde — MongoDB tronque les µs (BSON Date = ms).
+        # Garantit que le hash est identique quelle que soit la source (SQLite ou MongoDB).
+        dt = dt.replace(microsecond=(dt.microsecond // 1000) * 1000)
         created = dt.isoformat()
     else:
         created = ""
@@ -46,4 +49,41 @@ def verify_row_hash(log) -> bool:
     """Return True if the stored row_hash matches the recomputed value."""
     expected = compute_row_hash(log)
     stored = getattr(log, "row_hash", None) or ""
+    return hmac.compare_digest(expected, stored)
+
+
+# ── Mongo-native equivalents ───────────────────────────────────────────────────
+# compute_row_hash()/verify_row_hash() above read attributes (log.id, log.action,
+# ...) so they already work unchanged against any duck-typed object — including
+# raw audit_logs documents from Mongo (Phase 4 made the HMAC payload source-agnostic
+# by truncating datetimes to millisecond precision). These two helpers are just a
+# dict → attribute-namespace adapter so the SAME formula can be applied to a Mongo
+# document (`_id` instead of `id`, everything else identical) without ANY change to
+# compute_row_hash() itself. There is no separate "Mongo hash chain" — this is a
+# per-row HMAC exactly like SQLite's, not a chain (no row links to a previous row's
+# hash), so there is nothing to "re-anchor" across the SQLite/Mongo boundary today.
+
+def _hashable_from_doc(doc: dict):
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        id=doc.get("_id") or doc.get("id"),
+        created_at=doc.get("created_at"),
+        user_id=doc.get("user_id"),
+        action=doc.get("action"),
+        resource_type=doc.get("resource_type"),
+        resource_id=doc.get("resource_id"),
+        status=doc.get("status"),
+        ip_address=doc.get("ip_address"),
+    )
+
+
+def compute_row_hash_from_doc(doc: dict) -> str:
+    """Mongo-native equivalent of compute_row_hash() for a raw audit_logs dict."""
+    return compute_row_hash(_hashable_from_doc(doc))
+
+
+def verify_row_hash_from_doc(doc: dict) -> bool:
+    """Mongo-native equivalent of verify_row_hash() for a raw audit_logs dict."""
+    expected = compute_row_hash_from_doc(doc)
+    stored = doc.get("row_hash") or ""
     return hmac.compare_digest(expected, stored)

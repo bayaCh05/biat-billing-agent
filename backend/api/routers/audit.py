@@ -11,7 +11,6 @@ from api.auth import require_role
 from api.deps import get_session
 from api.security.audit_integrity import compute_row_hash, verify_row_hash
 from src.models.audit import AuditLogCreate, AuditLogOut
-from src.services.audit_service import log_action, _ip, _ua
 from src.storage.orm_models_audit import AuditLogORM
 
 router = APIRouter(prefix="/audit", tags=["admin"])
@@ -49,7 +48,7 @@ def _to_out(r: AuditLogORM) -> AuditLogOut:
     ),
     response_description="Entrées d'audit triées par date décroissante",
 )
-def list_audit_logs(
+async def list_audit_logs(
     action: str | None = Query(None, description="Filtrer par action (LOGIN, CREATE, APPROVE, REJECT, UPDATE, DELETE, EXPORT)"),
     resource_type: str | None = Query(None, description="Filtrer par type de ressource (InvoiceRecord, Asset, User, JournalEntry)"),
     user_id: str | None = Query(None, description="Filtrer par ID utilisateur"),
@@ -62,6 +61,16 @@ def list_audit_logs(
     _: dict = _ALLOWED,
     session: Session = Depends(get_session),
 ):
+    from src.storage.documents.service_bridge import list_audit_logs_mongo
+
+    mongo_rows = await list_audit_logs_mongo(
+        action=action, resource_type=resource_type, user_id=user_id,
+        user_email=user_email, status=status, from_date=from_date, to_date=to_date,
+        limit=limit, offset=offset,
+    )
+    if mongo_rows is not None:
+        return [_to_out(r) for r in mongo_rows]
+
     stmt = select(AuditLogORM).order_by(AuditLogORM.created_at.desc())
 
     if action:
@@ -100,13 +109,19 @@ def list_audit_logs(
     ),
     response_description="Historique complet trié par date décroissante",
 )
-def resource_history(
+async def resource_history(
     resource_type: str,
     resource_id: str,
     limit: int = Query(200, ge=1, le=500),
     _: dict = _ALLOWED,
     session: Session = Depends(get_session),
 ):
+    from src.storage.documents.service_bridge import resource_history_mongo
+
+    mongo_rows = await resource_history_mongo(resource_type, resource_id, limit)
+    if mongo_rows is not None:
+        return [_to_out(r) for r in mongo_rows]
+
     rows = session.execute(
         select(AuditLogORM)
         .where(
@@ -127,11 +142,13 @@ def resource_history(
         "Réservé au rôle Admin."
     ),
 )
-def verify_integrity(
+async def verify_integrity(
     limit: int = 5000,
     _: dict = Depends(require_role("Admin")),
     session: Session = Depends(get_session),
 ):
+    from src.storage.documents.service_bridge import log_audit_event_native, verify_integrity_native
+
     rows = (
         session.execute(
             select(AuditLogORM).order_by(AuditLogORM.created_at.desc()).limit(limit)
@@ -161,21 +178,36 @@ def verify_integrity(
                 "created_at": row.created_at.isoformat(),
                 "action": row.action,
             })
+    session.commit()  # persist backfilled row_hash values on pre-HMAC SQLite rows
+
+    # SQLite and Mongo each hold event types the other doesn't (see CLAUDE.md
+    # "MongoDB Migration Status") — this is one compliance trail split across
+    # two stores, not two independent trails, so the two checks are merged into
+    # a single combined score rather than surfaced separately.
+    mongo_result = await verify_integrity_native(limit)
 
     total = len(rows)
-    score = (valid / total * 100) if total > 0 else 100.0
+    total_valid = valid
+    total_null = len(null_hash_entries)
+    total_tampered_entries = list(tampered)
 
-    null_count = len(null_hash_entries)
-    tampered_count = len(tampered)
+    if mongo_result is not None:
+        total += mongo_result["total_checked"]
+        total_valid += mongo_result["valid"]
+        total_null += mongo_result["null_hash_count"]
+        total_tampered_entries += mongo_result["tampered_entries"]
 
-    if null_count and tampered_count:
+    tampered_count = len(total_tampered_entries)
+    score = (total_valid / total * 100) if total > 0 else 100.0
+
+    if total_null and tampered_count:
         detail_msg = (
-            f"{null_count} entrée(s) antérieure(s) au système HMAC (non suspectes). "
+            f"{total_null} entrée(s) antérieure(s) au système HMAC (non suspectes). "
             f"{tampered_count} entrée(s) potentiellement altérée(s)."
         )
-    elif null_count:
+    elif total_null:
         detail_msg = (
-            f"{null_count} entrée(s) antérieure(s) au système HMAC (non suspectes). "
+            f"{total_null} entrée(s) antérieure(s) au système HMAC (non suspectes). "
             f"Score recalculé: {score:.1f}%."
         )
     elif tampered_count:
@@ -186,20 +218,19 @@ def verify_integrity(
     else:
         detail_msg = f"Intégrité vérifiée — {total} entrées conformes. Score: {score:.1f}%."
 
-    log_action(session, AuditLogCreate(
+    await log_audit_event_native(AuditLogCreate(
         action="AUDIT_INTEGRITY_CHECK",
         resource_type="AuditLog",
-        status="SUCCESS" if not tampered else "FAILURE",
+        status="SUCCESS" if not total_tampered_entries else "FAILURE",
         detail=detail_msg,
     ))
-    session.commit()
 
     return {
         "total_checked": total,
-        "valid": valid,
-        "null_hash_count": null_count,
+        "valid": total_valid,
+        "null_hash_count": total_null,
         "tampered_count": tampered_count,
-        "tampered_entries": tampered,
+        "tampered_entries": total_tampered_entries,
         "integrity_score": round(score, 2),
         "message": detail_msg,
         "checked_at": datetime.now(timezone.utc).isoformat(),
