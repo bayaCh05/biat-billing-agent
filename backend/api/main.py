@@ -28,7 +28,6 @@ from api.routers import invoices, review, journal, budget, capex, kpi, billing, 
 from api.routers import auth as auth_router
 from api.routers import admin, users, roadmap, projet_budget, livrables, audit, risks, security as security_router
 from api.routers import ai as ai_router
-from api.routers import demo_base64 as demo_base64_router
 
 _PROTECTED = [Depends(get_current_user)]
 
@@ -45,7 +44,6 @@ _TAGS: list[dict] = [
     {"name": "analytics",      "description": "Tableaux de bord, KPIs, suivi de trésorerie, requêtes NL"},
     {"name": "notifications",  "description": "Notifications persistantes — alertes factures et budget"},
     {"name": "risks",          "description": "Gestion des risques projet — matrice probabilité × impact"},
-    {"name": "demo",           "description": "Endpoints de démonstration — base64, utilitaires pédagogiques"},
 ]
 
 
@@ -229,7 +227,6 @@ app.include_router(kpi.analytics_router,   prefix="/api", dependencies=_PROTECTE
 app.include_router(risks.router,            prefix="/api", dependencies=_PROTECTED)
 app.include_router(ai_router.router,        prefix="/api", dependencies=_PROTECTED)
 app.include_router(security_router.router,  prefix="/api", dependencies=_PROTECTED)
-app.include_router(demo_base64_router.router, prefix="/api", dependencies=_PROTECTED)
 
 
 @app.get("/api/health", tags=["admin"])
