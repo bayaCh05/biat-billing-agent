@@ -10,8 +10,10 @@ Strategy:
 """
 from __future__ import annotations
 
+import logging
 import os
 from datetime import date
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 # Must be set before any api.* imports so the limiter reads it
@@ -457,6 +459,86 @@ class TestBudget:
         for field in ("year", "through_month", "total_budget_ytd",
                       "total_actual_ytd", "variance_pct", "lines"):
             assert field in body
+
+
+# ── Mongo-down warning behavior — direct HTTP-level proof (Fix item 7) ───────
+
+class TestMongoFallbackWarningAtHttpLevel:
+    """The unit tests in test_mongo_fallback_removal.py call the router
+    functions directly, bypassing FastAPI — a fair regression test, but not
+    the strongest possible proof since the pre-fix function signatures also
+    took a `session` argument these tests don't supply. This class proves the
+    same thing through the actual HTTP interface instead: mock only the Mongo
+    read function, hit the real endpoint, and check both the response body
+    and that a warning was actually logged."""
+
+    def test_roadmap_warns_when_mongo_down(self, caplog):
+        token = _login("chef@biat-it.tn", "biat2026")
+        with patch(
+            "src.storage.documents.service_bridge.list_roadmap_mongo",
+            new=AsyncMock(return_value=None),
+        ), caplog.at_level(logging.WARNING):
+            r = client.get("/api/roadmap", headers=_auth(token))
+        assert r.status_code == 200
+        assert r.json() == []
+        assert any("MongoDB indisponible" in rec.message for rec in caplog.records)
+
+    def test_risks_warns_when_mongo_down(self, caplog):
+        token = _login("chef@biat-it.tn", "biat2026")
+        with patch(
+            "src.storage.documents.service_bridge.list_risks_mongo",
+            new=AsyncMock(return_value=None),
+        ), caplog.at_level(logging.WARNING):
+            r = client.get("/api/risks", headers=_auth(token))
+        assert r.status_code == 200
+        assert r.json() == []
+        assert any("MongoDB indisponible" in rec.message for rec in caplog.records)
+
+    def test_livrables_warns_when_mongo_down(self, caplog):
+        token = _login("chef@biat-it.tn", "biat2026")
+        with patch(
+            "src.storage.documents.service_bridge.list_livrables_mongo",
+            new=AsyncMock(return_value=None),
+        ), caplog.at_level(logging.WARNING):
+            r = client.get("/api/phases/fake-phase-id/livrables", headers=_auth(token))
+        assert r.status_code == 200
+        assert r.json() == []
+        assert any("MongoDB indisponible" in rec.message for rec in caplog.records)
+
+    def test_notifications_count_warns_when_mongo_down(self, caplog):
+        token = _login("comptable@biat-it.tn", "biat2026")
+        with patch(
+            "src.storage.documents.service_bridge.count_unread_notifications_mongo",
+            new=AsyncMock(return_value=None),
+        ), caplog.at_level(logging.WARNING):
+            r = client.get("/api/notifications/count", headers=_auth(token))
+        assert r.status_code == 200
+        assert r.json()["count"] == 0
+        assert any("MongoDB indisponible" in rec.message for rec in caplog.records)
+
+    def test_budget_plan_entries_warns_when_mongo_down(self, caplog):
+        token = _login("comptable@biat-it.tn", "biat2026")
+        with patch(
+            "src.storage.documents.service_bridge.get_budget_plan_entries_mongo",
+            new=AsyncMock(return_value=None),
+        ), caplog.at_level(logging.WARNING):
+            r = client.get("/api/budget/plan", headers=_auth(token))
+        assert r.status_code == 200
+        assert r.json() == []
+        assert any("MongoDB indisponible" in rec.message for rec in caplog.records)
+
+    def test_review_queue_keeps_fallback_but_warns_when_mongo_down(self, caplog):
+        # The one deliberate exception: still serves SQLite data (the daemon
+        # writes invoices SQLite-only), but must now warn instead of being silent.
+        token = _login("comptable@biat-it.tn", "biat2026")
+        with patch(
+            "src.storage.documents.service_bridge.get_review_queue_mongo",
+            new=AsyncMock(return_value=None),
+        ), caplog.at_level(logging.WARNING):
+            r = client.get("/api/review", headers=_auth(token))
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+        assert any("MongoDB indisponible" in rec.message for rec in caplog.records)
 
 
 # ── Projects endpoint ─────────────────────────────────────────────────────────
