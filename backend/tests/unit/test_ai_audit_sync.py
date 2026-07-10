@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-os.environ.setdefault("JWT_SECRET", "test-secret-for-audit-hmac")
+os.environ.setdefault("JWT_SECRET", "test-secret-for-audit-hmac-padding")
 
 from api.security.audit_integrity import verify_row_hash_from_doc
 from src.models.audit import AuditLogCreate

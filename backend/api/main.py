@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from api.auth import SECRET, get_current_user, seed_demo_users, validate_demo_users, refresh_demo_passwords
+from api.auth import get_current_user, seed_demo_users, validate_demo_users, refresh_demo_passwords
 from api.limiter import limiter
 from api.security.security_headers import SecurityHeadersMiddleware
 from src.storage.mongodb import close_mongodb, init_beanie
@@ -75,13 +75,9 @@ def _startup() -> None:
     except Exception as exc:
         _log.warning("Impossible de préparer les comptes démo en base : %s", exc)
 
-    # Warn if JWT secret is below recommended minimum length for HMAC-SHA256
-    if len(SECRET) < 32:
-        _log.warning(
-            "⚠️  JWT_SECRET est trop court (%d octets — minimum recommandé : 32). "
-            "Définir JWT_SECRET dans les variables d'environnement avant la mise en production.",
-            len(SECRET),
-        )
+    # JWT_SECRET itself is validated at import time in api.security.jwt_handler
+    # (_validate_secret) — the app fails to start entirely if it's missing, too
+    # short, or a known placeholder, so no redundant check is needed here.
 
     # Warn if AUDIT_HMAC_SECRET is missing (fallback sur JWT_SECRET = clés non séparées)
     if not os.getenv("AUDIT_HMAC_SECRET", "").strip():
