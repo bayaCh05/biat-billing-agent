@@ -18,7 +18,6 @@ from src.ai_agents.ollama_client import OllamaClient
 from src.models.audit import AuditLogCreate
 from src.models.enums import InvoiceStatus
 from src.models.invoice import InvoiceRecord
-from src.services.audit_service import log_action
 
 if TYPE_CHECKING:
     from src.agent.pipeline import PipelineComponents
@@ -33,8 +32,20 @@ class AIOrchestrator:
         self._c = components
         self._db = db
         self._steps: list[PipelineStep] = []
-        from src.storage.repository import InvoiceRepository
-        self._repo = InvoiceRepository(db)
+
+        # Mongo primaire pour le chemin de traitement d'une facture — voir
+        # sync_mongo_repository.py pour le pourquoi (pipeline synchrone,
+        # Beanie/Motor est async-only). Ce sont des clones du duplicate/
+        # anomaly detector partagés (mêmes seuils de config), pas les
+        # instances de PipelineComponents elles-mêmes : le daemon headless
+        # (agent/pipeline.py) continue d'utiliser SQLAlchemy sans changement.
+        from src.storage.sync_mongo_repository import (
+            SyncMongoInvoiceRepository, SyncMongoJournalRepository,
+        )
+        self._repo = SyncMongoInvoiceRepository()
+        self._journal_repo = SyncMongoJournalRepository()
+        self._duplicate_detector = self._c.duplicate_detector.with_repository(self._repo)
+        self._anomaly_detector = self._c.anomaly_detector.with_repository(self._repo)
 
     def process_invoice(self, invoice: InvoiceRecord) -> OrchestratorResult:
         """Run a pre-loaded InvoiceRecord through the full AI pipeline.
@@ -124,8 +135,8 @@ class AIOrchestrator:
             agent3 = AnomalyAgent(
                 self._c.field_validator,
                 self._c.coherence_checker,
-                self._c.duplicate_detector,
-                self._c.anomaly_detector,
+                self._duplicate_detector,
+                self._anomaly_detector,
             )
             result3 = agent3.run({"invoice": invoice, "db": self._db})
 
@@ -179,7 +190,7 @@ class AIOrchestrator:
             from src.ai_agents.accounting_agent import AccountingAgent
             agent4 = AccountingAgent(
                 self._c.entry_generator,
-                self._c.journal_repository,
+                self._journal_repo,
                 self._c.cost_catalog,
             )
             result4 = agent4.run({"invoice": invoice, "db": self._db})
@@ -242,12 +253,12 @@ class AIOrchestrator:
         result = agent.run({"task": "health_summary", "db": db})
         return result.output
 
-    def check_accounting_consistency(self, db: Session) -> dict:
+    def check_accounting_consistency(self) -> dict:
         from src.ai_agents.accounting_agent import AccountingAgent
         agent = AccountingAgent(
-            self._c.entry_generator, self._c.journal_repository, self._c.cost_catalog
+            self._c.entry_generator, self._journal_repo, self._c.cost_catalog
         )
-        return agent.check_consistency(db)
+        return agent.check_consistency()
 
     def retrain_models(self) -> dict:
         try:
@@ -259,9 +270,12 @@ class AIOrchestrator:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _audit_ai(self, action: str, resource_id: str, detail: str) -> None:
-        """Enregistre une décision IA dans l'audit HMAC. N'interrompt jamais le pipeline."""
+        """Enregistre une décision IA dans l'audit HMAC (Mongo-natif, écriture
+        synchrone via log_ai_audit_event_sync — voir sync_mongo_repository.py).
+        N'interrompt jamais le pipeline."""
         try:
-            log_action(self._db, AuditLogCreate(
+            from src.storage.sync_mongo_repository import log_ai_audit_event_sync
+            log_ai_audit_event_sync(AuditLogCreate(
                 user_id="system:ai",
                 user_email="system:ai",
                 user_role="AI",
