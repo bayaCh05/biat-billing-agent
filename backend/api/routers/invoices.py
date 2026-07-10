@@ -89,7 +89,7 @@ async def upload_invoice(
         user_role=current_user.get("role"),
     ))
 
-    from src.storage.sync_mongo_repository import SyncMongoInvoiceRepository
+    from src.storage.sync_mongo_repository import InvoiceHashConflict, SyncMongoInvoiceRepository
     repo = SyncMongoInvoiceRepository()
 
     if live:
@@ -142,7 +142,12 @@ async def upload_invoice(
                 raw_file_path=persistent_path,
                 status=InvoiceStatus.RECEIVED,
             )
-            repo.save(invoice)
+            try:
+                repo.save(invoice)
+            except InvoiceHashConflict:
+                raise HTTPException(
+                    409, "Cette facture (même contenu de fichier) est déjà en cours de soumission."
+                )
 
         # Run through AI orchestrator (extraction → classification → anomaly → accounting)
         from src.ai_agents.orchestrator import AIOrchestrator

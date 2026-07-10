@@ -2666,6 +2666,8 @@ class BudgetPlanConflict(Exception):
 
 
 async def create_budget_plan_entry_native(body, year: int, user: dict) -> Any:
+    from pymongo.errors import DuplicateKeyError
+
     from src.storage.documents.budget_plan import BudgetPlanDocument
 
     existing = await BudgetPlanDocument.find_one({"catalog_id": body.catalog_id, "year": year})
@@ -2682,7 +2684,14 @@ async def create_budget_plan_entry_native(body, year: int, user: dict) -> Any:
         "updated_at": datetime.now(timezone.utc),
     }
     coll = BudgetPlanDocument.get_pymongo_collection()
-    await coll.insert_one(doc)
+    try:
+        await coll.insert_one(doc)
+    except DuplicateKeyError:
+        # Two concurrent creates for the same (catalog_id, year) both pass the
+        # find_one() check above — the compound unique index is the real
+        # guarantee, so the loser of the race must map to the same conflict
+        # the app-level check already reports, not an unhandled 500.
+        raise BudgetPlanConflict(body.catalog_id)
     await _create_audit_log_native(user, "BUDGET_PLAN_CREATED", "BudgetPlan", f"{body.catalog_id}/{year}", "")
     return await BudgetPlanDocument.find_one({"catalog_id": body.catalog_id, "year": year})
 
@@ -2831,7 +2840,17 @@ async def create_user_native(
     nom: str, prenom: str, email: str, hashed_password: str,
     role: str, departement: str = "",
 ) -> Any:
-    """Retourne None si l'email existe déjà (409 côté appelant)."""
+    """Retourne None si l'email existe déjà (409 côté appelant).
+
+    Le find_one() ci-dessous ne fait qu'un rejet précoce optimiste — la
+    garantie d'unicité réelle vient de l'index unique Mongo sur `email`
+    (voir user.py). Deux requêtes concurrentes peuvent toutes les deux
+    passer ce check avant que l'une des deux n'insère ; l'insert_one()
+    restant doit donc aussi absorber le DuplicateKeyError levé par Mongo
+    pour la perdante de la course, sous peine de 500 au lieu d'un 409 propre.
+    """
+    from pymongo.errors import DuplicateKeyError
+
     from src.storage.documents.user import UserDocument
 
     existing = await UserDocument.find_one({"email": email})
@@ -2848,7 +2867,10 @@ async def create_user_native(
         "last_login_at": None, "last_login_ip": None, "profile_picture": None,
     }
     coll = UserDocument.get_pymongo_collection()
-    await coll.insert_one(doc)
+    try:
+        await coll.insert_one(doc)
+    except DuplicateKeyError:
+        return None
     return await UserDocument.find_one({"email": email})
 
 

@@ -83,6 +83,16 @@ def _bson_to_date(v) -> date | None:
 
 # ── Invoices ────────────────────────────────────────────────────────────────
 
+class InvoiceHashConflict(Exception):
+    """Levée quand deux requêtes concurrentes uploadent le même fichier
+    (même file_hash) et gagnent toutes deux le find_one() de vérification
+    avant qu'une des deux n'insère — voir save()."""
+
+    def __init__(self, file_hash: str):
+        self.file_hash = file_hash
+        super().__init__(file_hash)
+
+
 class SyncMongoInvoiceRepository:
     """Même API que src.storage.repository.InvoiceRepository, backend Mongo sync."""
 
@@ -107,7 +117,15 @@ class SyncMongoInvoiceRepository:
                 "changed_at": datetime.now(timezone.utc),
                 "changed_by": changed_by, "notes": None,
             }]
-            coll.insert_one(scalar)
+            # get_by_hash() in the caller is an optimistic pre-check, not the
+            # real guarantee — the unique index on file_hash (invoice.py) is.
+            # Two concurrent uploads of the same file can both pass that
+            # check before either inserts; the loser must get a clean
+            # conflict here instead of an unhandled 500.
+            try:
+                coll.insert_one(scalar)
+            except pymongo.errors.DuplicateKeyError:
+                raise InvoiceHashConflict(invoice.file_hash)
         else:
             update: dict[str, Any] = {"$set": scalar}
             if existing.get("status") != invoice.status.value:
