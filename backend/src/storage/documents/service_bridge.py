@@ -2977,7 +2977,7 @@ async def revoke_token_native(jti: str, reason: str, user_id: str | None) -> Non
 
 async def generate_otp_native(user_doc, purpose: str) -> str:
     """Génère et envoie un OTP à 6 chiffres. Retourne le code généré."""
-    import random
+    import secrets
     import string
     from src.storage.documents.password_verification import PasswordVerificationDocument
     from src.services.email_service import send_otp_email
@@ -2988,7 +2988,9 @@ async def generate_otp_native(user_doc, purpose: str) -> str:
         {"$set": {"used": True}},
     )
 
-    code = "".join(random.choices(string.digits, k=6))
+    # secrets.choice (CSPRNG) — random.choices() is a non-cryptographic PRNG
+    # and must never be used for OTP codes (predictable/brute-forceable seed).
+    code = "".join(secrets.choice(string.digits) for _ in range(6))
     now = datetime.now(timezone.utc)
     await coll.insert_one({
         "_id": str(uuid4()), "user_id": str(user_doc.id), "verification_type": "OTP",

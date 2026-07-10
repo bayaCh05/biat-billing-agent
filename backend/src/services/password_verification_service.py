@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import os
-import random
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
@@ -44,7 +43,7 @@ def generate_otp(db: Session, user, purpose: str) -> str:
     for pv in existing:
         pv.used = True
 
-    code = "".join(random.choices(string.digits, k=6))
+    code = "".join(secrets.choice(string.digits) for _ in range(6))
     pv = PasswordVerificationORM(
         user_id=user.id,
         verification_type="OTP",
@@ -62,7 +61,7 @@ def generate_otp(db: Session, user, purpose: str) -> str:
 
 def generate_demo_otp(email: str, purpose: str) -> str:
     """Generate an OTP for demo accounts without touching the database."""
-    code = "".join(random.choices(string.digits, k=6))
+    code = "".join(secrets.choice(string.digits) for _ in range(6))
     _DEMO_OTP_CODES[(email, purpose)] = (
         code,
         datetime.now(timezone.utc) + timedelta(minutes=10),
