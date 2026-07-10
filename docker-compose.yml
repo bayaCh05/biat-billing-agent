@@ -11,3 +11,26 @@ services:
       - "1025:1025"   # SMTP
       - "8025:8025"   # Web UI
     restart: unless-stopped
+
+  # ── MongoDB (migration SQLite → MongoDB, Phase 7) ─────────────────────────────
+  # DATA RESIDENCY: local container only, bound to 127.0.0.1 — never expose
+  # this port publicly or point MONGODB_URI at a cloud cluster with real data.
+  # Auth is required (--auth). MONGO_INITDB_ROOT_USERNAME/PASSWORD only bootstrap
+  # a root user on a brand-new empty volume — for an existing volume, create the
+  # user manually first (mongosh admin --eval 'db.createUser(...)') before this
+  # takes effect, or auth will be enforced with no user able to log in.
+  mongo:
+    image: mongo:7
+    container_name: biat_mongo
+    command: ["mongod", "--auth"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-biat_admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD must be set in .env}
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - biat_mongo_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  biat_mongo_data:
