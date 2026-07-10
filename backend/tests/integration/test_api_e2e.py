@@ -16,6 +16,10 @@ from uuid import UUID
 
 # Must be set before any api.* imports so the limiter reads it
 os.environ["RATE_LIMIT_ENABLED"] = "false"
+# Isolated Mongo database for this test module — never touches the dev DB.
+# Mongo-native write paths (Lot 3+) require Beanie to actually be initialized
+# (see lifespan handling below), so tests run against a real, disposable DB.
+os.environ["MONGODB_DB"] = "biat_billing_test"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,7 +51,26 @@ from api.deps import get_session  # noqa: E402
 
 app.dependency_overrides[get_session] = _override_session
 
+# Entered eagerly (not via `with`) so the ASGI lifespan runs for the whole
+# module: Mongo-native routes (Lot 3+) need `init_beanie()` to have actually
+# run, otherwise Beanie raises CollectionWasNotInitialized instead of a clean
+# 404/behavior. Closed + dropped in the session-scoped fixture below.
 client = TestClient(app, raise_server_exceptions=True)
+client.__enter__()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _close_client_and_drop_test_db():
+    yield
+    client.__exit__(None, None, None)
+    try:
+        import pymongo
+
+        from src.storage.mongodb import MONGODB_DB, MONGODB_URI
+        if MONGODB_URI:
+            pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=2_000).drop_database(MONGODB_DB)
+    except Exception:
+        pass
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -170,56 +193,128 @@ class TestInvoices:
         r = client.post("/api/invoices/upload", headers=_auth(token))
         assert r.status_code == 422
 
+    def test_real_upload_writes_audit_trail_to_mongo_only(self, tmp_path):
+        """Lot 7 + Lot 8 — preuve en direct (process courant, donc code source
+        réellement exécuté, pas une copie historique déjà migrée) :
+          - INVOICE_UPLOADED atterrit dans Mongo (log_audit_event_native), pas SQLite
+          - AI_EXTRACT/AI_CLASSIFY/AI_ANOMALY atterrissent dans Mongo
+            (log_ai_audit_event_sync), dans l'ordre, sans doublon
+          - zéro nouvelle ligne SQLite pour ces actions
+          - chaque ligne Mongo a un row_hash HMAC valide
+        """
+        import pymongo
+        from api.security.audit_integrity import verify_row_hash_from_doc
+        from src.storage.mongodb import MONGODB_DB, MONGODB_URI
+        from tests.fixtures.make_invoice_pdf import make_supplier_invoice_pdf
+
+        pdf_path = make_supplier_invoice_pdf(tmp_path / "audit_trail_test.pdf")
+        token = _login("comptable@biat-it.tn", "biat2026")
+
+        sqlite_session = _sf()
+        try:
+            before_sqlite = sqlite_session.execute(
+                text("SELECT COUNT(*) FROM audit_logs")
+            ).scalar_one()
+        finally:
+            sqlite_session.close()
+
+        with open(pdf_path, "rb") as fh:
+            r = client.post(
+                "/api/invoices/upload",
+                headers=_auth(token),
+                files={"file": ("audit_trail_test.pdf", fh, "application/pdf")},
+                data={"live": "false"},
+            )
+        assert r.status_code == 200, r.text
+        invoice_id = r.json()["id"]
+
+        sqlite_session = _sf()
+        try:
+            after_sqlite = sqlite_session.execute(
+                text("SELECT COUNT(*) FROM audit_logs")
+            ).scalar_one()
+        finally:
+            sqlite_session.close()
+        assert after_sqlite == before_sqlite, (
+            "aucune nouvelle ligne SQLite audit_logs attendue pour cet upload — "
+            f"avant={before_sqlite} après={after_sqlite}"
+        )
+
+        mongo = pymongo.MongoClient(MONGODB_URI)[MONGODB_DB]
+        rows = list(
+            mongo.audit_logs.find({"resource_id": invoice_id}).sort("created_at", 1)
+        )
+        actions = [row["action"] for row in rows]
+
+        assert "INVOICE_UPLOADED" not in actions, (
+            "INVOICE_UPLOADED est indexé par file_hash, pas resource_id=invoice_id "
+            "— vérifié séparément ci-dessous"
+        )
+        # AI_* events are keyed by invoice_id (see AIOrchestrator._audit_ai)
+        ai_actions = [a for a in actions if a.startswith("AI_")]
+        assert ai_actions == sorted(set(ai_actions), key=ai_actions.index), "ordre inattendu"
+        assert ai_actions[:3] == ["AI_EXTRACT", "AI_CLASSIFY", "AI_ANOMALY"], ai_actions
+        assert len(ai_actions) == len(set(ai_actions)), f"doublon détecté: {ai_actions}"
+        for row in rows:
+            assert verify_row_hash_from_doc(row), f"HMAC invalide pour {row['action']}"
+
+        # INVOICE_UPLOADED is logged before the invoice UUID is minted (keyed by
+        # file content, not resource_id) — find it by action + recency instead.
+        uploaded = list(
+            mongo.audit_logs.find({"action": "INVOICE_UPLOADED"}).sort("created_at", -1).limit(1)
+        )
+        assert uploaded, "aucune entrée INVOICE_UPLOADED trouvée dans Mongo"
+        assert verify_row_hash_from_doc(uploaded[0])
+
 
 # ── Payment installments endpoint ───────────────────────────────────────────
 
 class TestPaymentInstallments:
     def test_mark_paid_updates_existing_installment(self):
+        # mark_paid is Mongo-native (Lot 5) — seed directly into the isolated
+        # test Mongo DB, not SQLite.
+        import pymongo
+        from datetime import datetime, timezone
+
+        from src.storage.mongodb import MONGODB_DB, MONGODB_URI
+
         token = _login("comptable@biat-it.tn", "biat2026")
 
-        session = _sf()
+        mongo = pymongo.MongoClient(MONGODB_URI)[MONGODB_DB]
+        installment_id = "7947955e-a599-4512-b8c7-5c2ab4c27166"
+        mongo.payment_installments.insert_one({
+            "_id": installment_id,
+            "invoice_id": "invoice-1",
+            "installment_number": 2,
+            "total_installments": 3,
+            "base_amount": 5751.667,
+            "current_amount": 5751.667,
+            "due_date": datetime(2026, 6, 27, tzinfo=timezone.utc),
+            "paid_date": None,
+            "paid_amount": None,
+            "status": "PENDING",
+            "late_periods": 0,
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
+        })
+
         try:
-            session.execute(text(
-                "INSERT INTO payment_installments ("
-                "id, invoice_id, installment_number, total_installments, base_amount, current_amount, due_date, status, late_periods, created_at, updated_at"
-                ") VALUES ("
-                ":id, :invoice_id, :installment_number, :total_installments, :base_amount, :current_amount, :due_date, :status, :late_periods, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
-                ")"
-            ), {
-                "id": "7947955e-a599-4512-b8c7-5c2ab4c27166",
-                "invoice_id": "invoice-1",
-                "installment_number": 2,
-                "total_installments": 3,
-                "base_amount": 5751.667,
-                "current_amount": 5751.667,
-                "due_date": "2026-06-27",
-                "status": "PENDING",
-                "late_periods": 0,
-            })
-            session.commit()
-        finally:
-            session.close()
+            r = client.patch(
+                f"/api/installments/{installment_id}/mark-paid",
+                headers=_auth(token),
+                json={"paid_amount": 5751.667, "paid_date": "2026-06-27"},
+            )
 
-        r = client.patch(
-            "/api/installments/7947955e-a599-4512-b8c7-5c2ab4c27166/mark-paid",
-            headers=_auth(token),
-            json={"paid_amount": 5751.667, "paid_date": "2026-06-27"},
-        )
+            assert r.status_code == 200, r.text
+            assert r.json()["status"] == "PAID"
 
-        assert r.status_code == 200, r.text
-        assert r.json()["status"] == "PAID"
-
-        session = _sf()
-        try:
-            row = session.execute(text(
-                "SELECT status, paid_amount, paid_date FROM payment_installments WHERE id = :id"
-            ), {"id": "7947955e-a599-4512-b8c7-5c2ab4c27166"}).mappings().first()
+            row = mongo.payment_installments.find_one({"_id": installment_id})
             assert row is not None
             assert row["status"] == "PAID"
             assert row["paid_amount"] == 5751.667
-            assert str(row["paid_date"]) == "2026-06-27"
+            assert row["paid_date"] == datetime(2026, 6, 27)
         finally:
-            session.close()
+            mongo.payment_installments.delete_one({"_id": installment_id})
 
 
 # ── RBAC tests ────────────────────────────────────────────────────────────────

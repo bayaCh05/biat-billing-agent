@@ -56,19 +56,19 @@ async def upload_invoice(
     # Validate file before processing
     from api.security.file_validator import validate as validate_file
     from src.models.audit import AuditLogCreate
-    from src.services.audit_service import log_action, _ip, _ua
+    from src.services.audit_service import _ip, _ua
+    from src.storage.documents.service_bridge import log_audit_event_native
     try:
         file_info = validate_file(file.filename or "invoice.pdf", content)
     except Exception as validation_err:
-        log_action(session, AuditLogCreate(
+        await log_audit_event_native(AuditLogCreate(
             action="FILE_REJECTED", resource_type="InvoiceRecord", status="FAILURE",
             detail=str(validation_err),
-            ip_address=request.client.host if request.client else None,
+            ip_address=_ip(request), user_agent=_ua(request),
             user_id=current_user.get("sub"),
             user_email=current_user.get("email"),
             user_role=current_user.get("role"),
         ))
-        session.commit()
         raise
 
     suffix = Path(file.filename or "invoice.pdf").suffix or ".pdf"
@@ -80,16 +80,17 @@ async def upload_invoice(
     uploads_dir = Path("data/uploads")
     uploads_dir.mkdir(parents=True, exist_ok=True)
 
-    log_action(session, AuditLogCreate(
+    await log_audit_event_native(AuditLogCreate(
         action="INVOICE_UPLOADED", resource_type="InvoiceRecord", status="SUCCESS",
         detail=f"type={file_info['detected_type']} size={file_info['file_size_bytes']}B",
-        ip_address=request.client.host if request.client else None,
+        ip_address=_ip(request), user_agent=_ua(request),
         user_id=current_user.get("sub"),
         user_email=current_user.get("email"),
         user_role=current_user.get("role"),
     ))
 
-    repo = InvoiceRepository(session)
+    from src.storage.sync_mongo_repository import SyncMongoInvoiceRepository
+    repo = SyncMongoInvoiceRepository()
 
     if live:
         components = get_components()
@@ -168,13 +169,19 @@ async def upload_invoice(
     ),
     response_description="Liste de résumés de factures avec statut et montants",
 )
-def list_invoices(
+async def list_invoices(
     status: str | None = None,
     limit: int = 100,
     session: Session = Depends(get_session),
 ):
-    repo = InvoiceRepository(session)
-    invoices = repo.list_all(limit=limit)
+    from src.storage.documents.service_bridge import list_invoices_mongo
+
+    mongo_invoices = await list_invoices_mongo(limit)
+    if mongo_invoices is not None:
+        invoices = mongo_invoices
+    else:
+        repo = InvoiceRepository(session)
+        invoices = repo.list_all(limit=limit)
     if status:
         try:
             s = InvoiceStatus(status)
@@ -190,13 +197,19 @@ def list_invoices(
     description="Exporte toutes les factures (ou filtrées par statut) en CSV — usage comptable et ERP.",
     response_class=StreamingResponse,
 )
-def export_invoices_csv(
+async def export_invoices_csv(
     status: str | None = Query(None, description="Filtrer par statut (optionnel)"),
     limit: int = Query(5000, description="Nombre maximum de lignes"),
     session: Session = Depends(get_session),
 ):
-    repo = InvoiceRepository(session)
-    invoices = repo.list_all(limit=limit)
+    from src.storage.documents.service_bridge import list_invoices_mongo
+
+    mongo_invoices = await list_invoices_mongo(limit)
+    if mongo_invoices is not None:
+        invoices = mongo_invoices
+    else:
+        repo = InvoiceRepository(session)
+        invoices = repo.list_all(limit=limit)
     if status:
         try:
             s = InvoiceStatus(status)
@@ -249,15 +262,24 @@ def export_invoices_csv(
     response_description="InvoiceRecord complet avec champs ConfidenceField et flags",
     responses={404: {"description": "Facture non trouvée"}},
 )
-def get_invoice(
+async def get_invoice(
     invoice_id: str,
     session: Session = Depends(get_session),
 ):
-    repo = InvoiceRepository(session)
+    from src.storage.documents.service_bridge import _NOT_FOUND, get_invoice_mongo
+
     try:
         uid = UUID(invoice_id)
     except ValueError:
         raise HTTPException(400, "Invalid UUID")
+
+    mongo_inv = await get_invoice_mongo(uid)
+    if mongo_inv is _NOT_FOUND:
+        raise HTTPException(404, "Invoice not found")
+    if mongo_inv is not None:
+        return InvoiceOut.from_record(mongo_inv)
+
+    repo = InvoiceRepository(session)
     inv = repo.get_by_id(uid)
     if not inv:
         raise HTTPException(404, "Invoice not found")
@@ -275,23 +297,22 @@ def get_invoice(
         404: {"description": "Facture non trouvée"},
     },
 )
-def update_status(
+async def update_status(
     invoice_id: str,
     new_status: str,
     _: None = _COMPTABLE_OR_ADMIN,
-    session: Session = Depends(get_session),
 ):
-    repo = InvoiceRepository(session)
+    from src.storage.documents.service_bridge import update_invoice_status_native
+
     try:
-        uid = UUID(invoice_id)
+        UUID(invoice_id)
         status = InvoiceStatus(new_status)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    inv = repo.get_by_id(uid)
+
+    inv = await update_invoice_status_native(invoice_id, status.value)
     if not inv:
         raise HTTPException(404, "Invoice not found")
-    inv.status = status
-    repo.save(inv)
     return ActionResultOut(id=invoice_id, action="status_updated", new_status=new_status)
 
 
@@ -304,18 +325,29 @@ def update_status(
         "Utilisé par le tracker temps réel dans l'interface."
     ),
 )
-def get_pipeline_status(
+async def get_pipeline_status(
     invoice_id: str,
     session: Session = Depends(get_session),
 ):
-    repo = InvoiceRepository(session)
+    from src.storage.documents.service_bridge import _NOT_FOUND, get_invoice_mongo
+
     try:
         uid = UUID(invoice_id)
     except ValueError:
         raise HTTPException(400, "Invalid UUID")
-    inv = repo.get_by_id(uid)
-    if not inv:
+
+    use_mongo = True
+    mongo_inv = await get_invoice_mongo(uid)
+    if mongo_inv is _NOT_FOUND:
         raise HTTPException(404, "Invoice not found")
+    if mongo_inv is not None:
+        inv = mongo_inv
+    else:
+        use_mongo = False
+        repo = InvoiceRepository(session)
+        inv = repo.get_by_id(uid)
+        if not inv:
+            raise HTTPException(404, "Invoice not found")
 
     status = inv.status.value
 
@@ -361,44 +393,59 @@ def get_pipeline_status(
     # Step 4: fetch journal entry lines
     journal_entry = None
     if status in ("JOURNALED", "EXPORTED", "PAID"):
-        from sqlalchemy import text as sql_text
-        rows = session.execute(
-            sql_text(
-                "SELECT je.id, je.reference, je.date_ecriture, je.description, "
-                "je.accounting_explanation, "
-                "jl.compte, jl.libelle, jl.debit, jl.credit "
-                "FROM journal_entries je "
-                "JOIN journal_lines jl ON jl.entry_id = je.id "
-                "WHERE je.source_invoice_id = :iid "
-                "ORDER BY jl.debit DESC"
-            ),
-            {"iid": invoice_id},
-        ).fetchall()
+        from src.storage.documents.service_bridge import get_journal_entry_for_invoice_mongo
 
-        if rows:
-            total_debit = sum(float(r[7] or 0) for r in rows)
-            total_credit = sum(float(r[8] or 0) for r in rows)
-            is_balanced = abs(total_debit - total_credit) < 0.005
-            journal_entry = {
-                "id": str(rows[0][0]),
-                "reference": rows[0][1],
-                "date_ecriture": str(rows[0][2]),
-                "description": rows[0][3],
-                "accounting_explanation": rows[0][4],
-                "is_balanced": is_balanced,
-                "lines": [
-                    {
-                        "compte": r[5] or "",
-                        "libelle": r[6] or "",
-                        "debit": float(r[7] or 0),
-                        "credit": float(r[8] or 0),
-                    }
-                    for r in rows
-                ],
-            }
-            steps[3]["summary"] = (
-                f"Écriture {rows[0][1]} — {'équilibrée ✓' if is_balanced else 'DÉSÉQUILIBRÉE ⚠'}"
-            )
+        mongo_je = await get_journal_entry_for_invoice_mongo(invoice_id) if use_mongo else None
+        # mongo_je == {} (trouvé mais vide) est traité comme un échec, pas comme
+        # "pas d'écriture" : un statut JOURNALED/EXPORTED/PAID implique toujours
+        # une écriture existante, donc un résultat vide est suspect — on retombe
+        # sur SQL par sécurité plutôt que d'afficher "aucune écriture" à tort.
+        if mongo_je:
+            journal_entry = {k: v for k, v in mongo_je.items() if k != "summary"}
+            steps[3]["summary"] = mongo_je["summary"]
+        else:
+            from sqlalchemy import text as sql_text
+            rows = session.execute(
+                sql_text(
+                    "SELECT je.id, je.reference, je.date_ecriture, je.description, "
+                    "je.accounting_explanation, "
+                    "jl.compte, jl.libelle, jl.debit, jl.credit "
+                    "FROM journal_entries je "
+                    "JOIN journal_lines jl ON jl.entry_id = je.id "
+                    "WHERE je.source_invoice_id = :iid "
+                    "ORDER BY jl.debit DESC"
+                ),
+                # SQLite stocke source_invoice_id sans tirets (CHAR(32) brut) —
+                # bug préexistant : invoice_id (paramètre d'URL) est toujours au
+                # format avec tirets (str(UUID)), donc cette requête ne matchait
+                # jamais rien avant cette normalisation.
+                {"iid": invoice_id.replace("-", "")},
+            ).fetchall()
+
+            if rows:
+                total_debit = sum(float(r[7] or 0) for r in rows)
+                total_credit = sum(float(r[8] or 0) for r in rows)
+                is_balanced = abs(total_debit - total_credit) < 0.005
+                journal_entry = {
+                    "id": str(rows[0][0]),
+                    "reference": rows[0][1],
+                    "date_ecriture": str(rows[0][2]),
+                    "description": rows[0][3],
+                    "accounting_explanation": rows[0][4],
+                    "is_balanced": is_balanced,
+                    "lines": [
+                        {
+                            "compte": r[5] or "",
+                            "libelle": r[6] or "",
+                            "debit": float(r[7] or 0),
+                            "credit": float(r[8] or 0),
+                        }
+                        for r in rows
+                    ],
+                }
+                steps[3]["summary"] = (
+                    f"Écriture {rows[0][1]} — {'équilibrée ✓' if is_balanced else 'DÉSÉQUILIBRÉE ⚠'}"
+                )
 
     from src.ai_agents.ollama_client import OllamaClient
     degraded = not OllamaClient.get().is_available()
@@ -417,15 +464,23 @@ def get_pipeline_status(
     "/{invoice_id}/pdf",
     summary="Télécharger le PDF original de la facture",
 )
-def get_invoice_pdf(
+async def get_invoice_pdf(
     invoice_id: UUID,
     session: Session = Depends(get_session),
     current_user: dict = Depends(get_current_user),
 ):
-    repo = InvoiceRepository(session)
-    inv = repo.get_by_id(invoice_id)
-    if not inv:
+    from src.storage.documents.service_bridge import _NOT_FOUND, get_invoice_mongo
+
+    mongo_inv = await get_invoice_mongo(invoice_id)
+    if mongo_inv is _NOT_FOUND:
         raise HTTPException(404, "Facture introuvable")
+    if mongo_inv is not None:
+        inv = mongo_inv
+    else:
+        repo = InvoiceRepository(session)
+        inv = repo.get_by_id(invoice_id)
+        if not inv:
+            raise HTTPException(404, "Facture introuvable")
     path = Path(inv.raw_file_path) if inv.raw_file_path else None
     if not path or not path.exists():
         raise HTTPException(404, "Fichier PDF non disponible")
