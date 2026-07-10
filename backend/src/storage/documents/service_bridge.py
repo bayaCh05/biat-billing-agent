@@ -2049,14 +2049,47 @@ async def mirror_token_revoked(jti: str) -> None:
         logger.debug("mirror_token_revoked: miroir Mongo échoué — %s", exc)
 
 
-async def mirror_revoke_all_user_tokens(user_id: str) -> None:
+async def revoke_all_user_tokens_native(
+    user_id: str, except_jti: str | None = None, reason: str = "password_change",
+) -> int:
+    """Révoque toutes les sessions actives de l'utilisateur — appelé après tout
+    changement de mot de passe (OTP, lien de reset, reset forcé par un Admin)
+    pour qu'un JWT déjà volé ne survive pas au changement.
+
+    `except_jti` préserve une session courante quand l'appelant est authentifié
+    en tant que cet utilisateur (ex: changement de mot de passe volontaire) ;
+    laissé à None quand il n'y a pas de session courante à préserver (reset via
+    lien — flux non authentifié — ou reset forcé par un Admin sur un autre
+    utilisateur).
+
+    Révoque via les DEUX mécanismes : jwt_handler.revoke_token() (le blocklist
+    RevokedTokenDocument réellement vérifié par verify_access_token — sans ça
+    le JWT resterait utilisable) et ActiveTokenDocument.revoked (cohérence de
+    la liste de sessions affichée à l'utilisateur). Contrairement à l'ancienne
+    mirror_revoke_all_user_tokens() qu'elle remplace (jamais appelée, erreurs
+    Mongo avalées en silence), cette fonction est authoritative — comme les
+    autres *_native de ce module — et ne doit pas avaler ses erreurs.
+    """
+    from api.security import jwt_handler
     from src.storage.documents.active_token import ActiveTokenDocument
 
-    try:
+    now = datetime.now(timezone.utc)
+    query: dict[str, Any] = {
+        "user_id": str(user_id), "revoked": False, "expires_at": {"$gt": now},
+    }
+    if except_jti:
+        query["_id"] = {"$ne": except_jti}
+
+    active = await ActiveTokenDocument.find(query).to_list()
+    for token in active:
+        await jwt_handler.revoke_token(token.id, reason, str(user_id))
+
+    if active:
         coll = ActiveTokenDocument.get_pymongo_collection()
-        await coll.update_many({"user_id": str(user_id)}, {"$set": {"revoked": True}})
-    except Exception as exc:
-        logger.debug("mirror_revoke_all_user_tokens: miroir Mongo échoué — %s", exc)
+        await coll.update_many(
+            {"_id": {"$in": [t.id for t in active]}}, {"$set": {"revoked": True}},
+        )
+    return len(active)
 
 
 async def mirror_revoked_token(jti: str, reason: str, user_id: str | None) -> None:

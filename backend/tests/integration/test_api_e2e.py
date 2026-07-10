@@ -642,3 +642,124 @@ class TestResetTokenReplay:
             if demo_email in USERS:
                 USERS[demo_email]["password"] = original_password
             DEMO_AUTH_STATE.pop(demo_email, None)
+
+
+# ── Session revocation on password change/reset — post-audit follow-up ───────
+
+class TestSessionRevocationOnPasswordChange:
+    """A JWT stolen before a password change/reset must not survive it.
+
+    Uses fresh, disposable, non-demo users (created via the admin API) rather
+    than the shared comptable@biat-it.tn account: any *-biat-it.tn email is
+    treated as a demo account (_is_demo_account()) and takes a pure in-memory
+    shortcut that bypasses the real Mongo-native code paths entirely — a demo
+    account also has no real UserDocument seeded into this test module's
+    isolated Mongo DB in the first place. A dedicated user per test also
+    avoids mutating shared global state (the USERS dict) across the suite.
+    """
+
+    def _create_real_user(self) -> tuple[str, str, str]:
+        """Returns (user_id, email, password) for a freshly created, non-demo,
+        Mongo-backed user with a password we control directly (admin's
+        create-user endpoint only emails a random temp password — never
+        returns it — so we overwrite it via a direct pymongo write, safe here
+        since this user is brand new and used by nothing else)."""
+        import pymongo
+        from uuid import uuid4
+
+        from api.auth import hash_password
+        from src.storage.mongodb import MONGODB_DB, MONGODB_URI
+
+        email = f"revoke-test-{uuid4().hex[:12]}@example.com"
+        password = "KnownPass99!"
+
+        admin_token = _login("admin@biat-it.tn", "admin2026")
+        r = client.post("/api/admin/users", headers=_auth(admin_token), json={
+            "nom": "Test", "prenom": "Revoke", "email": email,
+            "role": "Comptable", "departement": "IT",
+        })
+        assert r.status_code == 201, r.text
+        user_id = r.json()["user_id"]
+
+        db = pymongo.MongoClient(MONGODB_URI).get_database(MONGODB_DB)
+        result = db["users"].update_one(
+            {"_id": user_id},
+            {"$set": {"hashed_password": hash_password(password), "is_first_login": False}},
+        )
+        assert result.modified_count == 1
+        return user_id, email, password
+
+    def _still_valid(self, token: str) -> bool:
+        return client.get("/api/users/me", headers=_auth(token)).status_code == 200
+
+    def _get_password_verification_secret(self, user_id: str, verification_type: str) -> str:
+        """Test-only backdoor: the API never returns OTP codes/reset tokens
+        directly (by design), so fetch the just-generated one straight from Mongo."""
+        import pymongo
+
+        from src.storage.mongodb import MONGODB_DB, MONGODB_URI
+
+        coll = pymongo.MongoClient(MONGODB_URI).get_database(MONGODB_DB)["password_verifications"]
+        doc = coll.find_one(
+            {"user_id": str(user_id), "verification_type": verification_type, "used": False},
+            sort=[("created_at", -1)],
+        )
+        assert doc is not None, f"No {verification_type} verification found for user {user_id}"
+        return doc["code_or_token"]
+
+    def test_direct_change_password_revokes_other_sessions_keeps_current(self):
+        _, email, password = self._create_real_user()
+        token_a = _login(email, password)
+        token_b = _login(email, password)
+
+        r = client.patch("/api/auth/change-password", headers=_auth(token_a), json={
+            "current_password": password, "new_password": "NouveauPass99!",
+        })
+        assert r.status_code == 200, r.text
+        assert self._still_valid(token_a), "session making the change must survive"
+        assert not self._still_valid(token_b), "other session must be revoked"
+
+    def test_otp_confirm_revokes_other_sessions_keeps_current(self):
+        user_id, email, password = self._create_real_user()
+        token_a = _login(email, password)
+        token_b = _login(email, password)
+
+        r = client.post("/api/auth/change-password/request-otp", headers=_auth(token_a))
+        assert r.status_code == 200, r.text
+        assert r.json()["skip_otp"] is False
+
+        otp_code = self._get_password_verification_secret(user_id, "OTP")
+        r2 = client.post("/api/auth/change-password/confirm", headers=_auth(token_a), json={
+            "otp_code": otp_code, "current_password": password, "new_password": "NouveauPass99!",
+        })
+        assert r2.status_code == 200, r2.text
+        assert self._still_valid(token_a), "session making the change must survive"
+        assert not self._still_valid(token_b), "other session must be revoked"
+
+    def test_admin_reset_revokes_target_sessions(self):
+        target_id, email, password = self._create_real_user()
+        admin_token = _login("admin@biat-it.tn", "admin2026")
+        target_token = _login(email, password)
+
+        r = client.post(f"/api/admin/users/{target_id}/reset-password", headers=_auth(admin_token))
+        assert r.status_code == 200, r.text
+        assert not self._still_valid(target_token), "target's session must be revoked"
+
+    def test_reset_password_link_revokes_all_sessions(self):
+        user_id, email, password = self._create_real_user()
+        token_a = _login(email, password)
+        token_b = _login(email, password)
+
+        r = client.post("/api/auth/forgot-password", json={"email": email})
+        assert r.status_code == 200, r.text
+
+        token = self._get_password_verification_secret(user_id, "LINK")
+        r2 = client.post("/api/auth/reset-password", json={
+            "token": token, "new_password": "NouveauPass99!",
+        })
+        assert r2.status_code == 200, r2.text
+
+        # Unauthenticated recovery flow — even the session that requested
+        # it must not survive (no "current session" concept here).
+        assert not self._still_valid(token_a)
+        assert not self._still_valid(token_b)

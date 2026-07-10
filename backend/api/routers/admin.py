@@ -254,24 +254,33 @@ def update_user(
         404: {"description": "Utilisateur non trouvé"},
     },
 )
-def reset_password(
+async def reset_password(
     user_id: str,
     request: Request,
     current_user: dict = Depends(get_current_user),
     _: dict = _ADMIN,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_users import UserORM
+    from src.storage.documents.service_bridge import (
+        get_user_by_id_native, log_audit_event_native,
+        revoke_all_user_tokens_native, update_user_password_native,
+    )
 
-    user = session.get(UserORM, UUID(user_id))
+    user = await get_user_by_id_native(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé.")
 
     temp_pw = generate_temp_password()
-    user.hashed_password = hash_password(temp_pw)
-    user.is_first_login = True
+    await update_user_password_native(user_id, hash_password(temp_pw), is_first_login=True)
 
-    log_action(session, AuditLogCreate(
+    # Revoke ALL of the target user's sessions — an Admin resetting someone's
+    # password is very often a response to a compromised/stolen token, so the
+    # attacker's session must not survive it. There's no session of the
+    # target user to preserve (the acting session here is the Admin's own).
+    revoked_count = await revoke_all_user_tokens_native(
+        user_id, except_jti=None, reason="admin_password_reset",
+    )
+
+    await log_audit_event_native(AuditLogCreate(
         user_id=current_user.get("sub"),
         user_email=current_user.get("email"),
         user_role=current_user.get("role"),
@@ -279,11 +288,10 @@ def reset_password(
         resource_type="User",
         resource_id=user_id,
         status="SUCCESS",
-        detail=f"Mot de passe réinitialisé pour {user.email}",
+        detail=f"Mot de passe réinitialisé pour {user.email} — {revoked_count} session(s) révoquée(s)",
         ip_address=_ip(request),
         user_agent=_ua(request),
     ))
-    session.commit()
 
     from src.services.email_service import send_temp_password_email
     try:

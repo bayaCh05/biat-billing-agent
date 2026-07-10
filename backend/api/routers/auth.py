@@ -607,39 +607,43 @@ def revoke_session(
     summary="Changer le mot de passe (direct — sans OTP)",
 )
 @limiter.limit(limit("3/minute"))
-def change_password(
+async def change_password(
     request: Request,
     body: ChangePasswordRequest,
     current_user: dict = Depends(get_current_user),
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_users import UserORM
+    from src.storage.documents.service_bridge import (
+        get_user_by_email_native, log_audit_event_native,
+        revoke_all_user_tokens_native, update_user_password_native,
+    )
 
     email = current_user.get("email")
     if not email:
         raise HTTPException(400, "Changement de mot de passe non disponible pour les comptes de démonstration.")
     _validate_password_strength(body.new_password)
 
-    user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
+    user = await get_user_by_email_native(email)
     if user:
         if not verify_password(body.current_password, user.hashed_password):
             raise HTTPException(400, "Mot de passe actuel incorrect.")
 
-        user.hashed_password = hash_password(body.new_password)
-        user.is_first_login = False
+        await update_user_password_native(str(user.id), hash_password(body.new_password), is_first_login=False)
 
-        # Revoke current access token so user must re-login
+        # Revoke every OTHER active session so a token stolen before this
+        # change can't survive it — the session making this change stays
+        # logged in (the user just proved their identity with current_password).
         jti = current_user.get("jti")
-        if jti:
-            jwt_handler.revoke_token(jti, "password_change", str(user.id), session)
+        revoked_count = await revoke_all_user_tokens_native(
+            str(user.id), except_jti=jti, reason="password_change",
+        )
 
-        log_action(session, AuditLogCreate(
+        await log_audit_event_native(AuditLogCreate(
             user_id=str(user.id), user_email=user.email, user_role=user.role,
             action="PASSWORD_CHANGED", resource_type="User", resource_id=str(user.id),
-            status="SUCCESS", detail="Mot de passe changé (direct)",
+            status="SUCCESS",
+            detail=f"Mot de passe changé (direct) — {revoked_count} autre(s) session(s) révoquée(s)",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
-        session.commit()
         return {"message": "Mot de passe modifié avec succès."}
 
     if email in USERS:
@@ -647,13 +651,12 @@ def change_password(
             raise HTTPException(400, "Mot de passe actuel incorrect.")
         USERS[email]["password"] = body.new_password
         DEMO_AUTH_STATE.setdefault(email, {})["is_first_login"] = False
-        log_action(session, AuditLogCreate(
+        await log_audit_event_native(AuditLogCreate(
             user_email=email, user_role=USERS[email]["role"],
             action="PASSWORD_CHANGED", resource_type="User", resource_id=email,
             status="SUCCESS", detail="Mot de passe démo changé (direct)",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
-        session.commit()
         return {"message": "Mot de passe modifié avec succès."}
 
     raise HTTPException(404, "Utilisateur non trouvé.")
@@ -712,14 +715,15 @@ def request_otp(
 
 @router.post("/change-password/confirm", summary="Confirmer changement via OTP")
 @limiter.limit(limit("5/minute"))
-def confirm_otp(
+async def confirm_otp(
     request: Request,
     body: ConfirmOtpRequest,
     current_user: dict = Depends(get_current_user),
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_users import UserORM
-    from src.services.password_verification_service import verify_otp
+    from src.storage.documents.service_bridge import (
+        get_user_by_email_native, log_audit_event_native,
+        revoke_all_user_tokens_native, update_user_password_native, verify_otp_native,
+    )
 
     email = current_user.get("email")
     if not email:
@@ -730,67 +734,74 @@ def confirm_otp(
 
     # Demo accounts: skip OTP — just update the password directly
     if _is_demo_account(user_id, email):
-        user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
+        user = await get_user_by_email_native(email)
         if user:
-            user.hashed_password = hash_password(body.new_password)
-            user.is_first_login = False
-            log_action(session, AuditLogCreate(
+            await update_user_password_native(str(user.id), hash_password(body.new_password), is_first_login=False)
+            revoked_count = await revoke_all_user_tokens_native(
+                str(user.id), except_jti=current_user.get("jti"), reason="password_change_otp",
+            )
+            await log_audit_event_native(AuditLogCreate(
                 user_id=str(user.id), user_email=user.email, user_role=user.role,
                 action="PASSWORD_CHANGED", resource_type="User", resource_id=str(user.id),
-                status="SUCCESS", detail="Mot de passe changé (compte démo — sans OTP)",
+                status="SUCCESS",
+                detail=f"Mot de passe changé (compte démo — sans OTP) — {revoked_count} autre(s) session(s) révoquée(s)",
                 ip_address=_ip(request), user_agent=_ua(request),
             ))
-            session.commit()
             return {"success": True, "message": "Mot de passe modifié avec succès."}
         if email in USERS:
             USERS[email]["password"] = body.new_password
             DEMO_AUTH_STATE.setdefault(email, {})["is_first_login"] = False
-            log_action(session, AuditLogCreate(
+            await log_audit_event_native(AuditLogCreate(
                 user_email=email, user_role=USERS[email].get("role", ""),
                 action="PASSWORD_CHANGED", resource_type="User", resource_id=email,
                 status="SUCCESS", detail="Mot de passe démo changé (sans OTP)",
                 ip_address=_ip(request), user_agent=_ua(request),
             ))
-            session.commit()
             return {"success": True, "message": "Mot de passe modifié avec succès."}
         raise HTTPException(404, "Utilisateur non trouvé.")
 
     # Real users: verify OTP
-    user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
+    user = await get_user_by_email_native(email)
     if user:
         if body.current_password and not verify_password(body.current_password, user.hashed_password):
-            log_action(session, AuditLogCreate(
+            await log_audit_event_native(AuditLogCreate(
                 user_id=str(user.id), user_email=user.email, user_role=user.role,
                 action="OTP_VERIFIED", resource_type="User", resource_id=str(user.id),
                 status="FAILURE", detail="Mot de passe actuel incorrect",
                 ip_address=_ip(request), user_agent=_ua(request),
             ))
-            session.commit()
             raise HTTPException(400, "Mot de passe actuel incorrect.")
 
         if not body.otp_code:
             raise HTTPException(400, "Code OTP requis pour les comptes réels.")
 
-        valid = verify_otp(session, user.id, body.otp_code)
+        valid = await verify_otp_native(str(user.id), body.otp_code)
         if not valid:
-            log_action(session, AuditLogCreate(
+            await log_audit_event_native(AuditLogCreate(
                 user_id=str(user.id), user_email=user.email, user_role=user.role,
                 action="OTP_VERIFIED", resource_type="User", resource_id=str(user.id),
                 status="FAILURE", detail="Code OTP invalide ou expiré",
                 ip_address=_ip(request), user_agent=_ua(request),
             ))
-            session.commit()
             raise HTTPException(400, "Code incorrect ou expiré. Demandez un nouveau code.")
 
-        user.hashed_password = hash_password(body.new_password)
-        user.is_first_login = False
-        log_action(session, AuditLogCreate(
+        await update_user_password_native(str(user.id), hash_password(body.new_password), is_first_login=False)
+
+        # Same policy as the direct change-password path: revoke every OTHER
+        # active session (current one — the one that just completed OTP — stays
+        # logged in), so a token stolen before this change can't survive it.
+        current_jti = current_user.get("jti")
+        revoked_count = await revoke_all_user_tokens_native(
+            str(user.id), except_jti=current_jti, reason="password_change_otp",
+        )
+
+        await log_audit_event_native(AuditLogCreate(
             user_id=str(user.id), user_email=user.email, user_role=user.role,
             action="PASSWORD_CHANGED", resource_type="User", resource_id=str(user.id),
-            status="SUCCESS", detail="Mot de passe changé via OTP",
+            status="SUCCESS",
+            detail=f"Mot de passe changé via OTP — {revoked_count} autre(s) session(s) révoquée(s)",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
-        session.commit()
         return {"success": True, "message": "Mot de passe modifié avec succès."}
 
     raise HTTPException(404, "Utilisateur non trouvé.")
@@ -839,39 +850,48 @@ def forgot_password(
 
 @router.post("/reset-password", summary="Réinitialiser le mot de passe via token")
 @limiter.limit(limit("5/minute"))
-def reset_password(
+async def reset_password(
     request: Request,
     body: ResetPasswordRequest,
-    session: Session = Depends(get_session),
 ):
-    from src.services.password_verification_service import verify_reset_token, verify_demo_reset_token
+    from src.services.password_verification_service import verify_demo_reset_token
+    from src.storage.documents.service_bridge import (
+        log_audit_event_native, revoke_all_user_tokens_native,
+        update_user_password_native, verify_reset_token_native,
+    )
 
     _validate_password_strength(body.new_password)
 
-    user = verify_reset_token(session, body.token)
+    user = await verify_reset_token_native(body.token)
     if user:
-        user.hashed_password = hash_password(body.new_password)
-        user.is_first_login = False
-        log_action(session, AuditLogCreate(
+        await update_user_password_native(str(user.id), hash_password(body.new_password), is_first_login=False)
+
+        # Unauthenticated flow — there is no "current session" to preserve
+        # (that's the whole point of this recovery path), so every session
+        # is revoked. A JWT stolen before the reset must not survive it.
+        revoked_count = await revoke_all_user_tokens_native(
+            str(user.id), except_jti=None, reason="password_reset_link",
+        )
+
+        await log_audit_event_native(AuditLogCreate(
             user_id=str(user.id), user_email=user.email, user_role=user.role,
             action="PASSWORD_RESET_COMPLETED", resource_type="User", resource_id=str(user.id),
-            status="SUCCESS", detail="Mot de passe réinitialisé via lien",
+            status="SUCCESS",
+            detail=f"Mot de passe réinitialisé via lien — {revoked_count} session(s) révoquée(s)",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
-        session.commit()
         return {"success": True, "message": "Mot de passe réinitialisé avec succès."}
 
     demo_email = verify_demo_reset_token(body.token)
     if demo_email and demo_email in USERS:
         USERS[demo_email]["password"] = body.new_password
         DEMO_AUTH_STATE.setdefault(demo_email, {})["is_first_login"] = False
-        log_action(session, AuditLogCreate(
+        await log_audit_event_native(AuditLogCreate(
             user_email=demo_email, user_role=USERS[demo_email]["role"],
             action="PASSWORD_RESET_COMPLETED", resource_type="User", resource_id=demo_email,
             status="SUCCESS", detail="Mot de passe démo réinitialisé via lien",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
-        session.commit()
         return {"success": True, "message": "Mot de passe réinitialisé avec succès."}
 
     raise HTTPException(400, "Lien invalide ou expiré. Faites une nouvelle demande.")
