@@ -1,6 +1,7 @@
 """Livrables and phase validation endpoints."""
 from __future__ import annotations
 
+import logging
 from datetime import date
 from uuid import UUID
 
@@ -13,6 +14,8 @@ from api.auth import get_current_user, require_role
 from api.deps import get_session
 
 router = APIRouter(tags=["projects"])
+
+_log = logging.getLogger(__name__)
 
 _EDIT = Depends(require_role("Chef de Projet", "Admin"))
 
@@ -63,14 +66,19 @@ def _to_out(lv) -> LivrableOut:
     ),
     response_description="Liste des livrables avec dates et statuts",
 )
-def list_livrables(phase_id: str, session: Session = Depends(get_session)):
-    from src.storage.orm_models_roadmap import LivrableORM
+async def list_livrables(phase_id: str):
+    from src.storage.documents.service_bridge import list_livrables_mongo
 
-    items = session.execute(
-        select(LivrableORM).where(LivrableORM.phase_id == phase_id)
-        .order_by(LivrableORM.date_livraison_prevue)
-    ).scalars().all()
-    return [_to_out(i) for i in items]
+    mongo_items = await list_livrables_mongo(phase_id)
+    if mongo_items is None:
+        # Livrables are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning(
+            "list_livrables: MongoDB indisponible — retour d'une liste vide "
+            "(phase_id=%s).", phase_id,
+        )
+        return []
+    return [_to_out(i) for i in mongo_items]
 
 
 @router.post(

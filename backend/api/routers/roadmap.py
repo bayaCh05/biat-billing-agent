@@ -1,12 +1,12 @@
 """Feuille de route 2026 endpoints."""
 from __future__ import annotations
 
+import logging
 from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from api.auth import require_role
@@ -14,9 +14,9 @@ from api.deps import get_session
 
 router = APIRouter(prefix="/roadmap", tags=["roadmap"])
 
-_EDIT = Depends(require_role("Chef de Projet", "Admin"))
+_log = logging.getLogger(__name__)
 
-_CRITICITE_NUM = {4: "CRITIQUE", 3: "ELEVEE", 2: "MOYENNE", 1: "FAIBLE"}
+_EDIT = Depends(require_role("Chef de Projet", "Admin"))
 
 
 class RoadmapItemOut(BaseModel):
@@ -87,18 +87,21 @@ def _to_out(r) -> RoadmapItemOut:
     ),
     response_description="Liste des jalons de la roadmap pour l'année demandée",
 )
-def list_roadmap(
+async def list_roadmap(
     annee: int = Query(2026),
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import FeuilleDeRouteORM
+    from src.storage.documents.service_bridge import list_roadmap_mongo
 
-    items = session.execute(
-        select(FeuilleDeRouteORM)
-        .where(FeuilleDeRouteORM.annee == annee)
-        .order_by(FeuilleDeRouteORM.date_debut)
-    ).scalars().all()
-    return [_to_out(i) for i in items]
+    mongo_items = await list_roadmap_mongo(annee)
+    if mongo_items is None:
+        # Roadmap is written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data, so it
+        # was removed rather than kept as a silent source of "old data" bugs.
+        _log.warning(
+            "list_roadmap: MongoDB indisponible — retour d'une liste vide (annee=%s).", annee,
+        )
+        return []
+    return [_to_out(i) for i in mongo_items]
 
 
 @router.get(
@@ -112,59 +115,36 @@ def list_roadmap(
         "Une seule requête — pas de N+1."
     ),
 )
-def list_roadmap_with_risks(
+async def list_roadmap_with_risks(
     annee: int = Query(2026),
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import FeuilleDeRouteORM, RisqueORM
+    from src.storage.documents.service_bridge import list_roadmap_with_risks_mongo
 
     today = date.today()
 
-    items = session.execute(
-        select(FeuilleDeRouteORM)
-        .where(FeuilleDeRouteORM.annee == annee)
-        .order_by(FeuilleDeRouteORM.date_debut)
-    ).scalars().all()
-
-    risk_rows = session.execute(
-        select(
-            RisqueORM.feuille_route_id,
-            func.count(RisqueORM.id).label("risk_count"),
-            func.max(
-                case(
-                    (RisqueORM.niveau_criticite == "CRITIQUE", 4),
-                    (RisqueORM.niveau_criticite == "ELEVEE", 3),
-                    (RisqueORM.niveau_criticite == "MOYENNE", 2),
-                    (RisqueORM.niveau_criticite == "FAIBLE", 1),
-                    else_=0,
-                )
-            ).label("max_criticite_num"),
+    mongo_result = await list_roadmap_with_risks_mongo(annee)
+    if mongo_result is None:
+        # Roadmap + risks are written Mongo-only (see CLAUDE.md) — the old
+        # SQLite fallback here could only ever serve permanently stale data.
+        _log.warning(
+            "list_roadmap_with_risks: MongoDB indisponible — retour d'une liste vide "
+            "(annee=%s).", annee,
         )
-        .where(RisqueORM.feuille_route_id.is_not(None))
-        .group_by(RisqueORM.feuille_route_id)
-    ).all()
-
-    risk_by_item: dict[str, RiskBriefOut] = {
-        str(row.feuille_route_id): RiskBriefOut(
-            count=row.risk_count,
-            highest_criticite=_CRITICITE_NUM.get(row.max_criticite_num),
-        )
-        for row in risk_rows
-    }
+        return []
 
     result: list[RoadmapItemWithRisks] = []
-    for item in items:
+    for item in mongo_result["items"]:
         item_id = str(item.id)
         days_until_due = (item.date_fin - today).days
         is_late = days_until_due < 0 and item.statut not in ("TERMINE", "ANNULE")
         days_overdue = max(0, -days_until_due) if is_late else 0
-        rs = risk_by_item.get(item_id, RiskBriefOut(count=0, highest_criticite=None))
+        rs = mongo_result["risk_by_item"].get(item_id, {"count": 0, "highest_criticite": None})
         result.append(RoadmapItemWithRisks(
             **_to_out(item).model_dump(),
             days_overdue=days_overdue,
             is_late=is_late,
             days_until_due=days_until_due,
-            risk_summary=rs,
+            risk_summary=RiskBriefOut(**rs),
         ))
     return result
 

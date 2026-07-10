@@ -1,6 +1,7 @@
 """Review queue endpoints."""
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -16,6 +17,8 @@ from src.storage.repository import InvoiceRepository
 
 router = APIRouter(prefix="/review", tags=["invoices"])
 
+_log = logging.getLogger(__name__)
+
 _COMPTABLE_OR_ADMIN = Depends(require_role("Comptable", "Admin"))
 
 
@@ -30,7 +33,22 @@ _COMPTABLE_OR_ADMIN = Depends(require_role("Comptable", "Admin"))
     ),
     response_description="Liste de factures en attente de décision (approuver ou rejeter)",
 )
-def get_review_queue(session: Session = Depends(get_session)):
+async def get_review_queue(session: Session = Depends(get_session)):
+    from src.storage.documents.service_bridge import get_review_queue_mongo
+
+    mongo_queue = await get_review_queue_mongo()
+    if mongo_queue is not None:
+        return [InvoiceSummary.from_record(inv) for inv in mongo_queue]
+
+    # Unlike the other 5 "silent stale fallback" domains from the audit, this
+    # one is intentionally kept: the headless daemon (scripts/run_agent.py)
+    # still writes invoices SQLite-only (see CLAUDE.md), so an invoice needing
+    # review can legitimately exist only here — dropping this fallback would
+    # hide real invoices, not just stale ones. Logged so the trigger is at
+    # least visible instead of silent.
+    _log.warning(
+        "get_review_queue: MongoDB indisponible — repli sur la file de révision SQLite."
+    )
     repo = InvoiceRepository(session)
     queue = repo.get_review_queue()
     return [InvoiceSummary.from_record(inv) for inv in queue]

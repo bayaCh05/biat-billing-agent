@@ -1,6 +1,7 @@
 """Budget vs actual endpoints — read + editable plan."""
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -21,6 +22,8 @@ from src.budget.budget_tracker import BudgetPlan, BudgetTracker
 from src.storage.orm_models import BudgetPlanORM
 
 router = APIRouter(prefix="/budget", tags=["budget"])
+
+_log = logging.getLogger(__name__)
 
 _YAML_PATH = Path("config/budget_plan.yaml")
 
@@ -94,18 +97,28 @@ def budget_summary(
 # ── Editable plan CRUD ────────────────────────────────────────────────────────
 
 @router.get("/plan", response_model=list[BudgetPlanEntryOut], summary="Plan budgétaire éditable")
-def get_budget_plan_entries(year: int = date.today().year, session: Session = Depends(get_session)):
-    _seed_from_yaml(session, year)
-    rows = session.execute(
-        select(BudgetPlanORM).where(BudgetPlanORM.year == year).order_by(BudgetPlanORM.catalog_id)
-    ).scalars().all()
+async def get_budget_plan_entries(year: int = date.today().year):
+    from src.storage.documents.service_bridge import (
+        get_budget_plan_entries_mongo, seed_budget_plan_from_yaml_native,
+    )
+
+    await seed_budget_plan_from_yaml_native(year, _YAML_PATH)
+
+    mongo_rows = await get_budget_plan_entries_mongo(year)
+    if mongo_rows is None:
+        # Budget plan entries are written Mongo-only (see CLAUDE.md) — the old
+        # SQLite fallback here could only ever serve permanently stale data.
+        _log.warning(
+            "get_budget_plan_entries: MongoDB indisponible — retour d'une liste vide "
+            "(year=%s).", year,
+        )
+        return []
     return [
         BudgetPlanEntryOut(
             catalog_id=r.catalog_id, year=r.year, label=r.label,
-            monthly=r.monthly, note=r.note,
-            annual_total=sum(r.monthly),
+            monthly=r.monthly, note=r.note, annual_total=sum(r.monthly),
         )
-        for r in rows
+        for r in mongo_rows
     ]
 
 

@@ -1,6 +1,7 @@
 """Risk management endpoints."""
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
 from uuid import UUID
 
@@ -12,6 +13,8 @@ from api.auth import require_role
 from api.deps import get_session
 
 router = APIRouter(prefix="/risks", tags=["risks"])
+
+_log = logging.getLogger(__name__)
 
 _EDIT = Depends(require_role("Chef de Projet", "Admin", "Direction"))
 _VIEW = Depends(require_role("Chef de Projet", "Admin", "Direction", "Comptable"))
@@ -119,100 +122,80 @@ def _log_audit(session: Session, user: dict, action: str, resource_id: str, deta
 
 
 @router.get("", response_model=list[RisqueOut])
-def list_risks(
+async def list_risks(
     projet_id: str | None = Query(None),
     feuille_route_id: str | None = Query(None),
     statut: str | None = Query(None),
     niveau_criticite: str | None = Query(None),
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import RisqueORM
-    from sqlalchemy import select
+    from src.storage.documents.service_bridge import list_risks_mongo
 
-    q = select(RisqueORM)
-    if projet_id:
-        q = q.where(RisqueORM.projet_id == projet_id)
-    if feuille_route_id:
-        q = q.where(RisqueORM.feuille_route_id == UUID(feuille_route_id))
-    if statut:
-        q = q.where(RisqueORM.statut == statut)
-    if niveau_criticite:
-        q = q.where(RisqueORM.niveau_criticite == niveau_criticite)
-    q = q.order_by(RisqueORM.created_at.desc())
-    return [_to_out(r) for r in session.execute(q).scalars().all()]
+    mongo_result = await list_risks_mongo(projet_id, feuille_route_id, statut, niveau_criticite)
+    if mongo_result is None:
+        # Risks are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("list_risks: MongoDB indisponible — retour d'une liste vide.")
+        return []
+    return [_to_out(r) for r in mongo_result]
 
 
 @router.get("/summary")
-def risk_summary(session: Session = Depends(get_session)):
-    from src.services.risk_service import get_risk_summary
-    return get_risk_summary(session)
+async def risk_summary():
+    from src.storage.documents.service_bridge import risk_summary_mongo
+
+    mongo_result = await risk_summary_mongo()
+    if mongo_result is None:
+        _log.warning("risk_summary: MongoDB indisponible — retour d'un résumé vide.")
+        return {
+            "by_criticite": {"FAIBLE": 0, "MOYENNE": 0, "ELEVEE": 0, "CRITIQUE": 0},
+            "by_statut": {}, "overdue": [], "top_critical": [], "total_active": 0,
+        }
+    return mongo_result
 
 
 @router.get("/par-projet", summary="Risques groupés par projet")
-def risks_par_projet(
-    session: Session = Depends(get_session),
-    _: None = _VIEW,
-):
+async def risks_par_projet(_: None = _VIEW):
     """Pour chaque projet ayant au moins un risque : nom du projet, comptes
     par criticité et liste complète. Filtrage statut/criticité côté client.
     Projets triés par criticité maximale décroissante."""
-    from src.storage.orm_models_roadmap import RisqueORM
-    from src.storage.orm_models_projects import CharteProjetORM
-    from sqlalchemy import select
+    from src.storage.documents.service_bridge import risks_par_projet_mongo
 
-    # Tous les risques liés à un projet
-    risks = session.execute(
-        select(RisqueORM)
-        .where(RisqueORM.projet_id.isnot(None))
-        .order_by(RisqueORM.projet_id, RisqueORM.created_at.desc())
-    ).scalars().all()
-
-    # Noms de projets depuis la charte
-    chartes = session.execute(select(CharteProjetORM)).scalars().all()
-    proj_names: dict[str, str] = {c.project_id: c.project_name for c in chartes}
-
-    grouped: dict[str, list] = {}
-    for r in risks:
-        grouped.setdefault(r.projet_id, []).append(r)
-
-    result = []
-    for projet_id, proj_risks in grouped.items():
-        by_criticite: dict[str, int] = {"FAIBLE": 0, "MOYENNE": 0, "ELEVEE": 0, "CRITIQUE": 0}
-        for r in proj_risks:
-            by_criticite[r.niveau_criticite] = by_criticite.get(r.niveau_criticite, 0) + 1
-        result.append({
-            "projet_id": projet_id,
-            "project_name": proj_names.get(projet_id, projet_id),
-            "total": len(proj_risks),
-            "by_criticite": by_criticite,
-            "risks": [_to_out(r) for r in proj_risks],
-        })
-
-    # Projets les plus critiques en premier
-    _order = {"CRITIQUE": 3, "ELEVEE": 2, "MOYENNE": 1, "FAIBLE": 0}
-    result.sort(
-        key=lambda g: max((_order.get(c, 0) * n) for c, n in g["by_criticite"].items()),
-        reverse=True,
-    )
-    return result
+    mongo_result = await risks_par_projet_mongo()
+    if mongo_result is None:
+        _log.warning("risks_par_projet: MongoDB indisponible — retour d'une liste vide.")
+        return []
+    return [
+        {**g, "risks": [_to_out(r) for r in g["risks"]]}
+        for g in mongo_result
+    ]
 
 
 @router.get("/roadmap/{feuille_route_id}", response_model=list[RisqueOut])
-def risks_for_roadmap(
-    feuille_route_id: str,
-    session: Session = Depends(get_session),
-):
-    from src.services.risk_service import get_risks_for_roadmap_item
-    return [_to_out(r) for r in get_risks_for_roadmap_item(session, UUID(feuille_route_id))]
+async def risks_for_roadmap(feuille_route_id: str):
+    from src.storage.documents.service_bridge import risks_for_roadmap_mongo
+
+    mongo_result = await risks_for_roadmap_mongo(feuille_route_id)
+    if mongo_result is None:
+        _log.warning(
+            "risks_for_roadmap: MongoDB indisponible — retour d'une liste vide "
+            "(feuille_route_id=%s).", feuille_route_id,
+        )
+        return []
+    return [_to_out(r) for r in mongo_result]
 
 
 @router.get("/projet/{projet_id}", response_model=list[RisqueOut])
-def risks_for_project(
-    projet_id: str,
-    session: Session = Depends(get_session),
-):
-    from src.services.risk_service import get_risks_for_project
-    return [_to_out(r) for r in get_risks_for_project(session, projet_id)]
+async def risks_for_project(projet_id: str):
+    from src.storage.documents.service_bridge import risks_for_project_mongo
+
+    mongo_result = await risks_for_project_mongo(projet_id)
+    if mongo_result is None:
+        _log.warning(
+            "risks_for_project: MongoDB indisponible — retour d'une liste vide "
+            "(projet_id=%s).", projet_id,
+        )
+        return []
+    return [_to_out(r) for r in mongo_result]
 
 
 @router.post("", response_model=RisqueOut, status_code=status.HTTP_201_CREATED)

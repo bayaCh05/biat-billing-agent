@@ -1,6 +1,7 @@
 """Notification endpoints — DB-persisted notifications with mark-as-read support."""
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,8 @@ from src.storage.orm_models_notifications import NotificationORM
 from src.notifications.notification_service import sync_flagged_invoices
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
+
+_log = logging.getLogger(__name__)
 
 
 class NotificationOut(BaseModel):
@@ -52,12 +55,19 @@ def _to_out(n: NotificationORM) -> NotificationOut:
     ),
     response_description="Compteur de notifications non lues",
 )
-def get_count(session: Session = Depends(get_session)):
-    sync_flagged_invoices(session)
-    count = session.execute(
-        select(NotificationORM).where(NotificationORM.is_read == False)  # noqa: E712
-    ).scalars().all()
-    return NotificationCountOut(count=len(count))
+async def get_count(session: Session = Depends(get_session)):
+    from src.storage.documents.service_bridge import (
+        count_unread_notifications_mongo, sync_flagged_invoices_mirrored,
+    )
+
+    await sync_flagged_invoices_mirrored(session)
+    mongo_count = await count_unread_notifications_mongo()
+    if mongo_count is None:
+        # Notifications are written Mongo-only (see CLAUDE.md) — the old
+        # SQLite fallback here could only ever serve permanently stale data.
+        _log.warning("get_count: MongoDB indisponible — retour d'un compteur à 0.")
+        return NotificationCountOut(count=0)
+    return NotificationCountOut(count=mongo_count)
 
 
 @router.get(
@@ -71,15 +81,17 @@ def get_count(session: Session = Depends(get_session)):
     ),
     response_description="Liste de notifications avec statut de lecture",
 )
-def list_notifications(session: Session = Depends(get_session)):
-    sync_flagged_invoices(session)
-    rows = session.execute(
-        select(NotificationORM).order_by(
-            NotificationORM.is_read.asc(),
-            NotificationORM.created_at.desc(),
-        )
-    ).scalars().all()
-    return [_to_out(n) for n in rows]
+async def list_notifications(session: Session = Depends(get_session)):
+    from src.storage.documents.service_bridge import (
+        list_notifications_mongo, sync_flagged_invoices_mirrored,
+    )
+
+    await sync_flagged_invoices_mirrored(session)
+    mongo_rows = await list_notifications_mongo()
+    if mongo_rows is None:
+        _log.warning("list_notifications: MongoDB indisponible — retour d'une liste vide.")
+        return []
+    return [_to_out(n) for n in mongo_rows]
 
 
 @router.patch(
