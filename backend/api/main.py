@@ -20,6 +20,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from api.auth import SECRET, get_current_user, seed_demo_users, validate_demo_users, refresh_demo_passwords
 from api.limiter import limiter
 from api.security.security_headers import SecurityHeadersMiddleware
+from src.storage.mongodb import close_mongodb, init_beanie
 
 _log = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ from api.routers import invoices, review, journal, budget, capex, kpi, billing, 
 from api.routers import auth as auth_router
 from api.routers import admin, users, roadmap, projet_budget, livrables, audit, risks, security as security_router
 from api.routers import ai as ai_router
+from api.routers import demo_base64 as demo_base64_router
 
 _PROTECTED = [Depends(get_current_user)]
 
@@ -43,16 +45,19 @@ _TAGS: list[dict] = [
     {"name": "analytics",      "description": "Tableaux de bord, KPIs, suivi de trésorerie, requêtes NL"},
     {"name": "notifications",  "description": "Notifications persistantes — alertes factures et budget"},
     {"name": "risks",          "description": "Gestion des risques projet — matrice probabilité × impact"},
+    {"name": "demo",           "description": "Endpoints de démonstration — base64, utilitaires pédagogiques"},
 ]
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     _startup()
+    await init_beanie()
     from api.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
     yield
     stop_scheduler()
+    await close_mongodb()
 
 
 def _startup() -> None:
@@ -228,6 +233,7 @@ app.include_router(kpi.analytics_router,   prefix="/api", dependencies=_PROTECTE
 app.include_router(risks.router,            prefix="/api", dependencies=_PROTECTED)
 app.include_router(ai_router.router,        prefix="/api", dependencies=_PROTECTED)
 app.include_router(security_router.router,  prefix="/api", dependencies=_PROTECTED)
+app.include_router(demo_base64_router.router, prefix="/api", dependencies=_PROTECTED)
 
 
 @app.get("/api/health", tags=["admin"])
