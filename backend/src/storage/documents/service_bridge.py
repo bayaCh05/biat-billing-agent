@@ -1592,7 +1592,9 @@ async def security_summary_mongo() -> dict | None:
             "rejected_files_today": rejected_files_today,
             "last_integrity_check": last_integrity_check,
             "last_integrity_score": last_integrity_score,
-            "tampered_entries_count": 0,
+            # tampered_entries_count is intentionally absent — the caller
+            # (api/routers/security.py::security_summary) always overwrites it
+            # with a live, merged SQLite+Mongo count via compute_integrity_summary().
             "active_sessions_count": active_sessions,
             "unauthorized_access_attempts_today": unauthorized_today,
             "accounts_with_recent_failures": [

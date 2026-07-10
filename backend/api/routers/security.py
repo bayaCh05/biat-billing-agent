@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from api.auth import require_role
 from api.deps import get_session
+from api.routers.audit import compute_integrity_summary
 from src.storage.orm_models_audit import AuditLogORM
 from src.storage.orm_models_users import UserORM
 
@@ -22,10 +23,23 @@ _ADMIN = Depends(require_role("Admin"))
     summary="Tableau de bord sécurité",
     description="Résumé de l'état de sécurité — logins, comptes verrouillés, intégrité audit. Admin only.",
 )
-def security_summary(
+async def security_summary(
     _: dict = _ADMIN,
     session: Session = Depends(get_session),
 ):
+    from src.storage.documents.service_bridge import security_summary_mongo
+
+    # Live-computed, merged SQLite + Mongo tampered-entry count (see
+    # compute_integrity_summary) — never hardcoded, so known tamper/backfill
+    # findings (e.g. legacy SQLite HMAC-key-rotation mismatches) stay visible
+    # to Admins here rather than being silently reported as zero.
+    integrity = await compute_integrity_summary(session)
+
+    mongo_result = await security_summary_mongo()
+    if mongo_result is not None:
+        mongo_result["tampered_entries_count"] = integrity["tampered_count"]
+        return mongo_result
+
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Auth stats from audit log
@@ -121,7 +135,7 @@ def security_summary(
         "rejected_files_today": rejected_files_today,
         "last_integrity_check": last_integrity_check,
         "last_integrity_score": last_integrity_score,
-        "tampered_entries_count": 0,
+        "tampered_entries_count": integrity["tampered_count"],
         "active_sessions_count": active_sessions,
         "unauthorized_access_attempts_today": unauthorized_today,
         "accounts_with_recent_failures": [

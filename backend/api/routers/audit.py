@@ -134,20 +134,16 @@ async def resource_history(
     return [_to_out(r) for r in rows]
 
 
-@router.get(
-    "/verify-integrity",
-    summary="Vérifier l'intégrité des journaux d'audit",
-    description=(
-        "Recalcule le HMAC de chaque entrée et détecte toute altération. "
-        "Réservé au rôle Admin."
-    ),
-)
-async def verify_integrity(
-    limit: int = 5000,
-    _: dict = Depends(require_role("Admin")),
-    session: Session = Depends(get_session),
-):
-    from src.storage.documents.service_bridge import log_audit_event_native, verify_integrity_native
+async def compute_integrity_summary(session: Session, limit: int = 5000) -> dict:
+    """Merged SQLite + Mongo-native HMAC integrity check.
+
+    Shared by GET /audit/verify-integrity and GET /security/summary so both
+    surface the same tampered-entry count — audit_logs is one compliance
+    trail split across two stores (see CLAUDE.md "MongoDB Migration
+    Status"), not two independent ones, so results are always merged rather
+    than computed/reported separately.
+    """
+    from src.storage.documents.service_bridge import verify_integrity_native
 
     rows = (
         session.execute(
@@ -180,10 +176,6 @@ async def verify_integrity(
             })
     session.commit()  # persist backfilled row_hash values on pre-HMAC SQLite rows
 
-    # SQLite and Mongo each hold event types the other doesn't (see CLAUDE.md
-    # "MongoDB Migration Status") — this is one compliance trail split across
-    # two stores, not two independent trails, so the two checks are merged into
-    # a single combined score rather than surfaced separately.
     mongo_result = await verify_integrity_native(limit)
 
     total = len(rows)
@@ -218,13 +210,6 @@ async def verify_integrity(
     else:
         detail_msg = f"Intégrité vérifiée — {total} entrées conformes. Score: {score:.1f}%."
 
-    await log_audit_event_native(AuditLogCreate(
-        action="AUDIT_INTEGRITY_CHECK",
-        resource_type="AuditLog",
-        status="SUCCESS" if not total_tampered_entries else "FAILURE",
-        detail=detail_msg,
-    ))
-
     return {
         "total_checked": total,
         "valid": total_valid,
@@ -233,5 +218,34 @@ async def verify_integrity(
         "tampered_entries": total_tampered_entries,
         "integrity_score": round(score, 2),
         "message": detail_msg,
+    }
+
+
+@router.get(
+    "/verify-integrity",
+    summary="Vérifier l'intégrité des journaux d'audit",
+    description=(
+        "Recalcule le HMAC de chaque entrée et détecte toute altération. "
+        "Réservé au rôle Admin."
+    ),
+)
+async def verify_integrity(
+    limit: int = 5000,
+    _: dict = Depends(require_role("Admin")),
+    session: Session = Depends(get_session),
+):
+    from src.storage.documents.service_bridge import log_audit_event_native
+
+    result = await compute_integrity_summary(session, limit)
+
+    await log_audit_event_native(AuditLogCreate(
+        action="AUDIT_INTEGRITY_CHECK",
+        resource_type="AuditLog",
+        status="SUCCESS" if not result["tampered_entries"] else "FAILURE",
+        detail=result["message"],
+    ))
+
+    return {
+        **result,
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
