@@ -149,6 +149,21 @@ class TestUnauthenticated:
         assert r.status_code == 401, f"{path} should require auth, got {r.status_code}"
 
 
+# ── demo_base64 removed — post-audit follow-up (item 4/4) ────────────────────
+
+class TestDemoBase64Removed:
+    """demo_base64.py was confirmed dead (zero frontend usage) and deleted
+    outright — no route referencing it should exist anywhere in the app."""
+
+    def test_no_base64_routes_registered(self):
+        paths = [getattr(r, "path", "") for r in app.routes]
+        assert not any("base64" in p.lower() for p in paths), paths
+
+    def test_demo_tag_removed_from_openapi(self):
+        tag_names = [t["name"] for t in app.openapi_tags or []]
+        assert "demo" not in tag_names
+
+
 # ── Health (public) ───────────────────────────────────────────────────────────
 
 class TestHealth:
