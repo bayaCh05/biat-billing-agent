@@ -84,6 +84,18 @@ def _startup() -> None:
             "par défaut. Définir AUDIT_HMAC_SECRET séparément dans .env pour isoler les deux secrets."
         )
 
+    # Fail fast if LDAP is enabled but LDAP_BIND_PASSWORD is missing — no
+    # hardcoded fallback (see src/services/ldap_service.py). Checked here
+    # rather than at import time because that module is only imported lazily,
+    # on the first LDAP login attempt — this way a misconfiguration is caught
+    # at startup instead of on some user's first login.
+    auth_mode = os.getenv("AUTH_MODE", "local").lower()
+    if auth_mode in ("ldap", "hybrid") and not os.getenv("LDAP_BIND_PASSWORD", "").strip():
+        raise RuntimeError(
+            f"AUTH_MODE={auth_mode} nécessite LDAP_BIND_PASSWORD, qui n'est pas défini. "
+            "Définissez-le dans .env avant de démarrer."
+        )
+
     # Warn if DB is not at the latest Alembic revision
     db_url = os.getenv("DATABASE_URL", "sqlite:///./data/invoices.db")
     if ":memory:" in db_url:

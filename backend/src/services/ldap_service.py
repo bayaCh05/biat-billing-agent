@@ -26,7 +26,12 @@ _BASE_DN       = os.getenv("LDAP_BASE_DN",  "dc=biat,dc=local")
 _USERS_OU      = os.getenv("LDAP_USERS_OU",  f"ou=users,{_BASE_DN}")
 _GROUPS_OU     = os.getenv("LDAP_GROUPS_OU", f"ou=groups,{_BASE_DN}")
 _BIND_DN       = os.getenv("LDAP_BIND_DN",   f"cn=admin,{_BASE_DN}")
-_BIND_PASSWORD = os.getenv("LDAP_BIND_PASSWORD", "admin_secret")
+# No hardcoded fallback: an empty bind password just fails LDAP auth cleanly.
+# api/main.py::_startup() already fails the app at startup (before any
+# request) if AUTH_MODE requires LDAP and this is unset — see there for why
+# the check lives at startup rather than here (this module is only imported
+# lazily, on the first actual LDAP login attempt, not at app boot).
+_BIND_PASSWORD = os.getenv("LDAP_BIND_PASSWORD", "")
 _SEARCH_ATTR   = os.getenv("LDAP_SEARCH_ATTR", "mail")
 _TIMEOUT       = int(os.getenv("LDAP_TIMEOUT", "5"))
 _DEFAULT_ROLE  = os.getenv("LDAP_DEFAULT_ROLE", "")
