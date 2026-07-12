@@ -28,16 +28,6 @@ class AnomalyDetector:
         self.repository = repository
         self.catalog = catalog
 
-    def with_repository(self, repository) -> "AnomalyDetector":
-        """Retourne une copie superficielle avec un autre repository injecté.
-
-        Voir DuplicateDetector.with_repository() pour le contexte.
-        """
-        import copy
-        clone = copy.copy(self)
-        clone.repository = repository
-        return clone
-
     def detect(self, invoice: InvoiceRecord) -> InvoiceRecord:
         invoice = self._check_high_value(invoice)
         invoice = self._check_plausible_amount(invoice)

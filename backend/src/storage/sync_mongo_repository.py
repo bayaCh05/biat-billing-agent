@@ -4,23 +4,24 @@ Pourquoi synchrone : AIOrchestrator.process_invoice() et ses 4 agents sont
 délibérément synchrones ("Built as synchronous to match the existing FastAPI +
 SQLAlchemy patterns" — voir ai_agents/orchestrator.py), alors que Beanie/Motor
 est async-only. Plutôt que de faire remonter async/await dans toute la chaîne
-d'agents (et dans le daemon headless qui appelle le même PipelineComponents
-partagé — voir agent/pipeline.py), on utilise ici un client pymongo classique
-(synchrone), avec les mêmes conventions que le reste de la migration :
-_id toujours une chaîne UUID avec tirets, jamais un objet UUID natif BSON.
+d'agents, on utilise ici un client pymongo classique (synchrone), avec les
+mêmes conventions que le reste de la migration : _id toujours une chaîne
+UUID avec tirets, jamais un objet UUID natif BSON.
 
 Ces classes exposent volontairement la MÊME API que leurs équivalents
-SQLAlchemy (InvoiceRepository, JournalRepository, AssetRepository,
-ClientInvoiceRepository) afin que DuplicateDetector, AnomalyDetector,
-InvoiceNumberer, InvoiceBuilder n'aient besoin d'AUCUNE modification — seul
-l'objet injecté change.
+SQLAlchemy historiques (InvoiceRepository, AssetRepository,
+ClientInvoiceRepository — le SQLAlchemy JournalRepository/journal_store.py a
+depuis été supprimé, dead code après ce portage) afin que DuplicateDetector,
+AnomalyDetector, InvoiceNumberer, InvoiceBuilder n'aient besoin d'AUCUNE
+modification — seul l'objet injecté change.
 
-Portée : uniquement le chemin AIOrchestrator (route API /invoices/upload) et
-la génération de factures client (billing.py). Le daemon headless
-(scripts/run_agent.py) et Streamlit continuent d'utiliser PipelineComponents
-partagé (SQLAlchemy) via agent/pipeline.py — hors périmètre de cette
-conversion, volontairement non touché pour ne pas les rendre inconsistants
-avec des données Mongo qu'ils ne lisent jamais.
+Portée : le chemin AIOrchestrator (route API /invoices/upload) et la
+génération de factures client (billing.py). Le daemon headless
+(scripts/run_agent.py, agent/pipeline.py, agent/agent.py) et son
+PipelineComponents SQLAlchemy ont été supprimés (Lot B, sub-lot 6) — ils
+étaient confirmés superseded en pratique par le chemin API+AIOrchestrator.
+AIOrchestrator utilise désormais AIComponents (agent/config_loader.py), un
+sous-ensemble sans SQLAlchemy de ce que PipelineComponents fournissait.
 """
 from __future__ import annotations
 
@@ -412,7 +413,8 @@ def log_ai_audit_event_sync(entry: "AuditLogCreate") -> None:
 # ── Journal ─────────────────────────────────────────────────────────────────
 
 class SyncMongoJournalRepository:
-    """Même API que src.accounting.journal_store.JournalRepository, backend Mongo sync."""
+    """Backend Mongo sync pour la journalisation comptable — remplace l'ancien
+    SQLAlchemy JournalRepository (src/accounting/journal_store.py, supprimé)."""
 
     @property
     def _coll(self):

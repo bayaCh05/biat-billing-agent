@@ -36,7 +36,6 @@ import src.storage.orm_models_users                  # noqa: E402 F401
 import src.storage.orm_models_projects               # noqa: E402 F401
 import src.storage.orm_models_roadmap                  # noqa: E402 F401
 import src.storage.orm_models_notifications          # noqa: E402 F401
-import src.accounting.journal_store                  # noqa: E402 F401
 import src.billing.client_invoice_store              # noqa: E402 F401
 import src.capex.asset_repository                    # noqa: E402 F401
 import src.storage.orm_models_audit                  # noqa: E402 F401

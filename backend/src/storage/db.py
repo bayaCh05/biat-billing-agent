@@ -45,7 +45,6 @@ def init_db(engine) -> None:
     prevent silent schema drift — Alembic is the single source of truth.
     """
     import src.storage.orm_models               # noqa: F401
-    import src.accounting.journal_store         # noqa: F401
     import src.billing.client_invoice_store     # noqa: F401
     import src.capex.asset_repository           # noqa: F401
     import src.storage.orm_models_projects      # noqa: F401

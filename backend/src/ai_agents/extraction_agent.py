@@ -22,7 +22,7 @@ class ExtractionAgent(BaseAgent):
 
     def __init__(self, extractor) -> None:
         super().__init__()
-        self._extractor = extractor  # HybridExtractor from PipelineComponents
+        self._extractor = extractor  # HybridExtractor from AIComponents
 
     def run(self, context: dict) -> AgentResult:
         """context keys: invoice (InvoiceRecord)"""

@@ -71,8 +71,6 @@ def test_full_pipeline_produces_4_ordered_ai_audit_events_no_duplicate(mongo_tes
     )
 
     components = MagicMock()
-    components.duplicate_detector.with_repository.return_value = MagicMock()
-    components.anomaly_detector.with_repository.return_value = MagicMock()
 
     db_session = MagicMock()
     orchestrator = AIOrchestrator(components, db_session)
@@ -125,8 +123,6 @@ def test_audit_write_failure_does_not_break_pipeline(mongo_test_db):
     )
 
     components = MagicMock()
-    components.duplicate_detector.with_repository.return_value = MagicMock()
-    components.anomaly_detector.with_repository.return_value = MagicMock()
 
     orchestrator = AIOrchestrator(components, MagicMock())
 

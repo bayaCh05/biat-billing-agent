@@ -88,7 +88,6 @@ dev = [
 ]
 
 [project.scripts]
-run-agent = "scripts.run_agent:main"
 review-queue = "scripts.review_queue:main"
 
 [tool.ruff]

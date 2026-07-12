@@ -21,18 +21,6 @@ class DuplicateDetector:
         )
         self.repository = repository
 
-    def with_repository(self, repository) -> "DuplicateDetector":
-        """Retourne une copie superficielle avec un autre repository injecté.
-
-        Utilisé par AIOrchestrator pour brancher un repository Mongo-natif
-        sans muter l'instance partagée de PipelineComponents (encore utilisée
-        par le daemon headless via agent/pipeline.py).
-        """
-        import copy
-        clone = copy.copy(self)
-        clone.repository = repository
-        return clone
-
     def detect(self, invoice: InvoiceRecord) -> InvoiceRecord:
         invoice = self._check_exact_duplicates(invoice)
         if not invoice.has_errors:
