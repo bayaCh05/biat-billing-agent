@@ -75,15 +75,23 @@ def _demo_me(role: str, email: str) -> UserMeOut:
     response_model=UserMeOut,
     summary="Profil de l'utilisateur connecté",
 )
-def get_me(
+async def get_me(
     current_user: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_users import UserORM
+    from src.storage.documents.service_bridge import _NOT_FOUND, get_user_by_email_mongo
 
     email = current_user.get("email")
     if not email:
         return _demo_me(current_user.get("role", ""), "")
+
+    mongo_user = await get_user_by_email_mongo(email)
+    if mongo_user is _NOT_FOUND:
+        return _demo_me(current_user.get("role", ""), email)
+    if mongo_user is not None:
+        return _build_me(mongo_user)
+
+    from src.storage.orm_models_users import UserORM
 
     user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
     if not user:
@@ -97,29 +105,19 @@ def get_me(
     summary="Modifier son profil",
     responses={400: {"description": "Non disponible pour les comptes démo"}},
 )
-def update_me(
+async def update_me(
     body: UserMeUpdateRequest,
     current_user: dict = Depends(get_current_user),
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_users import UserORM
+    from src.storage.documents.service_bridge import update_user_profile_native
 
     email = current_user.get("email")
     if not email:
         raise HTTPException(status_code=400, detail="Modification non disponible pour les comptes de démonstration.")
 
-    user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
+    user = await update_user_profile_native(email, body.nom, body.prenom, body.departement)
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé.")
-
-    if body.nom is not None:
-        user.nom = body.nom
-    if body.prenom is not None:
-        user.prenom = body.prenom
-    if body.departement is not None:
-        user.departement = body.departement
-    session.commit()
-    session.refresh(user)
     return _build_me(user)
 
 
@@ -139,13 +137,12 @@ def update_me(
     },
 )
 @limiter.limit(limit("10/minute"))
-def update_avatar(
+async def update_avatar(
     request: Request,
     body: AvatarUpdateRequest,
     current_user: dict = Depends(get_current_user),
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_users import UserORM
+    from src.storage.documents.service_bridge import update_user_avatar_native
 
     email = current_user.get("email")
     if not email:
@@ -175,12 +172,9 @@ def update_avatar(
             f"Image trop grande ({decoded_size // 1024} Ko). Limite : 2 Mo.",
         )
 
-    user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
+    user = await update_user_avatar_native(email, avatar)
     if not user:
         raise HTTPException(404, "Utilisateur non trouvé.")
 
-    user.profile_picture = avatar
-    session.commit()
-    session.refresh(user)
     _log.info("Photo de profil mise à jour pour %s (%d Ko).", email, decoded_size // 1024)
     return _build_me(user)

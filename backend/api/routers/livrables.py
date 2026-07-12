@@ -3,15 +3,11 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from api.auth import get_current_user, require_role
-from api.deps import get_session
 
 router = APIRouter(tags=["projects"])
 
@@ -97,28 +93,18 @@ async def list_livrables(phase_id: str):
         404: {"description": "Phase non trouvée"},
     },
 )
-def create_livrable(
+async def create_livrable(
     phase_id: str,
     body: LivrableCreateRequest,
     current_user: dict = Depends(get_current_user),
     _: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import LivrableORM
-    from src.storage.orm_models_projects import PhaseORM
+    from src.storage.documents.service_bridge import create_livrable_native
 
-    phase = session.get(PhaseORM, phase_id)
-    if not phase:
+    created_by = current_user.get("email", current_user.get("role", ""))
+    lv = await create_livrable_native(phase_id, body, created_by)
+    if lv is None:
         raise HTTPException(status_code=404, detail="Phase non trouvée.")
-
-    lv = LivrableORM(
-        phase_id=phase_id, titre=body.titre, description=body.description,
-        date_livraison_prevue=body.date_livraison_prevue, statut=body.statut,
-        created_by=current_user.get("email", current_user.get("role", "")),
-    )
-    session.add(lv)
-    session.commit()
-    session.refresh(lv)
     return _to_out(lv)
 
 
@@ -133,23 +119,16 @@ def create_livrable(
         404: {"description": "Livrable non trouvé"},
     },
 )
-def update_livrable(
+async def update_livrable(
     livrable_id: str,
     body: LivrableUpdateRequest,
     _: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import LivrableORM
+    from src.storage.documents.service_bridge import update_livrable_native
 
-    lv = session.get(LivrableORM, UUID(livrable_id))
+    lv = await update_livrable_native(livrable_id, body)
     if not lv:
         raise HTTPException(status_code=404, detail="Livrable non trouvé.")
-    if body.titre is not None:               lv.titre = body.titre
-    if body.description is not None:         lv.description = body.description
-    if body.statut is not None:              lv.statut = body.statut
-    if body.date_livraison_reelle is not None: lv.date_livraison_reelle = body.date_livraison_reelle
-    session.commit()
-    session.refresh(lv)
     return _to_out(lv)
 
 
@@ -167,31 +146,19 @@ def update_livrable(
         404: {"description": "Phase non trouvée"},
     },
 )
-def valider_phase(
+async def valider_phase(
     phase_id: str,
     _: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import LivrableORM
-    from src.storage.orm_models_projects import PhaseORM
+    from src.storage.documents.service_bridge import PhaseValidationError, valider_phase_native
 
-    phase = session.get(PhaseORM, phase_id)
-    if not phase:
-        raise HTTPException(status_code=404, detail="Phase non trouvée.")
-
-    livrables = session.execute(
-        select(LivrableORM).where(LivrableORM.phase_id == phase_id)
-    ).scalars().all()
-
-    non_termines = [l for l in livrables if l.statut not in ("LIVRE", "VALIDE")]
-    if non_termines:
+    try:
+        phase = await valider_phase_native(phase_id)
+    except PhaseValidationError as exc:
         raise HTTPException(
             status_code=400,
-            detail=f"{len(non_termines)} livrable(s) non terminé(s) — tous doivent être LIVRE ou VALIDE avant validation.",
+            detail=f"{exc.count} livrable(s) non terminé(s) — tous doivent être LIVRE ou VALIDE avant validation.",
         )
-
-    phase.status = "VALIDEE"
-    from datetime import date as date_cls
-    phase.closed_date = date_cls.today()
-    session.commit()
+    if phase is None:
+        raise HTTPException(status_code=404, detail="Phase non trouvée.")
     return {"message": f"Phase '{phase.name}' validée avec succès.", "status": "VALIDEE"}

@@ -2,24 +2,19 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 
-import yaml
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from api.auth import get_current_user, require_role
+from api.auth import require_role
 from api.deps import get_session, get_budget_plan
-from src.models.audit import AuditLogCreate
-from src.services.audit_service import log_action, _ip, _ua
 from api.schemas import (
     BudgetSummaryOut, BudgetLineOut,
     BudgetPlanEntryOut, BudgetPlanEntryIn, BudgetPlanUpdateIn,
 )
 from src.budget.budget_tracker import BudgetPlan, BudgetTracker
-from src.storage.orm_models import BudgetPlanORM
 
 router = APIRouter(prefix="/budget", tags=["budget"])
 
@@ -28,25 +23,6 @@ _log = logging.getLogger(__name__)
 _YAML_PATH = Path("config/budget_plan.yaml")
 
 _COMPTABLE_OR_ADMIN = Depends(require_role("Comptable", "Admin"))
-
-
-def _seed_from_yaml(session: Session, year: int) -> None:
-    """Populate budget_plan_entries from YAML if the table is empty for that year."""
-    existing = session.execute(
-        select(BudgetPlanORM).where(BudgetPlanORM.year == year).limit(1)
-    ).scalar_one_or_none()
-    if existing:
-        return
-    data = yaml.safe_load(_YAML_PATH.read_text())
-    for entry in data.get("entries", []):
-        session.add(BudgetPlanORM(
-            catalog_id=entry["catalog_id"],
-            year=year,
-            label=entry["label"],
-            monthly=[float(v) for v in entry["monthly"]],
-            note=entry.get("note"),
-        ))
-    session.commit()
 
 
 @router.get(
@@ -60,16 +36,22 @@ def _seed_from_yaml(session: Session, year: int) -> None:
     ),
     response_description="Synthèse avec totaux YTD, variance et liste des lignes en dépassement",
 )
-def budget_summary(
+async def budget_summary(
     year: int = date.today().year,
     month: int = date.today().month,
     session: Session = Depends(get_session),
     plan: BudgetPlan = Depends(get_budget_plan),
 ):
-    tracker = BudgetTracker(plan=plan, session=session)
-    summary = tracker.summary(year=year, through_month=month)
+    from src.storage.documents.service_bridge import budget_summary_mongo
 
-    variances = tracker.ytd_variance(year=year, through_month=month)
+    mongo_result = await budget_summary_mongo(plan, year, month)
+    if mongo_result is not None:
+        summary = mongo_result["summary"]
+        variances = mongo_result["variances"]
+    else:
+        tracker = BudgetTracker(plan=plan, session=session)
+        summary = tracker.summary(year=year, through_month=month)
+        variances = tracker.ytd_variance(year=year, through_month=month)
 
     lines = []
     for v in variances:
@@ -123,43 +105,20 @@ async def get_budget_plan_entries(year: int = date.today().year):
 
 
 @router.put("/plan/{catalog_id}", response_model=BudgetPlanEntryOut, summary="Modifier une ligne budgétaire")
-def update_budget_plan_entry(
+async def update_budget_plan_entry(
     catalog_id: str,
     body: BudgetPlanUpdateIn,
-    request: Request,
     year: int = date.today().year,
     current_user: dict = _COMPTABLE_OR_ADMIN,
-    session: Session = Depends(get_session),
 ):
-    row = session.execute(
-        select(BudgetPlanORM).where(
-            BudgetPlanORM.catalog_id == catalog_id,
-            BudgetPlanORM.year == year,
-        )
-    ).scalar_one_or_none()
+    if body.monthly is not None and len(body.monthly) != 12:
+        raise HTTPException(status_code=422, detail="monthly must have exactly 12 values")
+
+    from src.storage.documents.service_bridge import update_budget_plan_entry_native
+
+    row = await update_budget_plan_entry_native(catalog_id, year, body, current_user)
     if not row:
         raise HTTPException(status_code=404, detail=f"Budget line '{catalog_id}' not found for year {year}")
-    if body.label is not None:
-        row.label = body.label
-    if body.monthly is not None:
-        if len(body.monthly) != 12:
-            raise HTTPException(status_code=422, detail="monthly must have exactly 12 values")
-        row.monthly = [float(v) for v in body.monthly]
-    if body.note is not None:
-        row.note = body.note
-    row.updated_at = datetime.now(timezone.utc)
-    log_action(session, AuditLogCreate(
-        user_id=current_user.get("sub"),
-        user_email=current_user.get("email"),
-        user_role=current_user.get("role"),
-        action="BUDGET_PLAN_UPDATED",
-        resource_type="BudgetPlan",
-        resource_id=f"{catalog_id}/{year}",
-        status="SUCCESS",
-        ip_address=_ip(request),
-        user_agent=_ua(request),
-    ))
-    session.commit()
     return BudgetPlanEntryOut(
         catalog_id=row.catalog_id, year=row.year, label=row.label,
         monthly=row.monthly, note=row.note, annual_total=sum(row.monthly),
@@ -167,40 +126,20 @@ def update_budget_plan_entry(
 
 
 @router.post("/plan", response_model=BudgetPlanEntryOut, status_code=201, summary="Ajouter une ligne budgétaire")
-def create_budget_plan_entry(
+async def create_budget_plan_entry(
     body: BudgetPlanEntryIn,
-    request: Request,
     year: int = date.today().year,
     current_user: dict = _COMPTABLE_OR_ADMIN,
-    session: Session = Depends(get_session),
 ):
     if len(body.monthly) != 12:
         raise HTTPException(status_code=422, detail="monthly must have exactly 12 values")
-    existing = session.execute(
-        select(BudgetPlanORM).where(
-            BudgetPlanORM.catalog_id == body.catalog_id,
-            BudgetPlanORM.year == year,
-        )
-    ).scalar_one_or_none()
-    if existing:
+
+    from src.storage.documents.service_bridge import BudgetPlanConflict, create_budget_plan_entry_native
+
+    try:
+        row = await create_budget_plan_entry_native(body, year, current_user)
+    except BudgetPlanConflict:
         raise HTTPException(status_code=409, detail=f"Budget line '{body.catalog_id}' already exists for year {year}")
-    row = BudgetPlanORM(
-        catalog_id=body.catalog_id, year=year, label=body.label,
-        monthly=[float(v) for v in body.monthly], note=body.note,
-    )
-    session.add(row)
-    log_action(session, AuditLogCreate(
-        user_id=current_user.get("sub"),
-        user_email=current_user.get("email"),
-        user_role=current_user.get("role"),
-        action="BUDGET_PLAN_CREATED",
-        resource_type="BudgetPlan",
-        resource_id=f"{body.catalog_id}/{year}",
-        status="SUCCESS",
-        ip_address=_ip(request),
-        user_agent=_ua(request),
-    ))
-    session.commit()
     return BudgetPlanEntryOut(
         catalog_id=row.catalog_id, year=row.year, label=row.label,
         monthly=row.monthly, note=row.note, annual_total=sum(row.monthly),
@@ -208,31 +147,13 @@ def create_budget_plan_entry(
 
 
 @router.delete("/plan/{catalog_id}", status_code=204, summary="Supprimer une ligne budgétaire")
-def delete_budget_plan_entry(
+async def delete_budget_plan_entry(
     catalog_id: str,
-    request: Request,
     year: int = date.today().year,
     current_user: dict = _COMPTABLE_OR_ADMIN,
-    session: Session = Depends(get_session),
 ):
-    row = session.execute(
-        select(BudgetPlanORM).where(
-            BudgetPlanORM.catalog_id == catalog_id,
-            BudgetPlanORM.year == year,
-        )
-    ).scalar_one_or_none()
-    if not row:
+    from src.storage.documents.service_bridge import delete_budget_plan_entry_native
+
+    found = await delete_budget_plan_entry_native(catalog_id, year, current_user)
+    if not found:
         raise HTTPException(status_code=404, detail=f"Budget line '{catalog_id}' not found")
-    session.delete(row)
-    log_action(session, AuditLogCreate(
-        user_id=current_user.get("sub"),
-        user_email=current_user.get("email"),
-        user_role=current_user.get("role"),
-        action="BUDGET_PLAN_DELETED",
-        resource_type="BudgetPlan",
-        resource_id=f"{catalog_id}/{year}",
-        status="SUCCESS",
-        ip_address=_ip(request),
-        user_agent=_ua(request),
-    ))
-    session.commit()

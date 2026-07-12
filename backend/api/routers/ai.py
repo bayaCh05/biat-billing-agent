@@ -137,7 +137,6 @@ def suggest_mitigation(body: MitigationRequest):
     ),
 )
 def accounting_check(
-    session: Session = Depends(get_session),
     _user=Depends(require_role("Admin")),
 ):
     components = get_components()
@@ -148,7 +147,7 @@ def accounting_check(
             components.journal_repository,
             components.cost_catalog,
         )
-        return agent.check_consistency(session)
+        return agent.check_consistency()
     finally:
         components.close()
 

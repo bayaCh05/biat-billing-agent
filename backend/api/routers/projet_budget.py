@@ -1,8 +1,6 @@
 """Project budget line endpoints."""
 from __future__ import annotations
 
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -65,7 +63,13 @@ def _to_out(lb) -> LigneBudgetOut:
     ),
     response_description="Liste des lignes avec indicateurs d'avancement budgétaire",
 )
-def list_budget(projet_id: str, session: Session = Depends(get_session)):
+async def list_budget(projet_id: str, session: Session = Depends(get_session)):
+    from src.storage.documents.service_bridge import list_budget_lines_mongo
+
+    mongo_lignes = await list_budget_lines_mongo(projet_id)
+    if mongo_lignes is not None:
+        return [_to_out(l) for l in mongo_lignes]
+
     from src.storage.orm_models_roadmap import LigneBudgetORM
 
     lignes = session.execute(
@@ -87,23 +91,14 @@ def list_budget(projet_id: str, session: Session = Depends(get_session)):
     response_description="Ligne budgétaire créée",
     responses={403: {"description": "Permissions insuffisantes"}},
 )
-def create_budget_line(
+async def create_budget_line(
     projet_id: str,
     body: LigneBudgetCreateRequest,
     _: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import LigneBudgetORM
+    from src.storage.documents.service_bridge import create_budget_line_native
 
-    lb = LigneBudgetORM(
-        projet_id=projet_id,
-        categorie=body.categorie,
-        montant_prevu=body.montant_prevu,
-        devise=body.devise,
-    )
-    session.add(lb)
-    session.commit()
-    session.refresh(lb)
+    lb = await create_budget_line_native(projet_id, body)
     return _to_out(lb)
 
 
@@ -118,21 +113,16 @@ def create_budget_line(
         404: {"description": "Ligne budgétaire non trouvée"},
     },
 )
-def update_budget_line(
+async def update_budget_line(
     ligne_id: str,
     body: LigneBudgetUpdateRequest,
     _: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import LigneBudgetORM
+    from src.storage.documents.service_bridge import update_budget_line_native
 
-    lb = session.get(LigneBudgetORM, UUID(ligne_id))
+    lb = await update_budget_line_native(ligne_id, body)
     if not lb:
         raise HTTPException(status_code=404, detail="Ligne budget non trouvée.")
-    if body.categorie is not None:    lb.categorie = body.categorie
-    if body.montant_prevu is not None: lb.montant_prevu = body.montant_prevu
-    session.commit()
-    session.refresh(lb)
     return _to_out(lb)
 
 
@@ -146,18 +136,15 @@ def update_budget_line(
         404: {"description": "Ligne budgétaire non trouvée"},
     },
 )
-def delete_budget_line(
+async def delete_budget_line(
     ligne_id: str,
     _: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import LigneBudgetORM
+    from src.storage.documents.service_bridge import delete_budget_line_native
 
-    lb = session.get(LigneBudgetORM, UUID(ligne_id))
-    if not lb:
+    found = await delete_budget_line_native(ligne_id)
+    if not found:
         raise HTTPException(status_code=404, detail="Ligne budget non trouvée.")
-    session.delete(lb)
-    session.commit()
 
 
 @router.get(
@@ -170,7 +157,13 @@ def delete_budget_line(
     ),
     response_description="Synthèse avec totaux et taux de consommation",
 )
-def budget_synthese(projet_id: str, session: Session = Depends(get_session)):
+async def budget_synthese(projet_id: str, session: Session = Depends(get_session)):
+    from src.storage.documents.service_bridge import budget_synthese_mongo
+
+    mongo_result = await budget_synthese_mongo(projet_id)
+    if mongo_result is not None:
+        return BudgetSyntheseOut(**mongo_result)
+
     from src.storage.orm_models_roadmap import LigneBudgetORM
 
     lignes = session.execute(

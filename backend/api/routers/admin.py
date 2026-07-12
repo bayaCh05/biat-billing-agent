@@ -1,18 +1,16 @@
 """Admin user management endpoints — ADMIN role only."""
 from __future__ import annotations
 
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.auth import generate_temp_password, get_current_user, hash_password, require_role
 from api.deps import get_session
 from api.limiter import limiter, limit
 from src.models.audit import AuditLogCreate
-from src.services.audit_service import log_action, _ip, _ua
+from src.services.audit_service import _ip, _ua
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -62,36 +60,23 @@ class UserOut(BaseModel):
     },
 )
 @limiter.limit(limit("5/minute"))
-def create_user(
+async def create_user(
     request: Request,
     body: UserCreateRequest,
     current_user: dict = Depends(get_current_user),
     _: dict = _ADMIN,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_users import UserORM
-
-    existing = session.execute(
-        select(UserORM).where(UserORM.email == body.email.lower().strip())
-    ).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=409, detail="Un utilisateur avec cet email existe déjà.")
+    from src.storage.documents.service_bridge import create_user_native, log_audit_event_native
 
     temp_pw = generate_temp_password()
-    user = UserORM(
-        nom=body.nom,
-        prenom=body.prenom,
-        email=body.email.lower().strip(),
-        hashed_password=hash_password(temp_pw),
-        role=body.role,
-        departement=body.departement,
-        is_first_login=True,
-        is_active=True,
+    user = await create_user_native(
+        nom=body.nom, prenom=body.prenom, email=body.email.lower().strip(),
+        hashed_password=hash_password(temp_pw), role=body.role, departement=body.departement,
     )
-    session.add(user)
-    session.flush()  # get user.id before log
+    if user is None:
+        raise HTTPException(status_code=409, detail="Un utilisateur avec cet email existe déjà.")
 
-    log_action(session, AuditLogCreate(
+    await log_audit_event_native(AuditLogCreate(
         user_id=current_user.get("sub"),
         user_email=current_user.get("email"),
         user_role=current_user.get("role"),
@@ -103,8 +88,6 @@ def create_user(
         ip_address=_ip(request),
         user_agent=_ua(request),
     ))
-    session.commit()
-    session.refresh(user)
 
     from src.services.email_service import send_temp_password_email
     try:
@@ -127,14 +110,19 @@ def create_user(
     response_description="Liste complète des utilisateurs avec rôles et statuts",
     responses={403: {"description": "Rôle Admin requis"}},
 )
-def list_users(
+async def list_users(
     _: dict = _ADMIN,
     session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_users import UserORM
     from api.auth import USERS
+    from src.storage.documents.service_bridge import list_users_mongo
 
-    db_users = session.execute(select(UserORM).order_by(UserORM.created_at.desc())).scalars().all()
+    mongo_users = await list_users_mongo()
+    if mongo_users is not None:
+        db_users = mongo_users
+    else:
+        from src.storage.orm_models_users import UserORM
+        db_users = session.execute(select(UserORM).order_by(UserORM.created_at.desc())).scalars().all()
     db_emails = {u.email for u in db_users}
 
     result = [
@@ -184,42 +172,31 @@ def list_users(
         404: {"description": "Utilisateur non trouvé"},
     },
 )
-def update_user(
+async def update_user(
     user_id: str,
     body: UserUpdateRequest,
     request: Request,
     current_user: dict = Depends(get_current_user),
     _: dict = _ADMIN,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_users import UserORM
+    from src.storage.documents.service_bridge import (
+        get_user_by_id_native, log_audit_event_native, update_user_admin_native,
+    )
 
-    user = session.get(UserORM, UUID(user_id))
-    if not user:
+    existing = await get_user_by_id_native(user_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé.")
+    before = {"role": existing.role, "is_active": existing.is_active, "departement": existing.departement}
 
-    before = {"role": user.role, "is_active": user.is_active, "departement": user.departement}
-    if body.role is not None:
-        user.role = body.role
-    if body.is_active is not None:
-        if body.is_active is False and user.role == "Admin":
-            active_admins = session.execute(
-                select(func.count(UserORM.id)).where(
-                    UserORM.role == "Admin",
-                    UserORM.is_active == True,  # noqa: E712
-                )
-            ).scalar_one()
-            if active_admins <= 1:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Impossible de désactiver le dernier administrateur actif.",
-                )
-        user.is_active = body.is_active
-    if body.departement is not None:
-        user.departement = body.departement
+    user = await update_user_admin_native(user_id, body.role, body.is_active, body.departement)
+    if user == "LAST_ADMIN":
+        raise HTTPException(
+            status_code=409,
+            detail="Impossible de désactiver le dernier administrateur actif.",
+        )
     after = {"role": user.role, "is_active": user.is_active, "departement": user.departement}
 
-    log_action(session, AuditLogCreate(
+    await log_audit_event_native(AuditLogCreate(
         user_id=current_user.get("sub"),
         user_email=current_user.get("email"),
         user_role=current_user.get("role"),
@@ -232,8 +209,6 @@ def update_user(
         ip_address=_ip(request),
         user_agent=_ua(request),
     ))
-    session.commit()
-    session.refresh(user)
     return UserOut(
         id=str(user.id), nom=user.nom, prenom=user.prenom, email=user.email,
         role=user.role, departement=user.departement, is_first_login=user.is_first_login,

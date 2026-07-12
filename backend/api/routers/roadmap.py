@@ -3,14 +3,11 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
 from api.auth import require_role
-from api.deps import get_session
 
 router = APIRouter(prefix="/roadmap", tags=["roadmap"])
 
@@ -161,22 +158,13 @@ async def list_roadmap_with_risks(
     response_description="Jalon créé avec son identifiant UUID",
     responses={403: {"description": "Rôle Chef de Projet ou Admin requis"}},
 )
-def create_roadmap_item(
+async def create_roadmap_item(
     body: RoadmapCreateRequest,
     _: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import FeuilleDeRouteORM
+    from src.storage.documents.service_bridge import create_roadmap_item_native
 
-    item = FeuilleDeRouteORM(
-        titre=body.titre, description=body.description,
-        date_debut=body.date_debut, date_fin=body.date_fin,
-        projet_id=body.projet_id, responsable_id=body.responsable_id,
-        statut=body.statut, priorite=body.priorite, annee=body.annee,
-    )
-    session.add(item)
-    session.commit()
-    session.refresh(item)
+    item = await create_roadmap_item_native(body)
     return _to_out(item)
 
 
@@ -191,26 +179,16 @@ def create_roadmap_item(
         404: {"description": "Jalon non trouvé"},
     },
 )
-def update_roadmap_item(
+async def update_roadmap_item(
     item_id: str,
     body: RoadmapUpdateRequest,
     _: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import FeuilleDeRouteORM
+    from src.storage.documents.service_bridge import update_roadmap_item_native
 
-    item = session.get(FeuilleDeRouteORM, UUID(item_id))
+    item = await update_roadmap_item_native(item_id, body)
     if not item:
         raise HTTPException(status_code=404, detail="Item non trouvé.")
-    if body.titre is not None:      item.titre = body.titre
-    if body.description is not None: item.description = body.description
-    if body.date_debut is not None:  item.date_debut = body.date_debut
-    if body.date_fin is not None:    item.date_fin = body.date_fin
-    if body.statut is not None:      item.statut = body.statut
-    if body.priorite is not None:    item.priorite = body.priorite
-    if body.projet_id is not None:   item.projet_id = body.projet_id
-    session.commit()
-    session.refresh(item)
     return _to_out(item)
 
 
@@ -224,15 +202,12 @@ def update_roadmap_item(
         404: {"description": "Jalon non trouvé"},
     },
 )
-def delete_roadmap_item(
+async def delete_roadmap_item(
     item_id: str,
     _: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import FeuilleDeRouteORM
+    from src.storage.documents.service_bridge import delete_roadmap_item_native
 
-    item = session.get(FeuilleDeRouteORM, UUID(item_id))
-    if not item:
+    found = await delete_roadmap_item_native(item_id)
+    if not found:
         raise HTTPException(status_code=404, detail="Item non trouvé.")
-    session.delete(item)
-    session.commit()

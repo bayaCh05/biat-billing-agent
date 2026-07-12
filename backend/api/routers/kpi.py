@@ -31,7 +31,13 @@ _DIRECTION_COMPTABLE = Depends(require_role("Admin", "Direction", "Comptable"))
     ),
     response_description="Compteurs et taux agrégés sur l'ensemble des factures",
 )
-def get_kpi(session: Session = Depends(get_session)):
+async def get_kpi(session: Session = Depends(get_session)):
+    from src.storage.documents.service_bridge import get_kpi_mongo
+
+    mongo_result = await get_kpi_mongo()
+    if mongo_result is not None:
+        return KpiOut(**mongo_result)
+
     from src.storage.orm_models import InvoiceORM
 
     # Single aggregation query: totals + FLAGGED + pending review counts + montants exposés
@@ -145,11 +151,24 @@ class AnalyticsKPIs(BaseModel):
         "basée sur la nature comptable (charge_type)."
     ),
 )
-def monthly_spend(
+async def monthly_spend(
     year: int = Query(2026, description="Année fiscale"),
     _: dict = _DIRECTION_COMPTABLE,
     session: Session = Depends(get_session),
 ):
+    from src.storage.documents.service_bridge import monthly_spend_mongo
+
+    mongo_result = await monthly_spend_mongo(year)
+    if mongo_result is not None:
+        by_month_m: dict[str, MonthlySpendItem] = {
+            r["month"]: MonthlySpendItem(**r) for r in mongo_result
+        }
+        months_m = [f"{year}-{m:02d}" for m in range(1, 13)]
+        return [
+            by_month_m.get(m, MonthlySpendItem(month=m, total_ht=0, total_ttc=0, invoice_count=0, opex=0, capex=0))
+            for m in months_m
+        ]
+
     from src.storage.orm_models import InvoiceORM
 
     rows = session.execute(
@@ -203,11 +222,17 @@ def monthly_spend(
         "sur les factures traitées (statuts terminaux). SQL GROUP BY issuer_name."
     ),
 )
-def by_supplier(
+async def by_supplier(
     year: int | None = Query(None, description="Filtrer par année (optionnel)"),
     _: dict = _DIRECTION_COMPTABLE,
     session: Session = Depends(get_session),
 ):
+    from src.storage.documents.service_bridge import by_supplier_mongo
+
+    mongo_result = await by_supplier_mongo(year)
+    if mongo_result is not None:
+        return [SupplierSpendItem(**r) for r in mongo_result]
+
     from src.storage.orm_models import InvoiceORM
 
     stmt = (
@@ -252,11 +277,17 @@ def by_supplier(
         "Inclut le pourcentage du total pour chaque poste."
     ),
 )
-def by_account(
+async def by_account(
     year: int | None = Query(None, description="Filtrer par année (optionnel)"),
     _: dict = _DIRECTION_COMPTABLE,
     session: Session = Depends(get_session),
 ):
+    from src.storage.documents.service_bridge import by_account_mongo
+
+    mongo_result = await by_account_mongo(year)
+    if mongo_result is not None:
+        return [AccountSpendItem(**r) for r in mongo_result]
+
     from src.storage.orm_models import InvoiceORM
 
     stmt = (
@@ -301,11 +332,17 @@ def by_account(
         "taux de rejet, taux de révision humaine, CAPEX/OPEX YTD et factures en attente."
     ),
 )
-def analytics_kpis(
+async def analytics_kpis(
     year: int = Query(2026, description="Année fiscale"),
     _: dict = _DIRECTION_COMPTABLE,
     session: Session = Depends(get_session),
 ):
+    from src.storage.documents.service_bridge import analytics_kpis_mongo
+
+    mongo_result = await analytics_kpis_mongo(year)
+    if mongo_result is not None:
+        return AnalyticsKPIs(**mongo_result)
+
     from src.storage.orm_models import InvoiceORM
 
     year_filter = func.strftime("%Y", InvoiceORM.invoice_date) == str(year)

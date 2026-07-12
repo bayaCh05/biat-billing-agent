@@ -163,33 +163,27 @@ async def security_summary(
     summary="Déverrouiller un compte",
     description="Déverrouille manuellement un compte verrouillé. Admin only.",
 )
-def unlock_account(
+async def unlock_account(
     user_id: str,
     _: dict = _ADMIN,
-    session: Session = Depends(get_session),
 ):
     from uuid import UUID
+    from fastapi import HTTPException
     from src.models.audit import AuditLogCreate
-    from src.services.audit_service import log_action
+    from src.storage.documents.service_bridge import log_audit_event_native, unlock_account_native
 
     try:
-        uid = UUID(user_id)
+        UUID(user_id)
     except ValueError:
-        from fastapi import HTTPException
         raise HTTPException(400, "UUID invalide.")
 
-    user = session.get(UserORM, uid)
+    user = await unlock_account_native(user_id)
     if not user:
-        from fastapi import HTTPException
         raise HTTPException(404, "Utilisateur non trouvé.")
 
-    user.failed_login_attempts = 0
-    user.locked_until = None
-    user.last_failed_login = None
-    log_action(session, AuditLogCreate(
+    await log_audit_event_native(AuditLogCreate(
         user_id=user_id, user_email=user.email,
         action="ACCOUNT_UNLOCKED", resource_type="User", resource_id=user_id,
         status="SUCCESS", detail="Compte déverrouillé manuellement par Admin",
     ))
-    session.commit()
     return {"message": f"Compte {user.email} déverrouillé."}

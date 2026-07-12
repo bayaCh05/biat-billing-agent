@@ -2,16 +2,13 @@
 from __future__ import annotations
 
 import logging
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.deps import get_session
 from src.storage.orm_models_notifications import NotificationORM
-from src.notifications.notification_service import sync_flagged_invoices
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -102,13 +99,12 @@ async def list_notifications(session: Session = Depends(get_session)):
     response_description="Notification mise à jour avec is_read=true",
     responses={404: {"description": "Notification non trouvée"}},
 )
-def mark_read(notif_id: str, session: Session = Depends(get_session)):
-    notif = session.get(NotificationORM, UUID(notif_id))
+async def mark_read(notif_id: str):
+    from src.storage.documents.service_bridge import mark_notification_read_native
+
+    notif = await mark_notification_read_native(notif_id)
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found.")
-    notif.is_read = True
-    session.commit()
-    session.refresh(notif)
     return _to_out(notif)
 
 
@@ -119,11 +115,8 @@ def mark_read(notif_id: str, session: Session = Depends(get_session)):
     description="Marque toutes les notifications non lues comme lues en une seule opération.",
     response_description="Compteur remis à zéro (count=0)",
 )
-def mark_all_read(session: Session = Depends(get_session)):
-    unread = session.execute(
-        select(NotificationORM).where(NotificationORM.is_read == False)  # noqa: E712
-    ).scalars().all()
-    for n in unread:
-        n.is_read = True
-    session.commit()
+async def mark_all_read():
+    from src.storage.documents.service_bridge import mark_all_notifications_read_native
+
+    await mark_all_notifications_read_native()
     return NotificationCountOut(count=0)

@@ -8,15 +8,14 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.auth import DEMO_AUTH_STATE, USERS, get_current_user, hash_password, verify_password
+from api.auth import DEMO_AUTH_STATE, USERS, get_current_user, hash_password, needs_rehash, verify_password
 from api.deps import get_session
 from api.limiter import limiter, limit
 from api.security import jwt_handler, account_lockout
 from src.models.audit import AuditLogCreate
-from src.services.audit_service import log_action, _ip, _ua
+from src.services.audit_service import _ip, _ua
 
 _log = logging.getLogger(__name__)
 
@@ -134,42 +133,6 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     )
 
 
-_MAX_ACTIVE_SESSIONS = int(os.getenv("MAX_ACTIVE_SESSIONS", "5"))
-
-
-def _register_active_token(jti: str, user_id: str, expires_at: datetime,
-                            ip: str | None, ua: str | None, db: Session) -> None:
-    from sqlalchemy import select as sa_select
-    from src.storage.orm_models_auth import ActiveTokenORM
-
-    # Révoquer les sessions les plus anciennes si le seuil est atteint
-    now = datetime.now(timezone.utc)
-    active = db.execute(
-        sa_select(ActiveTokenORM)
-        .where(
-            ActiveTokenORM.user_id == str(user_id),
-            ActiveTokenORM.revoked.is_(False),
-            ActiveTokenORM.expires_at > now,
-        )
-        .order_by(ActiveTokenORM.created_at.asc())
-    ).scalars().all()
-
-    if len(active) >= _MAX_ACTIVE_SESSIONS:
-        # Révoquer les plus anciennes pour rester sous le seuil
-        for old in active[: len(active) - _MAX_ACTIVE_SESSIONS + 1]:
-            old.revoked = True
-
-    db.merge(ActiveTokenORM(
-        jti=jti,
-        user_id=str(user_id),
-        created_at=now,
-        expires_at=expires_at,
-        ip_address=ip,
-        user_agent=(ua or "")[:100],
-        revoked=False,
-    ))
-
-
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post(
@@ -188,13 +151,16 @@ def _register_active_token(jti: str, user_id: str, expires_at: datetime,
     },
 )
 @limiter.limit(limit("5/minute"))
-def login(
+async def login(
     request: Request,
     response: Response,
     body: LoginRequest,
-    session: Session = Depends(get_session),
 ) -> LoginResponse:
-    from src.storage.orm_models_users import UserORM
+    from src.storage.documents.service_bridge import (
+        check_locked_native, create_user_native, get_user_by_email_native,
+        log_audit_event_native, record_login_failure_native, record_login_success_native,
+        register_active_token_native, update_user_password_native, update_user_role_native,
+    )
 
     email = body.email.lower().strip()
     ip = _ip(request)
@@ -206,23 +172,20 @@ def login(
 
         ldap_result = authenticate_ldap(email, body.password)
         if ldap_result is None:
-            log_action(session, AuditLogCreate(
+            await log_audit_event_native(AuditLogCreate(
                 user_email=email, action="LOGIN_FAILURE", resource_type="User",
                 status="FAILURE", detail=f"Échec LDAP depuis {ip}",
                 ip_address=ip, user_agent=ua,
             ))
-            session.commit()
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Email ou mot de passe incorrect.")
 
         role = ldap_result.get("role") or "Comptable"
 
         # Provisioning automatique : crée le compte local si inexistant
-        db_user = session.execute(
-            select(UserORM).where(UserORM.email == email)
-        ).scalar_one_or_none()
+        db_user = await get_user_by_email_native(email)
 
         if db_user is None:
-            db_user = UserORM(
+            db_user = await create_user_native(
                 nom=ldap_result.get("sn") or email.split("@")[0].capitalize(),
                 prenom=ldap_result.get("givenName") or "LDAP",
                 email=email,
@@ -230,21 +193,19 @@ def login(
                 hashed_password=hash_password(secrets.token_hex(32)),
                 role=role,
                 departement="IT",
-                is_first_login=False,
-                is_active=True,
             )
-            session.add(db_user)
-            session.flush()
+            if db_user is None:  # créé entre-temps par une requête concurrente
+                db_user = await get_user_by_email_native(email)
             _log.info("Compte provisionné depuis LDAP : %s (%s)", email, role)
         else:
             if not db_user.is_active:
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Compte désactivé.")
             # Le rôle LDAP fait autorité — mise à jour si nécessaire
             if role and db_user.role != role:
+                await update_user_role_native(str(db_user.id), role)
                 db_user.role = role
 
-        account_lockout.record_success(db_user, session)
-        db_user.last_login_ip = ip
+        await record_login_success_native(str(db_user.id), ip)
 
         access_token = jwt_handler.create_access_token(
             user_id=str(db_user.id),
@@ -262,17 +223,14 @@ def login(
 
         acc_payload = jwt_handler.decode_token_raw(access_token) or {}
         expires_at = datetime.now(timezone.utc) + timedelta(hours=jwt_handler.ACCESS_TOKEN_EXPIRE_HOURS)
-        _register_active_token(
-            acc_payload.get("jti", ""), str(db_user.id), expires_at, ip, ua, session
-        )
+        await register_active_token_native(acc_payload.get("jti", ""), str(db_user.id), expires_at, ip, ua)
 
-        log_action(session, AuditLogCreate(
+        await log_audit_event_native(AuditLogCreate(
             user_id=str(db_user.id), user_email=db_user.email, user_role=db_user.role,
             action="LOGIN_SUCCESS", resource_type="User", resource_id=str(db_user.id),
             status="SUCCESS", detail=f"Connexion LDAP depuis {ip}",
             ip_address=ip, user_agent=ua,
         ))
-        session.commit()
         _set_refresh_cookie(response, refresh_token)
 
         return LoginResponse(
@@ -284,28 +242,26 @@ def login(
         )
 
     # ── Authentification locale ────────────────────────────────────────────────
-    db_user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
+    db_user = await get_user_by_email_native(email)
 
     if db_user:
         # Check account status
         if not db_user.is_active:
-            log_action(session, AuditLogCreate(
+            await log_audit_event_native(AuditLogCreate(
                 user_email=email, action="LOGIN_FAILURE", resource_type="User",
                 resource_id=str(db_user.id), status="FAILURE",
                 detail="Compte désactivé", ip_address=ip, user_agent=ua,
             ))
-            session.commit()
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Compte désactivé.")
 
         # Check lockout
-        locked, remaining = account_lockout.check_locked(db_user)
+        locked, remaining = check_locked_native(db_user)
         if locked:
-            log_action(session, AuditLogCreate(
+            await log_audit_event_native(AuditLogCreate(
                 user_id=str(db_user.id), user_email=email, action="LOGIN_FAILURE",
                 resource_type="User", resource_id=str(db_user.id), status="FAILURE",
                 detail=f"Compte verrouillé — {remaining} min restantes", ip_address=ip, user_agent=ua,
             ))
-            session.commit()
             raise HTTPException(
                 status.HTTP_423_LOCKED,
                 detail=f"Compte verrouillé. Réessayez dans {remaining} minute(s).",
@@ -313,22 +269,25 @@ def login(
 
         # Verify password
         if not verify_password(body.password, db_user.hashed_password):
-            attempts = account_lockout.record_failed(db_user, session)
+            attempts = await record_login_failure_native(db_user)
             remaining_attempts = max(0, account_lockout.MAX_ATTEMPTS - attempts)
-            log_action(session, AuditLogCreate(
+            await log_audit_event_native(AuditLogCreate(
                 user_id=str(db_user.id), user_email=email, action="LOGIN_FAILURE",
                 resource_type="User", resource_id=str(db_user.id), status="FAILURE",
                 detail=f"Tentative #{attempts} depuis {ip}", ip_address=ip, user_agent=ua,
             ))
-            session.commit()
             detail = "Email ou mot de passe incorrect."
             if remaining_attempts == 0:
                 detail = f"Compte verrouillé après {account_lockout.MAX_ATTEMPTS} tentatives. Réessayez dans {account_lockout.LOCKOUT_MINUTES} min."
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=detail)
 
         # Success
-        account_lockout.record_success(db_user, session)
-        db_user.last_login_ip = ip
+        await record_login_success_native(str(db_user.id), ip)
+
+        # Lazy migration bcrypt → argon2id (transparent to the user)
+        if needs_rehash(db_user.hashed_password):
+            await update_user_password_native(str(db_user.id), hash_password(body.password), db_user.is_first_login)
+            _log.info("Password rehashed to argon2id for user %s", email)
 
         access_token = jwt_handler.create_access_token(
             user_id=str(db_user.id),
@@ -346,16 +305,13 @@ def login(
         # Decode jti for tracking
         acc_payload = jwt_handler.decode_token_raw(access_token) or {}
         expires_at = datetime.now(timezone.utc) + timedelta(hours=jwt_handler.ACCESS_TOKEN_EXPIRE_HOURS)
-        _register_active_token(
-            acc_payload.get("jti", ""), str(db_user.id), expires_at, ip, ua, session
-        )
+        await register_active_token_native(acc_payload.get("jti", ""), str(db_user.id), expires_at, ip, ua)
 
-        log_action(session, AuditLogCreate(
+        await log_audit_event_native(AuditLogCreate(
             user_id=str(db_user.id), user_email=db_user.email, user_role=db_user.role,
             action="LOGIN_SUCCESS", resource_type="User", resource_id=str(db_user.id),
             status="SUCCESS", detail=f"Connexion depuis {ip}", ip_address=ip, user_agent=ua,
         ))
-        session.commit()
         _set_refresh_cookie(response, refresh_token)
 
         return LoginResponse(
@@ -375,12 +331,11 @@ def login(
             email=email,
         )
         refresh_token = jwt_handler.create_refresh_token(user_id=f"demo:{email}")
-        log_action(session, AuditLogCreate(
+        await log_audit_event_native(AuditLogCreate(
             user_email=email, user_role=demo["role"],
             action="LOGIN_SUCCESS", resource_type="User", status="SUCCESS",
             detail=f"Compte démo depuis {ip}", ip_address=ip, user_agent=ua,
         ))
-        session.commit()
         _set_refresh_cookie(response, refresh_token)
         return LoginResponse(
             access_token=access_token,
@@ -390,11 +345,10 @@ def login(
             is_first_login=DEMO_AUTH_STATE.get(email, {}).get("is_first_login", False),
         )
 
-    log_action(session, AuditLogCreate(
+    await log_audit_event_native(AuditLogCreate(
         user_email=email, action="LOGIN_FAILURE", resource_type="User",
         status="FAILURE", detail=f"Utilisateur inconnu depuis {ip}", ip_address=ip, user_agent=ua,
     ))
-    session.commit()
     raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Email ou mot de passe incorrect.")
 
 
@@ -405,10 +359,9 @@ def login(
     description="Émet un nouveau access_token à partir du refresh_token (cookie httpOnly ou corps).",
 )
 @limiter.limit(limit("10/minute"))
-def refresh_token(
+async def refresh_token(
     request: Request,
     response: Response,
-    session: Session = Depends(get_session),
     cookie_refresh: str | None = Cookie(default=None, alias=_REFRESH_COOKIE),
 ):
     # Accept refresh token from cookie OR from JSON body
@@ -416,8 +369,7 @@ def refresh_token(
     try:
         data = request.scope.get("_body_cache")
         if data is None:
-            import asyncio
-            body_bytes = asyncio.get_event_loop().run_until_complete(request.body())
+            body_bytes = await request.body()
             request.scope["_body_cache"] = body_bytes
             data = body_bytes
         if data:
@@ -430,7 +382,7 @@ def refresh_token(
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token manquant.")
 
-    payload = jwt_handler.verify_refresh_token(token, db=session)
+    payload = await jwt_handler.verify_refresh_token(token)
     if not payload:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token invalide ou expiré.")
 
@@ -441,10 +393,10 @@ def refresh_token(
     email = ""
     extra: dict = {}
     try:
-        from src.storage.orm_models_users import UserORM
+        from src.storage.documents.service_bridge import get_user_by_id_native
         from uuid import UUID
-        uid = UUID(user_id)
-        db_user = session.get(UserORM, uid)
+        UUID(user_id)  # valide le format — lève ValueError pour les comptes démo
+        db_user = await get_user_by_id_native(user_id)
         if db_user and db_user.is_active:
             role = db_user.role
             email = db_user.email
@@ -459,13 +411,13 @@ def refresh_token(
     expires_at = datetime.now(timezone.utc) + timedelta(hours=jwt_handler.ACCESS_TOKEN_EXPIRE_HOURS)
     ip = _ip(request)
     ua = _ua(request)
-    _register_active_token(acc_payload.get("jti", ""), user_id, expires_at, ip, ua, session)
+    from src.storage.documents.service_bridge import log_audit_event_native, register_active_token_native
+    await register_active_token_native(acc_payload.get("jti", ""), user_id, expires_at, ip, ua)
 
-    log_action(session, AuditLogCreate(
+    await log_audit_event_native(AuditLogCreate(
         user_id=user_id, action="TOKEN_REFRESHED", resource_type="User",
         status="SUCCESS", detail=f"Token renouvelé depuis {ip}", ip_address=ip, user_agent=ua,
     ))
-    session.commit()
     return RefreshResponse(access_token=new_access)
 
 
@@ -474,13 +426,14 @@ def refresh_token(
     summary="Déconnexion",
     description="Révoque l'access_token courant et le refresh_token cookie.",
 )
-def logout(
+async def logout(
     request: Request,
     response: Response,
-    session: Session = Depends(get_session),
     current_user: dict = Depends(get_current_user),
     cookie_refresh: str | None = Cookie(default=None, alias=_REFRESH_COOKIE),
 ):
+    from src.storage.documents.service_bridge import log_audit_event_native, revoke_active_token_native
+
     ip = _ip(request)
     ua = _ua(request)
     user_id = current_user.get("sub")
@@ -488,29 +441,21 @@ def logout(
     # Revoke access token
     jti = current_user.get("jti")
     if jti:
-        jwt_handler.revoke_token(jti, "logout", user_id, session)
-        # Mark in active_tokens table
-        try:
-            from src.storage.orm_models_auth import ActiveTokenORM
-            active = session.get(ActiveTokenORM, jti)
-            if active:
-                active.revoked = True
-        except Exception:
-            pass
+        await jwt_handler.revoke_token(jti, "logout", user_id)
+        await revoke_active_token_native(jti)
 
     # Revoke refresh token cookie
     if cookie_refresh:
-        ref_payload = jwt_handler.verify_refresh_token(cookie_refresh)
+        ref_payload = await jwt_handler.verify_refresh_token(cookie_refresh)
         if ref_payload:
-            jwt_handler.revoke_token(ref_payload["jti"], "logout", user_id, session)
+            await jwt_handler.revoke_token(ref_payload["jti"], "logout", user_id)
 
-    log_action(session, AuditLogCreate(
+    await log_audit_event_native(AuditLogCreate(
         user_id=user_id, user_email=current_user.get("email"),
         user_role=current_user.get("role"),
         action="LOGOUT", resource_type="User", resource_id=user_id,
         status="SUCCESS", detail=f"Déconnexion depuis {ip}", ip_address=ip, user_agent=ua,
     ))
-    session.commit()
 
     # Clear cookie
     response.delete_cookie(_REFRESH_COOKIE, path="/api/auth")
@@ -522,33 +467,43 @@ def logout(
     summary="Sessions actives",
     description="Retourne les tokens actifs de l'utilisateur courant.",
 )
-def list_sessions(
+async def list_sessions(
     current_user: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_auth import ActiveTokenORM
-    from sqlalchemy import select as sa_select
+    from src.storage.documents.service_bridge import list_active_sessions_mongo
 
     user_id = str(current_user.get("sub", ""))
     current_jti = current_user.get("jti", "")
-    now = datetime.now(timezone.utc)
 
-    rows = session.execute(
-        sa_select(ActiveTokenORM).where(
-            ActiveTokenORM.user_id == user_id,
-            ActiveTokenORM.revoked == False,  # noqa: E712
-            ActiveTokenORM.expires_at > now,
-        ).order_by(ActiveTokenORM.created_at.desc())
-    ).scalars().all()
+    mongo_rows = await list_active_sessions_mongo(user_id)
+    if mongo_rows is not None:
+        rows = mongo_rows
+    else:
+        from src.storage.orm_models_auth import ActiveTokenORM
+        from sqlalchemy import select as sa_select
+
+        now = datetime.now(timezone.utc)
+        rows = session.execute(
+            sa_select(ActiveTokenORM).where(
+                ActiveTokenORM.user_id == user_id,
+                ActiveTokenORM.revoked == False,  # noqa: E712
+                ActiveTokenORM.expires_at > now,
+            ).order_by(ActiveTokenORM.created_at.desc())
+        ).scalars().all()
+
+    def _jti(r) -> str:
+        # ActiveTokenORM.jti (SQLAlchemy) vs ActiveTokenDocument.id (Beanie).
+        return r.jti if hasattr(r, "jti") else r.id
 
     return {
         "sessions": [
             {
-                "jti": r.jti[:8],
+                "jti": _jti(r)[:8],
                 "created_at": r.created_at.isoformat(),
                 "expires_at": r.expires_at.isoformat(),
                 "ip_address": r.ip_address,
-                "is_current": r.jti == current_jti,
+                "is_current": _jti(r) == current_jti,
             }
             for r in rows
         ]
@@ -560,14 +515,14 @@ def list_sessions(
     summary="Révoquer une session",
     description="Révoque un token actif par préfixe JTI (8 premiers caractères).",
 )
-def revoke_session(
+async def revoke_session(
     request: Request,
     body: RevokeSessionRequest,
     current_user: dict = Depends(get_current_user),
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_auth import ActiveTokenORM
-    from sqlalchemy import select as sa_select
+    from src.storage.documents.service_bridge import (
+        log_audit_event_native, revoke_active_tokens_by_prefix_native,
+    )
 
     jti_prefix = body.jti_prefix.strip()
     if len(jti_prefix) < 8:
@@ -576,27 +531,13 @@ def revoke_session(
     user_id = str(current_user.get("sub", ""))
     is_admin = current_user.get("role") == "Admin"
 
-    rows = session.execute(
-        sa_select(ActiveTokenORM).where(
-            ActiveTokenORM.jti.startswith(jti_prefix),
-            ActiveTokenORM.revoked == False,  # noqa: E712
-        )
-    ).scalars().all()
+    revoked_count = await revoke_active_tokens_by_prefix_native(jti_prefix, user_id, is_admin)
 
-    revoked_count = 0
-    for tok in rows:
-        if not is_admin and tok.user_id != user_id:
-            continue
-        tok.revoked = True
-        jwt_handler.revoke_token(tok.jti, "session_revoked", user_id, session)
-        revoked_count += 1
-
-    log_action(session, AuditLogCreate(
+    await log_audit_event_native(AuditLogCreate(
         user_id=user_id, action="SESSION_REVOKED", resource_type="User",
         status="SUCCESS", detail=f"{revoked_count} session(s) révoquée(s) — prefix {jti_prefix}",
         ip_address=_ip(request), user_agent=_ua(request),
     ))
-    session.commit()
     return {"revoked": revoked_count}
 
 
@@ -664,14 +605,14 @@ async def change_password(
 
 @router.post("/change-password/request-otp", summary="Demander un OTP")
 @limiter.limit(limit("3/minute"))
-def request_otp(
+async def request_otp(
     request: Request,
     current_user: dict = Depends(get_current_user),
-    session: Session = Depends(get_session),
 ):
     """Generate and email a 6-digit OTP. Demo accounts skip email entirely."""
-    from src.storage.orm_models_users import UserORM
-    from src.services.password_verification_service import generate_otp
+    from src.storage.documents.service_bridge import (
+        generate_otp_native, get_user_by_email_native, log_audit_event_native,
+    )
 
     email = current_user.get("email")
     if not email:
@@ -681,29 +622,27 @@ def request_otp(
 
     # Demo accounts cannot receive real emails — skip OTP entirely
     if _is_demo_account(user_id, email):
-        log_action(session, AuditLogCreate(
+        await log_audit_event_native(AuditLogCreate(
             user_email=email, action="OTP_REQUESTED", resource_type="User",
             status="SUCCESS", detail="OTP ignoré — compte de démonstration",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
-        session.commit()
         return {
             "skip_otp": True,
             "message": "Compte de démonstration — vérification email ignorée.",
             "masked_email": _mask_email(email),
         }
 
-    user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
+    user = await get_user_by_email_native(email)
     if user:
         purpose = "FIRST_LOGIN" if user.is_first_login else "VOLUNTARY_CHANGE"
-        generate_otp(session, user, purpose)
-        log_action(session, AuditLogCreate(
+        await generate_otp_native(user, purpose)
+        await log_audit_event_native(AuditLogCreate(
             user_id=str(user.id), user_email=user.email, user_role=user.role,
             action="OTP_REQUESTED", resource_type="User", resource_id=str(user.id),
             status="SUCCESS", detail=f"OTP demandé (purpose={purpose})",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
-        session.commit()
         return {
             "skip_otp": False,
             "message": "Code de vérification envoyé par email.",
@@ -809,20 +748,21 @@ async def confirm_otp(
 
 @router.post("/forgot-password", summary="Demander un lien de réinitialisation")
 @limiter.limit(limit("3/minute"))
-def forgot_password(
+async def forgot_password(
     request: Request,
     body: ForgotPasswordRequest,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_users import UserORM
-    from src.services.password_verification_service import generate_reset_link, generate_demo_reset_link
+    from src.services.password_verification_service import generate_demo_reset_link
+    from src.storage.documents.service_bridge import (
+        generate_reset_link_native, get_user_by_email_native, log_audit_event_native,
+    )
 
     email = body.email.lower().strip()
-    user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
+    user = await get_user_by_email_native(email)
 
     if user and user.is_active:
-        generate_reset_link(session, user, "FORGOT_PASSWORD")
-        log_action(session, AuditLogCreate(
+        await generate_reset_link_native(user, "FORGOT_PASSWORD")
+        await log_audit_event_native(AuditLogCreate(
             user_id=str(user.id), user_email=user.email, user_role=user.role,
             action="PASSWORD_RESET_REQUESTED", resource_type="User", resource_id=str(user.id),
             status="SUCCESS", detail="Lien de réinitialisation envoyé",
@@ -830,21 +770,20 @@ def forgot_password(
         ))
     elif email in USERS:
         generate_demo_reset_link(email, "FORGOT_PASSWORD")
-        log_action(session, AuditLogCreate(
+        await log_audit_event_native(AuditLogCreate(
             user_email=email, user_role=USERS[email]["role"],
             action="PASSWORD_RESET_REQUESTED", resource_type="User", resource_id=email,
             status="SUCCESS", detail="Lien de réinitialisation démo envoyé",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
     else:
-        log_action(session, AuditLogCreate(
+        await log_audit_event_native(AuditLogCreate(
             user_email=email, action="PASSWORD_RESET_REQUESTED",
             resource_type="User", status="FAILURE",
             detail="Email non trouvé ou compte inactif",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
 
-    session.commit()
     return {"message": "Si cet email est associé à un compte actif, un lien de réinitialisation a été envoyé."}
 
 

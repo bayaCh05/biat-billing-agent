@@ -4,15 +4,12 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user, require_role
 from api.deps import get_session
 from api.schemas import InvoiceSummary, ReviewActionRequest, ActionResultOut
-from src.models.audit import AuditLogCreate
-from src.models.enums import InvoiceStatus
-from src.services.audit_service import log_action, _ip, _ua
 from src.storage.repository import InvoiceRepository
 
 router = APIRouter(prefix="/review", tags=["invoices"])
@@ -66,39 +63,24 @@ async def get_review_queue(session: Session = Depends(get_session)):
     response_description="Confirmation avec nouveau statut VALIDATED",
     responses={404: {"description": "Facture non trouvée"}},
 )
-def approve(
+async def approve(
     invoice_id: str,
-    request: Request,
     body: ReviewActionRequest = ReviewActionRequest(),
     current_user: dict = Depends(get_current_user),
     _: None = _COMPTABLE_OR_ADMIN,
-    session: Session = Depends(get_session),
 ):
-    repo = InvoiceRepository(session)
-    inv = _get_or_404(repo, invoice_id)
-    for flag in inv.flags:
-        if not flag.resolved:
-            flag.resolved = True
-            flag.resolved_by = "human"
-    inv.human_review_required = False
-    inv.human_review_notes = body.notes or None
-    inv.status = InvoiceStatus.VALIDATED
-    repo.save(inv)
+    from src.storage.documents.service_bridge import approve_invoice_native
 
-    log_action(session, AuditLogCreate(
-        user_id=current_user.get("sub"),
-        user_email=current_user.get("email"),
-        user_role=current_user.get("role"),
-        action="APPROVE",
-        resource_type="InvoiceRecord",
-        resource_id=invoice_id,
-        status="SUCCESS",
-        detail=body.notes or None,
-        ip_address=_ip(request),
-        user_agent=_ua(request),
-    ))
-    session.commit()
-    return ActionResultOut(id=invoice_id, action="approved", new_status=inv.status.value)
+    try:
+        UUID(invoice_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid UUID")
+
+    doc = await approve_invoice_native(invoice_id, body.notes or None, current_user)
+    if doc is None:
+        raise HTTPException(404, "Invoice not found")
+
+    return ActionResultOut(id=invoice_id, action="approved", new_status=doc.status)
 
 
 @router.post(
@@ -112,43 +94,21 @@ def approve(
     response_description="Confirmation avec nouveau statut REJECTED",
     responses={404: {"description": "Facture non trouvée"}},
 )
-def reject(
+async def reject(
     invoice_id: str,
-    request: Request,
     body: ReviewActionRequest = ReviewActionRequest(),
     current_user: dict = Depends(get_current_user),
     _: None = _COMPTABLE_OR_ADMIN,
-    session: Session = Depends(get_session),
 ):
-    repo = InvoiceRepository(session)
-    inv = _get_or_404(repo, invoice_id)
-    inv.status = InvoiceStatus.REJECTED
-    inv.human_review_required = False
-    inv.human_review_notes = body.notes or None
-    repo.save(inv)
+    from src.storage.documents.service_bridge import reject_invoice_native
 
-    log_action(session, AuditLogCreate(
-        user_id=current_user.get("sub"),
-        user_email=current_user.get("email"),
-        user_role=current_user.get("role"),
-        action="REJECT",
-        resource_type="InvoiceRecord",
-        resource_id=invoice_id,
-        status="SUCCESS",
-        detail=body.notes or None,
-        ip_address=_ip(request),
-        user_agent=_ua(request),
-    ))
-    session.commit()
-    return ActionResultOut(id=invoice_id, action="rejected", new_status=inv.status.value)
-
-
-def _get_or_404(repo: InvoiceRepository, invoice_id: str):
     try:
-        uid = UUID(invoice_id)
+        UUID(invoice_id)
     except ValueError:
         raise HTTPException(400, "Invalid UUID")
-    inv = repo.get_by_id(uid)
-    if not inv:
+
+    doc = await reject_invoice_native(invoice_id, body.notes or None, current_user)
+    if doc is None:
         raise HTTPException(404, "Invoice not found")
-    return inv
+
+    return ActionResultOut(id=invoice_id, action="rejected", new_status=doc.status)

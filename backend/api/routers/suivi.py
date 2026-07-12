@@ -78,13 +78,21 @@ def _build_ageing(invoices, today: date) -> AgeingBucketOut:
     ),
     response_description="Snapshot complet avec buckets d'ageing et listes de factures",
 )
-def get_snapshot(session: Session = Depends(get_session)):
-    repo = InvoiceRepository(session)
+async def get_snapshot(session: Session = Depends(get_session)):
+    from src.storage.documents.service_bridge import get_suivi_invoices_mongo
+
     today = datetime.now(tz=timezone.utc).date()
 
-    pending_payment = repo.get_pending_payment()
-    pending_collection = repo.get_pending_collection()
-    overdue = repo.get_overdue()
+    mongo_result = await get_suivi_invoices_mongo()
+    if mongo_result is not None:
+        pending_payment = mongo_result["pending_payment"]
+        pending_collection = mongo_result["pending_collection"]
+        overdue = mongo_result["overdue"]
+    else:
+        repo = InvoiceRepository(session)
+        pending_payment = repo.get_pending_payment()
+        pending_collection = repo.get_pending_collection()
+        overdue = repo.get_overdue()
 
     total_payables = sum(inv.amount_ttc.value or 0 for inv in pending_payment)
     total_receivables = sum(inv.amount_ttc.value or 0 for inv in pending_collection)

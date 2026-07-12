@@ -29,7 +29,13 @@ def _phase_status(status: str, consumed_jh: float) -> str:
     ),
     response_description="Liste de projets avec budgets JH et TND, consommation et statut",
 )
-def list_projects(session: Session = Depends(get_session)):
+async def list_projects(session: Session = Depends(get_session)):
+    from src.storage.documents.service_bridge import list_projects_mongo
+
+    mongo_result = await list_projects_mongo()
+    if mongo_result is not None:
+        return [ProjectOut(**p) for p in mongo_result]
+
     chartes = session.execute(
         select(CharteProjetORM).order_by(CharteProjetORM.valid_from.desc())
     ).scalars().all()
@@ -64,7 +70,15 @@ def list_projects(session: Session = Depends(get_session)):
     response_description="Projet avec budget JH, consommation et montants TND",
     responses={404: {"description": "Projet non trouvé"}},
 )
-def get_project(project_id: str, session: Session = Depends(get_session)):
+async def get_project(project_id: str, session: Session = Depends(get_session)):
+    from src.storage.documents.service_bridge import get_project_mongo
+
+    mongo_result = await get_project_mongo(project_id)
+    if mongo_result is not None:
+        if not mongo_result:
+            raise HTTPException(status_code=404, detail="Projet non trouvé.")
+        return ProjectOut(**mongo_result)
+
     charte = session.execute(
         select(CharteProjetORM).where(CharteProjetORM.project_id == project_id)
     ).scalar_one_or_none()
@@ -95,7 +109,20 @@ def get_project(project_id: str, session: Session = Depends(get_session)):
     ),
     response_description="Liste des phases avec avancement JH",
 )
-def list_phases(project_id: str, session: Session = Depends(get_session)):
+async def list_phases(project_id: str, session: Session = Depends(get_session)):
+    from src.storage.documents.service_bridge import list_phases_mongo
+
+    mongo_phases = await list_phases_mongo(project_id)
+    if mongo_phases is not None:
+        return [
+            ProjectPhaseOut(
+                id=p.id, project_id=p.project_id, name=p.name,
+                planned_jh=p.planned_jh, consumed_jh=p.consumed_jh,
+                status=_phase_status(p.status, p.consumed_jh),
+            )
+            for p in mongo_phases
+        ]
+
     phases = session.execute(
         select(PhaseORM)
         .where(PhaseORM.project_id == project_id)

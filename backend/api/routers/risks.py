@@ -2,15 +2,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
-from uuid import UUID
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, model_validator
-from sqlalchemy.orm import Session
 
 from api.auth import require_role
-from api.deps import get_session
 
 router = APIRouter(prefix="/risks", tags=["risks"])
 
@@ -102,25 +99,6 @@ def _to_out(r) -> RisqueOut:
     )
 
 
-def _log_audit(session: Session, user: dict, action: str, resource_id: str, detail: str = "") -> None:
-    try:
-        from src.storage.orm_models_audit import AuditLogORM
-        log = AuditLogORM(
-            user_id=user.get("sub", ""),
-            user_email=user.get("email", ""),
-            user_role=user.get("role", ""),
-            action=action,
-            resource_type="RISK",
-            resource_id=resource_id,
-            entity_id=resource_id,
-            status="SUCCESS",
-            detail=detail,
-        )
-        session.add(log)
-    except Exception:
-        pass
-
-
 @router.get("", response_model=list[RisqueOut])
 async def list_risks(
     projet_id: str | None = Query(None),
@@ -199,106 +177,37 @@ async def risks_for_project(projet_id: str):
 
 
 @router.post("", response_model=RisqueOut, status_code=status.HTTP_201_CREATED)
-def create_risk(
+async def create_risk(
     body: RisqueCreateRequest,
     user: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import RisqueORM
-    from src.services.risk_service import calculate_criticite
+    from src.storage.documents.service_bridge import create_risk_native
 
-    criticite = calculate_criticite(body.probabilite, body.impact)
-    r = RisqueORM(
-        titre=body.titre,
-        description=body.description,
-        type_risque=body.type_risque,
-        probabilite=body.probabilite,
-        impact=body.impact,
-        niveau_criticite=criticite,
-        statut=body.statut,
-        plan_mitigation=body.plan_mitigation,
-        responsable_id=body.responsable_id,
-        date_identification=body.date_identification,
-        date_echeance_mitigation=body.date_echeance_mitigation,
-        feuille_route_id=UUID(body.feuille_route_id) if body.feuille_route_id else None,
-        projet_id=body.projet_id,
-        created_by=user.get("email", ""),
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-    session.add(r)
-    session.flush()
-    _log_audit(session, user, "RISK_CREATED", str(r.id), f"Risque créé: {r.titre}")
-    session.commit()
-    session.refresh(r)
+    r = await create_risk_native(body, user)
     return _to_out(r)
 
 
 @router.patch("/{risk_id}", response_model=RisqueOut)
-def update_risk(
+async def update_risk(
     risk_id: str,
     body: RisqueUpdateRequest,
     user: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import RisqueORM
-    from src.services.risk_service import calculate_criticite
+    from src.storage.documents.service_bridge import update_risk_native
 
-    r = session.get(RisqueORM, UUID(risk_id))
+    r = await update_risk_native(risk_id, body, user)
     if not r:
         raise HTTPException(status_code=404, detail="Risque non trouvé.")
-
-    old_statut = r.statut
-    recompute = False
-
-    if body.titre is not None:         r.titre = body.titre
-    if body.description is not None:   r.description = body.description
-    if body.type_risque is not None:   r.type_risque = body.type_risque
-    if body.plan_mitigation is not None: r.plan_mitigation = body.plan_mitigation
-    if body.responsable_id is not None: r.responsable_id = body.responsable_id
-    if body.date_echeance_mitigation is not None: r.date_echeance_mitigation = body.date_echeance_mitigation
-    if body.probabilite is not None:
-        r.probabilite = body.probabilite
-        recompute = True
-    if body.impact is not None:
-        r.impact = body.impact
-        recompute = True
-    if body.statut is not None:
-        r.statut = body.statut
-        if body.statut == "CLOTURE" and not r.date_cloture:
-            r.date_cloture = date.today()
-
-    if recompute:
-        r.niveau_criticite = calculate_criticite(r.probabilite, r.impact)
-
-    r.updated_at = datetime.now(timezone.utc)
-
-    if body.statut and body.statut != old_statut:
-        _log_audit(session, user, "RISK_STATUS_CHANGED", risk_id,
-                   f"{old_statut} → {body.statut}")
-    elif body.plan_mitigation is not None:
-        _log_audit(session, user, "RISK_MITIGATION_UPDATED", risk_id, r.titre)
-    if body.statut == "CLOTURE":
-        _log_audit(session, user, "RISK_CLOSED", risk_id, r.titre)
-
-    session.commit()
-    session.refresh(r)
     return _to_out(r)
 
 
 @router.delete("/{risk_id}", status_code=status.HTTP_204_NO_CONTENT)
-def close_risk(
+async def close_risk(
     risk_id: str,
     user: dict = _EDIT,
-    session: Session = Depends(get_session),
 ):
-    from src.storage.orm_models_roadmap import RisqueORM
+    from src.storage.documents.service_bridge import close_risk_native
 
-    r = session.get(RisqueORM, UUID(risk_id))
+    r = await close_risk_native(risk_id, user)
     if not r:
         raise HTTPException(status_code=404, detail="Risque non trouvé.")
-    r.statut = "CLOTURE"
-    r.date_cloture = date.today()
-    r.updated_at = datetime.now(timezone.utc)
-    _log_audit(session, user, "RISK_CLOSED", risk_id, r.titre)
-    session.commit()

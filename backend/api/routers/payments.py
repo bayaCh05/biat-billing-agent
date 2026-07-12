@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from api.auth import get_current_user, require_role
+from api.auth import require_role
 from api.deps import get_session
 
 router = APIRouter(prefix="/payments", tags=["payments"])
@@ -58,7 +58,13 @@ class MarkPaidRequest(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/installments/summary", response_model=InstallmentSummary)
-def get_summary(session: Session = Depends(get_session), _=_VIEW):
+async def get_summary(session: Session = Depends(get_session), _=_VIEW):
+    from src.storage.documents.service_bridge import get_installments_summary_mongo
+
+    mongo_result = await get_installments_summary_mongo()
+    if mongo_result is not None:
+        return InstallmentSummary(**mongo_result)
+
     today = date.today()
     rows = session.execute(text(
         "SELECT status, base_amount, current_amount, due_date "
@@ -89,11 +95,17 @@ def get_summary(session: Session = Depends(get_session), _=_VIEW):
 
 
 @router.get("/installments", response_model=list[InstallmentOut])
-def list_installments(
+async def list_installments(
     status: list[str] = Query(default=[]),
     session: Session = Depends(get_session),
     _=_VIEW,
 ):
+    from src.storage.documents.service_bridge import list_installments_mongo
+
+    mongo_result = await list_installments_mongo(status)
+    if mongo_result is not None:
+        return [InstallmentOut(**r) for r in mongo_result]
+
     today = date.today()
 
     rows = session.execute(text("""
@@ -154,31 +166,17 @@ def list_installments(
 
 
 @router.patch("/installments/{installment_id}/mark-paid")
-def mark_paid(
+async def mark_paid(
     installment_id: str,
     body: MarkPaidRequest,
-    session: Session = Depends(get_session),
     _=_EDIT,
 ):
-    _log.info("Marking installment paid: %s", installment_id)
-    row = session.execute(text(
-        "SELECT id, status FROM payment_installments WHERE id = :id"
-    ), {"id": installment_id}).mappings().first()
-    if not row:
-        raise HTTPException(404, "Échéance introuvable.")
-    if row["status"] == "PAID":
-        raise HTTPException(400, "Échéance déjà marquée comme payée.")
+    from src.storage.documents.service_bridge import mark_installment_paid_native
 
-    session.execute(text(
-        "UPDATE payment_installments "
-        "SET status = :status, paid_amount = :paid_amount, paid_date = :paid_date, updated_at = :updated_at "
-        "WHERE id = :id"
-    ), {
-        "id": installment_id,
-        "status": "PAID",
-        "paid_amount": body.paid_amount,
-        "paid_date": body.paid_date,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    })
-    session.commit()
+    _log.info("Marking installment paid: %s", installment_id)
+    result = await mark_installment_paid_native(installment_id, body.paid_amount, body.paid_date)
+    if result is None:
+        raise HTTPException(404, "Échéance introuvable.")
+    if result == "ALREADY_PAID":
+        raise HTTPException(400, "Échéance déjà marquée comme payée.")
     return {"id": installment_id, "status": "PAID", "paid_amount": body.paid_amount}
