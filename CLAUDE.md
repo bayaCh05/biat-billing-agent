@@ -30,9 +30,12 @@ Violating this is a compliance failure for a banking subsidiary.
 | Pydantic | 2.13.4 |
 | Pandas | 3.0.3 |
 | pytest | 9.0.3 |
-| DB | SQLite at `data/invoices.db` (WAL mode) |
+| DB (legacy/still-live) | SQLite at `data/invoices.db` (WAL mode) |
+| DB (primary, in migration) | MongoDB via Beanie/Motor — `docker-compose` service `biat_mongo`, `MONGODB_URI`/`MONGODB_DB` in `.env`. **Auth required**: `mongod --auth`, credentials via `MONGO_ROOT_USER`/`MONGO_ROOT_PASSWORD` in `.env` (embedded in `MONGODB_URI` as `mongodb://user:pass@host/?authSource=admin`) |
 | LLM | Ollama `qwen2.5:3b` on `http://localhost:11434` |
 | OCR | Tesseract (not EasyOCR — not installed) |
+
+**Two persistence layers coexist.** See "MongoDB Migration Status" below before touching any storage code — reads/writes for most domains now go to MongoDB, not SQLite, and the rule for which one differs by file.
 
 ---
 
@@ -42,14 +45,17 @@ Violating this is a compliance failure for a banking subsidiary.
 # Activate virtual environment (always required first)
 source .venv/bin/activate
 
-# Run tests
-.venv/bin/pytest                          # all 629 tests
-.venv/bin/pytest tests/unit/             # unit only
-.venv/bin/pytest tests/integration/     # integration only (needs Tesseract)
-.venv/bin/pytest --tb=short -q           # compact output
+# Run tests — MUST run from repo root, not backend/ (relative config paths break otherwise)
+.venv/bin/pytest backend/                 # all 1158 tests, 1 skipped (real-PDF fixture, env-dependent)
+.venv/bin/pytest backend/tests/unit/      # unit only
+.venv/bin/pytest backend/tests/integration/  # integration only (needs Tesseract)
+.venv/bin/pytest backend/ --tb=short -q   # compact output
 
 # Run Streamlit app
 streamlit run app/Home.py                 # starts on :8502
+
+# Run FastAPI backend (the real production interface)
+python scripts/run_api.py                 # port 8000, --reload for hot-reload
 
 # Run headless daemon (watches ./inbox folder)
 python scripts/run_agent.py
@@ -65,11 +71,35 @@ python scripts/make_realistic_invoice.py
 
 # Init / migrate DB
 python -c "from src.storage.db import build_engine, init_db; init_db(build_engine('sqlite:///./data/invoices.db'))"
+
+# MongoDB (docker-compose service "biat_mongo") — runs with --auth; see .env for
+# MONGO_ROOT_USER/MONGO_ROOT_PASSWORD. On an EXISTING populated volume, changing
+# these env vars alone does nothing (Mongo's init scripts only bootstrap a root
+# user on a brand-new empty data dir) — create the user manually first:
+#   docker exec biat_mongo mongosh admin --eval 'db.createUser({user:"...",pwd:"...",roles:[{role:"root",db:"admin"}]})'
+docker compose up -d mongo                              # start local Mongo
+python backend/scripts/db_inspect.py list <collection>   # read-only inspection CLI
+python backend/scripts/verify_migration_integrity.py     # SQLite vs Mongo row-count/UUID-identity check
 ```
 
 ---
 
 ## Architecture (v3)
+
+> **Path note:** the module paths below (`src/...`) predate the FastAPI backend and
+> predate this doc being kept in sync with it. The actual current repo root for all
+> of these is `backend/` (i.e. `backend/src/agent/pipeline.py`, not `src/agent/pipeline.py`).
+> There is also a full FastAPI REST API at `backend/api/` (routers under
+> `backend/api/routers/`: `invoices.py`, `auth.py`, `admin.py`, `users.py`, `security.py`,
+> `billing.py`, `payments.py`, `budget.py`, `capex.py`, `projet_budget.py`, `roadmap.py`,
+> `risks.py`, `livrables.py`, `notifications.py`, `review.py`, `journal.py`, `suivi.py`,
+> `ai.py`, plus `backend/api/scheduler.py` for nightly jobs) — this is the actual
+> production interface, not just Streamlit. `POST /api/invoices/upload` runs invoices
+> through `backend/src/ai_agents/orchestrator.py::AIOrchestrator` (see below), **not**
+> `pipeline.py::process_invoice()`. The daemon (`scripts/run_agent.py`) and Streamlit's
+> direct pipeline calls are the only things still using `pipeline.py::process_invoice()`.
+> Below this note, "Orchestrator... deleted in v3" refers to a different, older class —
+> `AIOrchestrator` is current and heavily used; do not read that note as discouraging it.
 
 ### Module dependency order (no cycles)
 ```
@@ -202,6 +232,144 @@ tests/
 
 ---
 
+## MongoDB Migration Status (Phase 7 — in progress, SQLite NOT yet removed)
+
+The app is mid-migration from SQLAlchemy/SQLite to MongoDB/Beanie. **Do not assume
+SQLite is authoritative for anything** — check this section first. All paths below
+are relative to `backend/`.
+
+### What's Mongo-primary (SQLite frozen/stale for these)
+
+- **Invoices, journal entries, CAPEX assets, payment installments** — written by
+  `src/ai_agents/orchestrator.py::AIOrchestrator` (the real upload pipeline) via a
+  **synchronous** pymongo repository layer, `src/storage/sync_mongo_repository.py`
+  (`SyncMongoInvoiceRepository`, `SyncMongoJournalRepository`, `SyncMongoAssetRepository`,
+  `SyncMongoClientInvoiceRepository`, plus free functions `save_payment_installments_sync`,
+  `historical_amounts_for_catalog_sync`, `historical_payment_terms_sync`,
+  `journal_consistency_check_sync`, `recalculate_late_installments_sync`).
+- **Roadmap, livrables, risks, phases, budget lines/plan entries, notifications,
+  review approve/reject** — written via async Beanie functions in
+  `src/storage/documents/service_bridge.py` (`*_native` functions), called directly
+  from `api/routers/*.py`.
+- **Users, sessions (active/revoked tokens), OTP codes, password-reset links,
+  account lockout state** — same pattern, `*_native` functions in `service_bridge.py`,
+  called from `api/auth.py` (`get_current_user`) and `api/routers/auth.py`,
+  `admin.py`, `users.py`, `security.py`.
+- **Audit log entries — all of them now**, not just auth/admin/security. As of
+  Lots 7–9, `invoices.py` upload-time events (`FILE_REJECTED`, `INVOICE_UPLOADED`),
+  `ai_agents/orchestrator.py::_audit_ai()` (`AI_EXTRACT`, `AI_CLASSIFY`,
+  `AI_ANOMALY`, `AI_JOURNAL`), and `api/routers/audit.py`'s `AUDIT_INTEGRITY_CHECK`
+  entries all write Mongo-native too (`log_audit_event_native()` /
+  `log_ai_audit_event_sync()` — the latter in `sync_mongo_repository.py`, sync
+  by design since `AIOrchestrator` is sync). **`src/services/audit_service.py::log_action()`
+  (the old SQLAlchemy audit writer) now has zero real callers anywhere in the
+  codebase** — grep confirms only its own definition and stale docstring
+  references remain. `audit_logs` in SQLite receives no new writes through any
+  currently-active code path.
+- **Journal consistency check** — `AccountingAgent.check_consistency()` delegates
+  directly to `sync_mongo_repository.py::journal_consistency_check_sync()`
+  (queries the `journal_entries` Mongo collection), used by both
+  `scheduler.py::_job_accounting_consistency` (weekly) and
+  `POST /ai/accounting-check`. The injected SQLAlchemy `journal_repository` is
+  no longer read by either caller.
+- **ML classifier retraining** — `scheduler.py::_job_retrain_classifier` (weekly)
+  and `POST /ai/retrain` both use `SyncMongoInvoiceRepository.count_by_status()`/
+  `.get_by_status()` (added specifically for this) instead of the SQLAlchemy
+  `InvoiceRepository` — see "Scheduled Jobs Status" below.
+
+### What's still SQLite-only (do not assume these are in Mongo)
+
+- **The daemon** (`scripts/run_agent.py` → `InvoiceAgent` → `agent/pipeline.py::process_invoice()`)
+  and **Streamlit's direct pipeline calls** — both still use the shared SQLAlchemy
+  `PipelineComponents` from `agent/config_loader.py`, untouched by the migration.
+  Do not assume invoices created this way land in Mongo. **Confirmed (2026-07)
+  by the project owner: both are superseded by the API+AIOrchestrator path in
+  practice** — safe to disregard as a blocker for SQLite read-only/removal work,
+  but the code itself hasn't been deleted.
+- **`scheduler.py::_job_scan_roadmap_risks`** (nightly) — the one job NOT yet
+  fixed. `RiskAgent._scan_roadmap()` reads `FeuilleDeRouteORM`/`RisqueORM` via a
+  SQLAlchemy session and writes new `RisqueORM` rows directly (`db.add()` +
+  `db.commit()`). Since real roadmap/risk data lives in Mongo (written via
+  `service_bridge.py`'s `create_risk_native()` etc.), this job (a) scans a stale,
+  frozen roadmap snapshot and (b) writes any AI-generated risks into SQLite only
+  — invisible to the real Mongo-backed UI. Worse than stale reads: it silently
+  creates orphaned data. Fixing this needs `_scan_roadmap()` rewritten against
+  Mongo documents (async native functions already exist —
+  `list_roadmap_mongo`, `risks_for_roadmap_mongo`, `create_risk_native` — bridged
+  via `asyncio.run()` since APScheduler jobs run in a plain thread, not an event
+  loop) — a real rewrite, not a call-site swap. **Largest remaining item.**
+- **`PATCH /ai/invoices/{id}/classification`** (`ai.py::correct_classification`,
+  classification-feedback endpoint) — reads the invoice via SQLAlchemy
+  `InvoiceRepository` and writes to a SQLite-only `classification_feedback`
+  table with **no Mongo equivalent at all**. Currently dormant (0 rows as of
+  2026-07 — looks unused in practice) but not dead code; would likely fail to
+  find any invoice uploaded through the real API path if actually used.
+- **`main.py`'s demo-user reseeding** (`seed_demo_users`/`refresh_demo_passwords`,
+  run on every startup) — writes SQLite `users`. Since login is Mongo-native now
+  and daemon/Streamlit are confirmed superseded, this looks like dead weight
+  rather than something to preserve — a deletion candidate, not a migration target.
+- **`api/routers/audit.py::compute_integrity_summary`**'s one-time HMAC backfill
+  (`session.commit()` after backfilling `row_hash` on any pre-HMAC-era SQLite row
+  still `NULL`) — as of 2026-07, 5 rows out of 708 in `audit_logs` still need
+  this. One-time; becomes permanently dormant once those 5 are backfilled (no
+  code path creates new `NULL`-hash rows anymore, per `log_action()` above).
+- **The audit-log HMAC hash chain** (`row_hash` column, `api/security/audit_integrity.py`,
+  `AUDIT_INTEGRITY_CHECK` endpoint) — this is structurally SQLite-specific (tamper-evidence
+  chain over that table's own rows). No Mongo equivalent exists yet; this is an open
+  design question, not a pending mechanical migration. `verify_integrity_native()`
+  computes an equivalent check over Mongo's `audit_logs` documents and
+  `compute_integrity_summary()` merges both into one score — see that function's
+  docstring ("one compliance trail split across two stores, not two independent ones").
+
+**Consequence: SQLite cannot be removed yet, but the reason has changed.**
+The original blocker (`audit_logs` writes) is resolved — see above. What's left
+blocking a full SQLite read-only/removal ("Lot 10"): the roadmap-risk-scan job
+(real, active gap), the classification-feedback endpoint (real but dormant gap),
+and the one-time HMAC backfill. Do not set SQLite read-only or delete
+SQLAlchemy code paths without resolving these first.
+
+### Scheduled Jobs Status (`api/scheduler.py`)
+
+| Job | Cadence | Data source | Status |
+|-----|---------|--------------|--------|
+| `_job_accounting_consistency` | weekly (Mon 6am) | Mongo (`journal_consistency_check_sync`) | ✅ Mongo-native |
+| `_job_retrain_classifier` | weekly | Mongo (`SyncMongoInvoiceRepository`) | ✅ Mongo-native |
+| `_job_recalculate_installments` | nightly | Mongo (`recalculate_late_installments_sync`) | ✅ Mongo-native |
+| `_job_scan_roadmap_risks` | nightly (8am) | SQLAlchemy (stale) | ❌ **not yet fixed** — see above |
+
+### Conventions — read before writing any Mongo code
+
+- **`_id` (and any soft-reference field) is ALWAYS a string with dashes**
+  (`str(uuid4())`), **NEVER** a native BSON UUID Binary — even when a Beanie
+  `Document` class declares the field as `UUID` in its Pydantic schema (several
+  do, e.g. `UserDocument.id`, `PasswordVerificationDocument.user_id` — this is a
+  known inconsistency between the Beanie schema's type hint and what's actually
+  on disk, not a bug to "fix"). All the migration + native write code inserts via
+  raw `Document.get_pymongo_collection()` + `insert_one`/`update_one`/`replace_one`,
+  never `Document(...).insert()`, specifically to avoid Pydantic coercing the
+  string into a UUID object on write.
+- **Never call `Document.get(x)` or a typed query (`Document.field == value`) against
+  a string-stored id/reference field.** Beanie coerces the argument to the field's
+  *declared* type before querying, silently producing a BSON UUID query that never
+  matches string-stored data — this bug has recurred repeatedly across the migration.
+  Use dict-filtered queries instead: `Document.find_one({"_id": id_str})` or the
+  `_get_by_str_id(doc_class, id_str)` helper in `service_bridge.py`.
+- **Sync vs async is not a style choice — it's forced by the caller.** FastAPI routes
+  are `async def` → use the async Beanie functions in `service_bridge.py`. The invoice
+  pipeline (`AIOrchestrator` and its 4 agents in `ai_agents/`) and anything called
+  from `InvoiceNumberer`/`InvoiceBuilder` (billing) are genuinely synchronous by
+  design — use `sync_mongo_repository.py` (plain `pymongo.MongoClient`) there instead,
+  never `await` inside them.
+- Dates with no time component (e.g. `invoice_date`, `acquisition_date`) are stored
+  as `datetime` at UTC midnight (`_to_midnight_utc()` helper) — BSON has no pure date type.
+- `MONGODB_URI` / `MONGODB_DB` env vars gate Mongo entirely — if unset, `init_beanie()`
+  returns `False` and the app runs SQLite-only (no crash). Don't assume Mongo is reachable
+  in every environment; native `*_native` functions do NOT have SQL fallbacks by design
+  (they're meant to be authoritative) — only the older `*_mongo()` read-bridge functions
+  from the earlier migration phase have a `None`-means-fall-back-to-SQL contract.
+
+---
+
 ## Key APIs to Know
 
 ### InvoiceRecord
@@ -265,7 +433,15 @@ Plan Comptable des Entreprises tunisien. Key accounts:
 ## Enums Reference
 
 ### InvoiceStatus (state machine)
-`RECEIVED → EXTRACTING → EXTRACTED → CLASSIFYING → CLASSIFIED → VALIDATING → VALIDATED/FLAGGED → EXPORTING → EXPORTED → PAID/COLLECTED`
+`RECEIVED → EXTRACTING → EXTRACTED → CLASSIFYING → CLASSIFIED → VALIDATING → VALIDATED/FLAGGED → EXPORTING → EXPORTED → JOURNALING → JOURNALED → PAID/COLLECTED`
+
+`JOURNALING`/`JOURNALED` is `pipeline.py`'s `post_journal()` stage (5th stage,
+after export) — on success `EXPORTED → JOURNALING → JOURNALED`; on failure
+reverts to `EXPORTED` + a `JOURNAL_FAILED` ERROR flag. This is the real
+happy-path terminal status for a successfully processed invoice, not `EXPORTED`
+— a test (`test_mark_paid_advances_supplier_invoice`) used to assume `EXPORTED`
+was terminal and silently skipped on every run once this stage started firing;
+fixed 2026-07 (see "Security Hardening Status" above).
 
 Terminal statuses (pipeline stops): `FLAGGED, ESCALATED, ERROR, REJECTED, EXTRACTION_FAILED`
 
@@ -305,16 +481,84 @@ storage:
 - `_build_components()` in `test_pipeline_e2e.py` is the integration test helper
 - 5 PyMuPDF C-library `DeprecationWarning`s in test output are harmless — ignore
 - `InvoiceRepository` mock must include `count_by_status` and `count_auto_approved`
+- No `pytest-asyncio`/`pytest-anyio` plugin actually installed despite being a
+  listed dependency — drive async code via `asyncio.run(coro)` in plain sync
+  test functions, not `async def test_...`.
+- **Rate-limit testing gotcha**: `api/limiter.py`'s `RATE_LIMIT_ENABLED` is read
+  once at import time and baked into every `@limiter.limit(...)` decorator.
+  `test_api_e2e.py` sets it to `false` before importing the real app, and since
+  pytest runs the whole suite in one process, whichever test module imports
+  `api.limiter` first fixes that constant for every test that follows. **Do
+  not** try to work around this with `importlib.reload()` — `slowapi`'s
+  `Limiter` registers each decorated route under a plain
+  `f"{module}.{qualname}"` string key that *accumulates* across repeated
+  reloads of the same function name, so reloading a router module N times
+  makes that endpoint's hit-count increase by N+1 per request (a pure test
+  artifact, verified experimentally — see `test_avatar_rate_limit.py`).
+  Instead, drive the real behavior through a clean `subprocess` with
+  `RATE_LIMIT_ENABLED=true` set before any import.
+
+---
+
+## Security Hardening Status (2026-07 audit)
+
+An internal audit produced two batches of findings, all now fixed and pushed
+except one. Don't re-scope or re-flag these — check here first.
+
+**Fixed:**
+- JWT_SECRET hardcoded fallback removed; validated at startup
+- Unique-index collisions now return clean 409s instead of unhandled 500s
+- Role guards added to journal/capex/nl-query/billing routes
+- `/security/summary` no longer hardcodes `tampered_entries_count: 0`
+- OTP generation uses `secrets`, not `random.choices()`
+- Silent SQL fallback removed on 6 Mongo-only read domains (roadmap/risks/livrables)
+- Session revocation on password change/reset/admin-reset (touches both
+  `RevokedTokenDocument` and `ActiveTokenDocument` — see "Conventions" above)
+- `LDAP_BIND_PASSWORD` hardcoded fallback removed; fail-fast check in
+  `api/main.py::_startup()` (not `ldap_service.py` — that module is only
+  imported lazily, on first LDAP login attempt, not at app boot)
+- MongoDB authentication enabled (`mongod --auth`; see Runtime table above)
+- Rate limit added to `PATCH /users/me/avatar` (10/minute, matches invoice upload)
+- Obsolete test skip fixed in `test_pipeline_e2e.py` (`test_mark_paid_advances_supplier_invoice`
+  was silently skipping every run once `pipeline.py` added the `post_journal()`
+  stage — see JOURNALED in "InvoiceStatus" below)
+- `service_bridge.py` test coverage: 127 functions audited, 30 confirmed dead
+  and removed, all 97 remaining now have direct unit tests
+- Debug-log leak fixed (raw invoice text no longer dumped at DEBUG level)
+- Unused `demo_base64` endpoint removed
+- Scheduled jobs (`accounting_consistency`, `retrain_classifier`) moved off
+  the stale SQLAlchemy repository onto Mongo — see "Scheduled Jobs Status" above
+
+**Still open:**
+- `scheduler.py::_job_scan_roadmap_risks` — see "What's still SQLite-only" above;
+  the largest remaining item, needs a real rewrite against Mongo documents
+- Refresh token rotation (jti reusable up to 7 days) — explicitly deprioritized
+- "Lot 10" (SQLite → read-only → removal) — blocked on the roadmap-risk-scan
+  job + classification-feedback endpoint + one-time HMAC backfill (all above);
+  final removal step explicitly needs supervisor sign-off regardless
 
 ---
 
 ## What NOT to Do
 
 - Do not add `@st.cache_resource` to `get_pipeline_components()` — it creates per-mode sessions that must be closed
-- Do not use `Orchestrator` — it was deleted in v3; use `process_invoice()` + `PipelineComponents`
+- Do not use the old `Orchestrator` class from pre-v3 (deleted) — use `process_invoice()` + `PipelineComponents`
+  for the daemon/Streamlit path. This is unrelated to `AIOrchestrator` (`ai_agents/orchestrator.py`), which is
+  current and is what `POST /api/invoices/upload` actually runs — do not delete or avoid that one.
 - Do not use `AccountingCoder(rules=...)` — v1 API, removed; use `AccountingCoder(catalog=CostCatalog)`
 - Do not use `CostCatalog.load()` — the correct classmethod is `CostCatalog.from_yaml()`
 - Do not call `use_container_width=True` in Streamlit — use `width="stretch"`
 - Do not call any cloud LLM with real invoice data — data residency violation
 - Do not import `EasyOCREngine` from `ocr_engine` — it moved to `extras_ocr.py`
 - Do not add `lifecycle_tracker` back to `PipelineComponents` — it belongs to `_backend.py` only
+- Do not set SQLite to read-only or remove SQLAlchemy code paths yet — the `audit_logs` blocker is resolved,
+  but `scheduler.py::_job_scan_roadmap_risks` and the classification-feedback endpoint are still real,
+  active SQLite dependencies (see "MongoDB Migration Status" / "Security Hardening Status")
+- Do not use `Document.get(x)` or `Document.field == value` typed queries against string-stored UUID/reference
+  fields (`_id`, `user_id`, etc.) — Beanie coerces to the declared Pydantic type and silently matches nothing.
+  Use dict-filtered `.find_one({"_id": id_str})` or `_get_by_str_id()` in `service_bridge.py`
+- Do not `await` anything inside `AIOrchestrator`/its 4 agents or `InvoiceNumberer`/`InvoiceBuilder` — that
+  call graph is synchronous by design; use `sync_mongo_repository.py`, not Beanie's async API, there
+- Do not write a new Mongo document via `Document(...).insert()` for any field that should be a string
+  UUID — Pydantic will coerce it to a native UUID/BSON Binary on write. Use
+  `Document.get_pymongo_collection()` + raw `insert_one`/`update_one` instead
