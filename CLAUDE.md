@@ -46,7 +46,7 @@ Violating this is a compliance failure for a banking subsidiary.
 source .venv/bin/activate
 
 # Run tests — MUST run from repo root, not backend/ (relative config paths break otherwise)
-.venv/bin/pytest backend/                 # all 1158 tests, 1 skipped (real-PDF fixture, env-dependent)
+.venv/bin/pytest backend/                 # all 1161 tests, 1 skipped (real-PDF fixture, env-dependent)
 .venv/bin/pytest backend/tests/unit/      # unit only
 .venv/bin/pytest backend/tests/integration/  # integration only (needs Tesseract)
 .venv/bin/pytest backend/ --tb=short -q   # compact output
@@ -276,6 +276,13 @@ are relative to `backend/`.
   and `POST /ai/retrain` both use `SyncMongoInvoiceRepository.count_by_status()`/
   `.get_by_status()` (added specifically for this) instead of the SQLAlchemy
   `InvoiceRepository` — see "Scheduled Jobs Status" below.
+- **Roadmap risk scan** — `RiskAgent._scan_roadmap()` (used by
+  `scheduler.py::_job_scan_roadmap_risks`, `POST /ai/scan-roadmap-risks`,
+  `POST /ai/scan-item-risk/{id}`) queries `FeuilleDeRouteDocument`/`RisqueDocument`
+  directly and creates risks via `create_risk_native()`. Bridged from its sync
+  callers (all plain `def`/APScheduler jobs, no event loop of their own) via
+  `asyncio.run()` in `_scan_roadmap()` — see that method's docstring before
+  reusing this bridge pattern elsewhere.
 
 ### What's still SQLite-only (do not assume these are in Mongo)
 
@@ -286,18 +293,6 @@ are relative to `backend/`.
   by the project owner: both are superseded by the API+AIOrchestrator path in
   practice** — safe to disregard as a blocker for SQLite read-only/removal work,
   but the code itself hasn't been deleted.
-- **`scheduler.py::_job_scan_roadmap_risks`** (nightly) — the one job NOT yet
-  fixed. `RiskAgent._scan_roadmap()` reads `FeuilleDeRouteORM`/`RisqueORM` via a
-  SQLAlchemy session and writes new `RisqueORM` rows directly (`db.add()` +
-  `db.commit()`). Since real roadmap/risk data lives in Mongo (written via
-  `service_bridge.py`'s `create_risk_native()` etc.), this job (a) scans a stale,
-  frozen roadmap snapshot and (b) writes any AI-generated risks into SQLite only
-  — invisible to the real Mongo-backed UI. Worse than stale reads: it silently
-  creates orphaned data. Fixing this needs `_scan_roadmap()` rewritten against
-  Mongo documents (async native functions already exist —
-  `list_roadmap_mongo`, `risks_for_roadmap_mongo`, `create_risk_native` — bridged
-  via `asyncio.run()` since APScheduler jobs run in a plain thread, not an event
-  loop) — a real rewrite, not a call-site swap. **Largest remaining item.**
 - **`PATCH /ai/invoices/{id}/classification`** (`ai.py::correct_classification`,
   classification-feedback endpoint) — reads the invoice via SQLAlchemy
   `InvoiceRepository` and writes to a SQLite-only `classification_feedback`
@@ -322,20 +317,24 @@ are relative to `backend/`.
   docstring ("one compliance trail split across two stores, not two independent ones").
 
 **Consequence: SQLite cannot be removed yet, but the reason has changed.**
-The original blocker (`audit_logs` writes) is resolved — see above. What's left
-blocking a full SQLite read-only/removal ("Lot 10"): the roadmap-risk-scan job
-(real, active gap), the classification-feedback endpoint (real but dormant gap),
-and the one-time HMAC backfill. Do not set SQLite read-only or delete
-SQLAlchemy code paths without resolving these first.
+The original blocker (`audit_logs` writes) is resolved, and so is the
+scheduled-jobs blocker (all 4 jobs are Mongo-native now) — see above. What's
+left blocking a full SQLite read-only/removal ("Lot 10"): the
+classification-feedback endpoint (real but dormant gap) and the one-time HMAC
+backfill. Do not set SQLite read-only or delete SQLAlchemy code paths without
+resolving these first — and note the daemon/Streamlit code paths above still
+exist even though they're confirmed unused in practice.
 
 ### Scheduled Jobs Status (`api/scheduler.py`)
 
-| Job | Cadence | Data source | Status |
-|-----|---------|--------------|--------|
-| `_job_accounting_consistency` | weekly (Mon 6am) | Mongo (`journal_consistency_check_sync`) | ✅ Mongo-native |
-| `_job_retrain_classifier` | weekly | Mongo (`SyncMongoInvoiceRepository`) | ✅ Mongo-native |
-| `_job_recalculate_installments` | nightly | Mongo (`recalculate_late_installments_sync`) | ✅ Mongo-native |
-| `_job_scan_roadmap_risks` | nightly (8am) | SQLAlchemy (stale) | ❌ **not yet fixed** — see above |
+All 4 jobs are Mongo-native as of 2026-07.
+
+| Job | Cadence | Data source |
+|-----|---------|--------------|
+| `_job_accounting_consistency` | weekly (Mon 6am) | Mongo (`journal_consistency_check_sync`) |
+| `_job_retrain_classifier` | weekly | Mongo (`SyncMongoInvoiceRepository`) |
+| `_job_recalculate_installments` | nightly | Mongo (`recalculate_late_installments_sync`) |
+| `_job_scan_roadmap_risks` | nightly (8am) | Mongo (`RiskAgent._scan_roadmap_async`, bridged via `asyncio.run()`) |
 
 ### Conventions — read before writing any Mongo code
 
@@ -526,16 +525,18 @@ except one. Don't re-scope or re-flag these — check here first.
   and removed, all 97 remaining now have direct unit tests
 - Debug-log leak fixed (raw invoice text no longer dumped at DEBUG level)
 - Unused `demo_base64` endpoint removed
-- Scheduled jobs (`accounting_consistency`, `retrain_classifier`) moved off
-  the stale SQLAlchemy repository onto Mongo — see "Scheduled Jobs Status" above
+- All 4 `scheduler.py` jobs (`accounting_consistency`, `retrain_classifier`,
+  `recalculate_installments`, `scan_roadmap_risks`) moved off the stale
+  SQLAlchemy repository onto Mongo — see "Scheduled Jobs Status" above.
+  `scan_roadmap_risks` was the largest item: it used to silently write
+  AI-suggested risks into SQLite only, invisible to the real Mongo-backed UI
 
 **Still open:**
-- `scheduler.py::_job_scan_roadmap_risks` — see "What's still SQLite-only" above;
-  the largest remaining item, needs a real rewrite against Mongo documents
 - Refresh token rotation (jti reusable up to 7 days) — explicitly deprioritized
-- "Lot 10" (SQLite → read-only → removal) — blocked on the roadmap-risk-scan
-  job + classification-feedback endpoint + one-time HMAC backfill (all above);
-  final removal step explicitly needs supervisor sign-off regardless
+- "Lot 10" (SQLite → read-only → removal) — blocked on the
+  classification-feedback endpoint + one-time HMAC backfill (see "What's still
+  SQLite-only" above); final removal step explicitly needs supervisor sign-off
+  regardless
 
 ---
 
