@@ -89,8 +89,7 @@ class InsightAgent(BaseAgent):
             f"Commence par: \"Satisfaisant\" | \"Vigilance requise\" | \"Situation critique\"\n"
             f"Puis les 2 points les plus importants. Sois factuel et direct."
         )
-        self._call_count += 1
-        raw = OllamaClient.get().complete(prompt, temperature=0.3, max_tokens=200)
+        raw = self._call_ollama(prompt, temperature=0.3, max_tokens=200)
         summary = (raw or "Données insuffisantes pour générer un résumé.").strip()
 
         status_label = "Satisfaisant"

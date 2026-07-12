@@ -137,6 +137,5 @@ class ClassificationAgent(BaseAgent):
                 f"est correcte selon le PCE tunisien. Cite les mots clés qui ont guidé ce choix. "
                 f"Maximum 150 caractères."
             )
-        self._call_count += 1
-        raw = OllamaClient.get().complete(prompt, temperature=0.1, max_tokens=80)
+        raw = self._call_ollama(prompt, temperature=0.1, max_tokens=80)
         return (raw or "").strip()[:200]

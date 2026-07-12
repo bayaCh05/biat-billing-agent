@@ -6,9 +6,7 @@ Capability B: On-demand mitigation plan drafting.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
 import time
 from datetime import date
 
@@ -154,18 +152,8 @@ class RiskAgent(BaseAgent):
             f'"impact": "FAIBLE|MOYEN|ELEVE|CRITIQUE", '
             f'"plan_mitigation": "3 actions numérotées"}}'
         )
-        self._call_count += 1
-        raw = OllamaClient.get().complete(prompt, temperature=0.2, max_tokens=200)
-        if not raw:
-            return None
-
-        try:
-            m = re.search(r"\{[\s\S]+\}", raw)
-            if m:
-                return json.loads(m.group(0))
-        except Exception:
-            pass
-        return None
+        raw = self._call_ollama(prompt, temperature=0.2, max_tokens=200)
+        return self._parse_json_response(raw)
 
     # ── Capability B — mitigation drafter ────────────────────────────────────
 
@@ -197,8 +185,7 @@ class RiskAgent(BaseAgent):
             f"Propose exactement 3 actions de mitigation concrètes et actionnables en français.\n"
             f"Format:\n1. [action]\n2. [action]\n3. [action]\nMaximum 150 mots total."
         )
-        self._call_count += 1
-        raw = OllamaClient.get().complete(prompt, temperature=0.3, max_tokens=200)
+        raw = self._call_ollama(prompt, temperature=0.3, max_tokens=200)
         suggestion = (raw or fallback).strip()
 
         return AgentResult(

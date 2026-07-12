@@ -416,22 +416,31 @@ C'est le seul endroit où le pipeline bifurque. Pour le reste, le flux est stric
 
 ### Ce que BaseAgent mutualise réellement
 
+> **Mise à jour (2026-07, nettoyage Lot C)** : ce constat a été corrigé. `_call_ollama()`
+> et `_parse_json_response()` sont désormais appelés par les 6 agents (5 sites
+> d'appel Ollama + le parsing JSON de `RiskAgent._generate_risk_for_overdue()`).
+> `_safe_float()` (aucun site à remplacer) a été supprimée. `_timed_run()` a été
+> remplacée par `_run_safely(fn)`, qui gère aussi le `try/except` — voir plus bas.
+
 ```python
 class BaseAgent(ABC):
-    def __init__(self): self._ollama = ...; self._call_count = 0
+    def __init__(self): self._call_count = 0
     @abstractmethod
     def run(self, context: dict) -> AgentResult: ...
-    def _call_ollama(self, ...): ...          # JAMAIS appelé par aucun agent
-    def _parse_json_response(self, ...): ...  # JAMAIS appelé par aucun agent
-    def _safe_float(self, ...): ...           # JAMAIS appelé par aucun agent
-    def _timed_run(self, fn): ...             # JAMAIS appelé par aucun agent
+    def _call_ollama(self, ...): ...          # utilisé par les 6 agents
+    def _parse_json_response(self, ...): ...  # utilisé par ClassificationAgent, RiskAgent
+    def _run_safely(self, fn): ...            # utilisé par 5 des 6 agents (voir note ci-dessous)
 ```
 
-**Fait notable** : `_call_ollama()`, `_parse_json_response()`, `_safe_float()` et `_timed_run()` sont définis dans `BaseAgent` mais **aucun des 6 agents ne les appelle jamais**. Chaque agent appelle `OllamaClient.get().complete()` directement, fait son propre parsing JSON avec `re.search()` ou `json.loads()`, et chronomètre lui-même avec `time.monotonic()`.
-
 **Ce que BaseAgent apporte réellement :**
-1. `self._call_count` : compteur d'appels Ollama, incrémenté manuellement par chaque agent
+1. `self._call_count` : compteur d'appels Ollama, incrémenté par `_call_ollama()`
 2. L'interface abstraite `run(context: dict) -> AgentResult` : contrat uniforme qui rend les agents interchangeables dans l'orchestrateur
+3. `_run_safely(fn)` : chronométrage + `try/except` uniforme — adopté par `ExtractionAgent`,
+   `ClassificationAgent`, `AnomalyAgent`, `AccountingAgent`, `RiskAgent._scan_roadmap()`.
+   `RiskAgent._draft_mitigation()` et les deux capacités d'`InsightAgent` ne l'utilisent
+   pas : leur logique a des retours anticipés (mode dégradé, validation) plutôt qu'un
+   simple bloc try/except à englober — les y forcer aurait ajouté une structure qui
+   n'existe pas réellement plutôt que de supprimer une vraie duplication.
 
 ### Le couplage réel via InvoiceRecord muté en place
 

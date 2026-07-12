@@ -17,7 +17,6 @@ class BaseAgent(ABC):
     name: str = "BaseAgent"
 
     def __init__(self) -> None:
-        self._ollama = OllamaClient.get()
         self._call_count = 0
 
     @abstractmethod
@@ -31,8 +30,12 @@ class BaseAgent(ABC):
         temperature: float = 0.0,
         max_tokens: int = 200,
     ) -> str | None:
+        # Resolve OllamaClient.get() fresh on every call (not cached at
+        # __init__) — matches how every agent's ad-hoc Ollama call site
+        # already did it, and lets tests patch OllamaClient.get() per-test
+        # after the agent fixture is constructed.
         self._call_count += 1
-        return self._ollama.complete(
+        return OllamaClient.get().complete(
             prompt=prompt,
             system=system,
             temperature=temperature,
@@ -53,14 +56,6 @@ class BaseAgent(ABC):
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            return None
-
-    def _safe_float(self, value) -> float | None:
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
             return None
 
     def _run_safely(self, fn) -> AgentResult:

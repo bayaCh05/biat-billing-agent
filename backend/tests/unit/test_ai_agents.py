@@ -135,18 +135,6 @@ class TestBaseAgentHelpers:
     def test_parse_json_returns_none_on_none(self, base_agent):
         assert base_agent._parse_json_response(None) is None
 
-    def test_safe_float_converts_string(self, base_agent):
-        assert base_agent._safe_float("3.14") == pytest.approx(3.14)
-
-    def test_safe_float_converts_int(self, base_agent):
-        assert base_agent._safe_float(42) == 42.0
-
-    def test_safe_float_returns_none_for_none(self, base_agent):
-        assert base_agent._safe_float(None) is None
-
-    def test_safe_float_returns_none_for_invalid_string(self, base_agent):
-        assert base_agent._safe_float("abc") is None
-
 
 # ── RiskAgent ─────────────────────────────────────────────────────────────────
 

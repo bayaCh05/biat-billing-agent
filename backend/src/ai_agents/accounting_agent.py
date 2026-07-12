@@ -120,8 +120,7 @@ class AccountingAgent(BaseAgent):
                 f"selon le PCE tunisien. Mentionne le principe comptable appliqué. "
                 f"Maximum 200 caractères."
             )
-            self._call_count += 1
-            raw = OllamaClient.get().complete(prompt, temperature=0.1, max_tokens=100)
+            raw = self._call_ollama(prompt, temperature=0.1, max_tokens=100)
             return (raw or "").strip()[:250]
         except Exception:
             return ""
@@ -181,8 +180,7 @@ class AccountingAgent(BaseAgent):
             f"Références: matériel informatique→3-5ans, serveur→5ans, logiciel→3ans, "
             f"véhicule→5ans, mobilier→10ans, bâtiment→20ans."
         )
-        self._call_count += 1
-        raw = OllamaClient.get().complete(prompt, temperature=0.0, max_tokens=5)
+        raw = self._call_ollama(prompt, temperature=0.0, max_tokens=5)
         if raw:
             import re
             # D'abord: réponse idéale = entier seul sur la ligne
