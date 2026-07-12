@@ -106,8 +106,9 @@ internship_biat/
 │   │   ├── security/         ← jwt_handler, file_validator, account_lockout, audit_integrity
 │   │   └── main.py           ← middlewares (CORS, RateLimit, CSP)
 │   ├── src/
-│   │   ├── agent/            ← pipeline.py (fonctions pures) + agent.py (daemon)
-│   │   ├── ai_agents/        ← orchestrateur + 6 agents IA spécialisés
+│   │   ├── agent/            ← config_loader.py (wire AIComponents) — l'ancien daemon
+│   │   │                       (pipeline.py + agent.py) a été supprimé en 2026-07
+│   │   ├── ai_agents/        ← AIOrchestrator + 6 agents IA spécialisés
 │   │   ├── models/           ← InvoiceRecord, enums, journal, asset
 │   │   ├── storage/          ← ORM SQLAlchemy + repositories
 │   │   ├── extraction/       ← HybridExtractor (PDF natif → OCR → LLM)
@@ -119,8 +120,8 @@ internship_biat/
 │   │   └── services/         ← email, audit, LDAP, ldif_parser, mock_ldap_auth
 │   ├── mock_ldap_data/       ← annuaire LDIF de test (5 utilisateurs)
 │   └── tests/
-│       ├── unit/             ← 18+ fichiers, ~629 tests
-│       └── integration/      ← pipeline E2E avec DB réelle
+│       ├── unit/             ← 42 fichiers
+│       └── integration/      ← API E2E avec vraie base Mongo de test
 ├── frontend/
 │   └── src/pages/
 │       ├── factures/         ← upload, liste, détail facture
@@ -232,17 +233,26 @@ AccountingAgent
 ### 4.2 Statuts du pipeline
 
 ```
-RECEIVED → EXTRACTING → EXTRACTED → CLASSIFYING → CLASSIFIED
-        → VALIDATING → VALIDATED / FLAGGED → EXPORTING → JOURNALED → PAID
+RECEIVED → EXTRACTED → CLASSIFIED → VALIDATED / FLAGGED → JOURNALED → PAID
 ```
+(Les statuts intermédiaires `-ING` et `EXPORTING`/`EXPORTED` existent encore dans
+l'enum mais ne sont plus jamais posés par `AIOrchestrator` — c'était le
+comportement de l'ancien daemon `agent/pipeline.py`, supprimé en 2026-07.)
 
 Statuts terminaux (arrêt pipeline) : `FLAGGED, ESCALATED, ERROR, EXTRACTION_FAILED`
 
-### 4.3 Correction du verrou SQLite (correctif de session)
+### 4.3 Correction du verrou SQLite (correctif de session, historique)
 
-**Problème identifié** : le pipeline utilisait deux sessions SQLAlchemy différentes simultanément (session FastAPI + session PipelineComponents), provoquant un verrou SQLite (`database is locked`) qui bloquait toutes les mises à jour de statut.
+**Problème identifié à l'époque** : le pipeline utilisait deux sessions SQLAlchemy différentes simultanément (session FastAPI + session PipelineComponents), provoquant un verrou SQLite (`database is locked`) qui bloquait toutes les mises à jour de statut.
 
-**Correction** : l'orchestrateur utilise désormais un `InvoiceRepository(self._db)` construit sur la session FastAPI transmise en paramètre — une seule session active par requête.
+**Correction à l'époque** : l'orchestrateur utilisait un `InvoiceRepository(self._db)` construit sur la session FastAPI transmise en paramètre — une seule session active par requête.
+
+**Note (2026-07)** : ce correctif décrivait l'état SQLAlchemy d'alors. Depuis,
+la facture elle-même est lue/écrite via `SyncMongoInvoiceRepository()` (Mongo,
+pas SQLAlchemy) dans `AIOrchestrator.__init__` — le verrou SQLite décrit
+ci-dessus ne peut plus se produire sur ce chemin. `self._db` (SQLAlchemy)
+reste un paramètre réel du constructeur, transmis à certains agents, mais
+n'est plus utilisé pour le repository des factures.
 
 ---
 

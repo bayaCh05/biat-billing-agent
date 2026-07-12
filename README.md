@@ -8,12 +8,12 @@ Processes supplier and client invoices: OCR/LLM extraction → classification �
 
 ---
 
-## Two UIs — which one to use
+## UI
 
-| UI | When to use | How to start |
-|----|-------------|--------------|
-| **React + FastAPI** (primary) | Full-featured demo, supervisor review, production deployment | `PYTHONPATH=backend uvicorn api.main:app --reload` + `npm run dev` in `frontend/` |
-| **Streamlit** (local demo) | Quick local test of the OCR/LLM pipeline without the React app | `streamlit run app/Home.py` |
+React + FastAPI is the only UI — `PYTHONPATH=backend uvicorn api.main:app --reload`
+(backend) + `npm run dev` in `frontend/` (frontend). There used to also be a
+Streamlit app (`app/Home.py`); it was removed from this repo before this doc
+was last synced — do not look for it.
 
 ---
 
@@ -25,6 +25,14 @@ Processes supplier and client invoices: OCR/LLM extraction → classification �
 | Node.js | 20+ |
 | Tesseract OCR | 5.x |
 | Ollama | latest |
+| MongoDB | via `docker compose up -d mongo` (primary DB — see step 3) |
+
+**Two databases are required, not one.** MongoDB is primary for almost
+everything (invoices, journal entries, users, roadmap, budget, audit log,
+...). SQLite (via SQLAlchemy/Alembic) is still required too — several
+routers (`audit.py`, `review.py`, `security.py`, others) have live,
+deliberately-kept SQL-backed code paths that haven't been migrated yet. Skip
+either one and parts of the app will fail or silently show stale/empty data.
 
 ---
 
@@ -44,17 +52,23 @@ ollama pull qwen2.5:3b
 # ollama serve must be running on http://localhost:11434
 ```
 
-### 3. Database — migrations + seed
+### 3. Databases — Mongo + SQLite migrations + seed
 
-Schema is managed by **Alembic**. Run migrations before starting the server.
+Start MongoDB (primary DB for almost everything — see Prerequisites):
+```bash
+docker compose up -d mongo   # runs with --auth; see .env for MONGO_ROOT_USER/PASSWORD
+```
+
+SQLite schema is managed by **Alembic** (still required — several routers
+have live SQL-backed code paths). Run migrations before starting the server.
 
 ```bash
 # Apply all pending migrations (creates full schema on a fresh DB)
 alembic upgrade head
 
-# Seed with realistic demo data (4 users, 22 invoices, 5 CAPEX assets,
-# 3 projects, 19 livrables, 3 client invoices, roadmap, audit logs)
-python backend/scripts/seed_demo.py
+# Seed with realistic demo data — writes to MongoDB, idempotent (safe to
+# re-run; does NOT wipe the database, unlike older versions of this script)
+python scripts/seed_demo.py
 ```
 
 #### Migration commands reference
@@ -73,9 +87,9 @@ alembic stamp head                           # stamp existing DB without running
 
 Seed options:
 ```bash
-python backend/scripts/seed_demo.py            # wipe + reseed (default)
-python backend/scripts/seed_demo.py --append   # keep existing rows, add new ones
-python backend/scripts/seed_demo.py --dry-run  # validate imports only, no writes
+python scripts/seed_demo.py            # idempotent upsert (default — safe to re-run, does not wipe)
+python scripts/seed_demo.py --append   # kept only for CLI compatibility; no effect (writes are always idempotent now)
+python scripts/seed_demo.py --dry-run  # validate imports only, no writes
 ```
 
 ### 4. FastAPI backend
@@ -111,12 +125,16 @@ PYTHONPATH=backend uvicorn \           npm run dev
 
 ## Demo accounts
 
+Passwords are read from env vars (`DEMO_ADMIN_PASSWORD`/`DEMO_COMPTABLE_PASSWORD`/
+`DEMO_CHEF_PASSWORD`/`DEMO_DIRECTION_PASSWORD` in `.env`, no hardcoded fallback —
+see `backend/api/auth.py`). Typical dev values:
+
 | Email | Password | Role |
 |-------|----------|------|
-| admin@biat-it.com.tn | biat2026! | Admin |
-| comptable@biat-it.com.tn | biat2026! | Comptable |
-| chef.projet@biat-it.com.tn | biat2026! | Chef de Projet |
-| direction@biat-it.com.tn | biat2026! | Direction |
+| admin@biat-it.tn | admin2026 | Admin |
+| comptable@biat-it.tn | biat2026 | Comptable |
+| chef@biat-it.tn | biat2026 | Chef de Projet |
+| directeur@biat-it.tn | biat2026 | Direction |
 
 | Role | Pages accessible |
 |------|-----------------|
@@ -129,13 +147,13 @@ PYTHONPATH=backend uvicorn \           npm run dev
 
 ## Running tests
 
-**Python (703 tests):**
+**Python (~1020 tests):**
 ```bash
 source .venv/bin/activate
-.venv/bin/pytest                          # all tests
-.venv/bin/pytest backend/tests/unit/     # unit only (mocked deps)
-.venv/bin/pytest backend/tests/          # all backend tests
-.venv/bin/pytest --tb=short -q           # compact output
+.venv/bin/pytest backend/                 # all tests — MUST run from repo root
+.venv/bin/pytest backend/tests/unit/      # unit only (mocked deps)
+.venv/bin/pytest backend/tests/integration/  # integration only (real Mongo test DB, needs Tesseract)
+.venv/bin/pytest backend/ --tb=short -q   # compact output
 ```
 
 **Frontend (Vitest + Testing Library):**
@@ -162,17 +180,18 @@ internship_biat/
 ├── backend/
 │   ├── api/                  # FastAPI routers + auth + scheduler
 │   ├── src/
-│   │   ├── agent/            # pipeline.py (pure functions), agent.py (daemon loop)
-│   │   ├── ai/
-│   │   │   ├── agents/       # 4 pipeline agents: extraction, classification, anomaly, accounting
-│   │   │   ├── services/     # RiskAgent (roadmap), InsightAgent (direction dashboard)
+│   │   ├── agent/            # config_loader.py — wires AIComponents (build_ai_components())
+│   │   ├── ai_agents/
+│   │   │   ├── orchestrator.py         # AIOrchestrator — the real invoice-processing entry point
+│   │   │   ├── extraction_agent.py, classification_agent.py,
+│   │   │   │   anomaly_agent.py, accounting_agent.py   # the 4 sequential agents
+│   │   │   ├── risk_agent.py, insight_agent.py  # roadmap risk scan, health-summary
 │   │   │   ├── rag/          # PCE vector store for duplicate detection
-│   │   │   ├── base.py       # BaseAgent abstract class
-│   │   │   ├── client.py     # OllamaClient singleton
-│   │   │   ├── invoice_pipeline.py  # InvoicePipeline: sequential 4-step runner
-│   │   │   └── schemas.py    # AgentResult, OrchestratorResult, PipelineStep
+│   │   │   ├── base_agent.py # BaseAgent abstract class
+│   │   │   ├── ollama_client.py  # OllamaClient singleton
+│   │   │   └── agent_schemas.py  # AgentResult, OrchestratorResult, PipelineStep
 │   │   ├── models/           # InvoiceRecord, Asset, JournalEntry, enums
-│   │   ├── storage/          # ORM models, repositories, DB init
+│   │   ├── storage/          # ORM models (SQLite/legacy) + sync_mongo_repository.py (primary)
 │   │   ├── extraction/       # PDF/OCR/LLM hybrid extractor
 │   │   ├── classification/   # AccountingCoder, CostCatalog, ML classifier
 │   │   ├── validation/       # field, coherence, duplicate, anomaly checks
@@ -180,12 +199,15 @@ internship_biat/
 │   │   ├── billing/          # client invoice generation
 │   │   ├── budget/           # BudgetTracker (planned vs actual)
 │   │   └── capex/            # depreciation (linear/degressive), AssetRepository
-│   ├── scripts/
-│   │   ├── seed_demo.py      # full demo data seeder (11 sections)
-│   │   ├── run_agent.py      # headless daemon (watches inbox/)
-│   │   └── review_queue.py   # terminal review UI
 │   └── tests/
-│       └── unit/             # 703 tests, all mocked
+│       ├── unit/             # 42 files, mocked deps
+│       └── integration/      # real disposable Mongo test DB, mocked LLM
+├── scripts/
+│   ├── seed_demo.py, seed_users.py, seed_budget_actuals.py, seed_projects.py,
+│   │   seed_risks.py, seed_roadmap.py  # Mongo-native, idempotent seeders
+│   ├── review_queue.py       # terminal review UI (reads SQLite — see Prerequisites)
+│   └── run_api.py            # FastAPI entry point
+│   # run_agent.py (headless daemon) removed 2026-07 — superseded by the API+AIOrchestrator path
 ├── frontend/
 │   └── src/
 │       ├── pages/
@@ -204,8 +226,8 @@ internship_biat/
 │   ├── cost_catalog.yaml     # 33 accounting taxonomy entries
 │   └── budget_plan.yaml      # annual budget by catalog ID (12 monthly values)
 ├── data/
-│   └── invoices.db           # SQLite (WAL mode)
-└── alembic/                  # DB migration scripts
+│   └── invoices.db           # SQLite (WAL mode) — still required, see Prerequisites
+└── backend/alembic/          # SQLite migration scripts
 ```
 
 ---
@@ -230,10 +252,12 @@ PDF / invoice file
                          → JOURNALED
 ```
 
-Core runner: `backend/src/ai/invoice_pipeline.py` — `InvoicePipeline.process_invoice()`.  
-Pure functions: `backend/src/agent/pipeline.py` — used by the Streamlit UI and the headless daemon.  
+Orchestration: `backend/src/ai_agents/orchestrator.py` — `AIOrchestrator.process_invoice()`,
+invoked from `POST /api/invoices/upload` — this is the only invoice-processing
+entry point (an older headless daemon existed until 2026-07; removed as
+superseded once confirmed unused in practice).  
 API layer: `backend/api/` — FastAPI + uvicorn, all endpoints under `/api/`.  
-UI: `frontend/` — React 18 + TypeScript + Vite + Tailwind v4.
+UI: `frontend/` — React 19 + TypeScript + Vite + Tailwind v4.
 
 ---
 
@@ -250,19 +274,10 @@ DATABASE_URL=sqlite:///./data/other.db PYTHONPATH=backend uvicorn api.main:app
 
 ---
 
-## Streamlit app (legacy UI)
+## Terminal review UI
 
 ```bash
-streamlit run app/Home.py   # :8502
-```
-
----
-
-## Headless daemon
-
-```bash
-python backend/scripts/run_agent.py     # watches ./inbox/ for new PDFs
-python backend/scripts/review_queue.py  # terminal review UI
+python scripts/review_queue.py   # reads SQLite — stale/empty on a Mongo-only environment, see Prerequisites
 ```
 
 ---
@@ -270,6 +285,7 @@ python backend/scripts/review_queue.py  # terminal review UI
 ## Generate a demo invoice PDF
 
 ```bash
-python backend/scripts/make_realistic_invoice.py
-# outputs a supplier PDF to ./inbox/ ready for upload
+python scripts/make_realistic_invoice.py
+# writes ./data/demo_invoice.pdf — upload it via POST /api/invoices/upload
+# (or the frontend's upload page); there is no folder-watcher anymore
 ```
