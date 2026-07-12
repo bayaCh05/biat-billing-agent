@@ -8,7 +8,6 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
-
 from src.storage import sync_mongo_repository
 from src.storage.sync_mongo_repository import (
     create_user_sync,
@@ -18,6 +17,7 @@ from src.storage.sync_mongo_repository import (
     save_ligne_budget_sync,
     save_livrable_sync,
     save_phase_sync,
+    save_risque_sync,
 )
 
 
@@ -72,7 +72,9 @@ def test_save_phase_sync_creates_then_skips_duplicate(db):
 
 def test_save_livrable_sync_and_phase_has_livrables(db):
     assert phase_has_livrables_sync("PH-1") is False
-    save_livrable_sync("PH-1", "Titre", "desc", date(2026, 3, 1), None, "EN_ATTENTE", "user@biat-it.tn")
+    save_livrable_sync(
+        "PH-1", "Titre", "desc", date(2026, 3, 1), None, "EN_ATTENTE", "user@biat-it.tn",
+    )
     assert phase_has_livrables_sync("PH-1") is True
     assert db["livrables"].docs[0]["phase_id"] == "PH-1"
 
@@ -91,3 +93,19 @@ def test_save_feuille_de_route_sync_creates_then_skips_duplicate(db):
         "Titre", "desc", date(2026, 1, 1), date(2026, 2, 1), "PRJ-A", "PLANIFIE", "HAUTE", 2026,
     ) is False
     assert len(db["feuilles_de_route"].docs) == 1
+
+
+def test_save_risque_sync_creates_then_skips_duplicate(db):
+    kwargs = dict(
+        titre="Risque X", description="desc", type_risque="TECHNIQUE",
+        probabilite="ELEVEE", impact="CRITIQUE", statut="IDENTIFIE",
+        plan_mitigation="plan", responsable_id="chef@biat-it.tn",
+        date_identification=date(2026, 1, 1), date_echeance_mitigation=None,
+        projet_id="PRJ-A", created_by="admin@biat-it.tn",
+    )
+    assert save_risque_sync(**kwargs) is True
+    assert save_risque_sync(**kwargs) is False
+    assert len(db["risques"].docs) == 1
+    doc = db["risques"].docs[0]
+    assert doc["niveau_criticite"] == "CRITIQUE"
+    assert doc["feuille_route_id"] is None

@@ -839,6 +839,36 @@ def save_ligne_budget_sync(
     return True
 
 
+def save_risque_sync(
+    titre: str, description: str, type_risque: str,
+    probabilite: str, impact: str, statut: str, plan_mitigation: str,
+    responsable_id: str | None, date_identification: date,
+    date_echeance_mitigation: date | None, projet_id: str | None,
+    created_by: str, feuille_route_id: str | None = None,
+) -> bool:
+    """Retourne False si un risque (titre) existe déjà, True si créé."""
+    from src.services.risk_service import calculate_criticite
+
+    coll = _get_db()["risques"]
+    if coll.find_one({"titre": titre}):
+        return False
+    now = datetime.now(timezone.utc)
+    coll.insert_one({
+        "_id": str(uuid4()), "titre": titre, "description": description,
+        "type_risque": type_risque, "probabilite": probabilite, "impact": impact,
+        "niveau_criticite": calculate_criticite(probabilite, impact),
+        "statut": statut, "plan_mitigation": plan_mitigation,
+        "responsable_id": responsable_id,
+        "date_identification": _to_midnight_utc(date_identification),
+        "date_echeance_mitigation": _to_midnight_utc(date_echeance_mitigation),
+        "date_cloture": None,
+        "feuille_route_id": feuille_route_id,
+        "projet_id": projet_id,
+        "created_by": created_by, "created_at": now, "updated_at": now,
+    })
+    return True
+
+
 def save_feuille_de_route_sync(
     titre: str, description: str, date_debut: date, date_fin: date,
     projet_id: str | None, statut: str, priorite: str, annee: int,

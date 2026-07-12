@@ -1,4 +1,4 @@
-"""Seed roadmap items (feuilles de route) across all 3 projects for 2026.
+"""Seed roadmap items (feuilles de route) across all 3 projects for 2026 into MongoDB.
 
 Covers all 4 quarters, all statuts, and varied priorities to test:
   - Gantt bar rendering (T1–T4 positions)
@@ -11,15 +11,20 @@ Usage:
 """
 from __future__ import annotations
 
+import asyncio
 import sys
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.storage.db import build_engine, build_session_factory, init_db
-from src.storage.orm_models_roadmap import FeuilleDeRouteORM
+# api.auth must be imported first (before src.storage.mongodb) — it's what
+# loads .env (MONGODB_URI included), which mongodb.py reads as a module-level
+# constant at import time.
+import api.auth  # noqa: F401
+from src.storage.mongodb import close_mongodb, init_beanie
+from src.storage.sync_mongo_repository import save_feuille_de_route_sync
 
 # Today is 2026-07-06
 
@@ -196,36 +201,36 @@ ITEMS = [
 ]
 
 
-def main() -> None:
-    engine = build_engine("sqlite:///./data/invoices.db")
-    init_db(engine)
-    sf = build_session_factory(engine)
+async def main() -> None:
+    if not await init_beanie():
+        print("MONGODB_URI non défini ou connexion impossible — abandon.")
+        sys.exit(1)
 
     today = date(2026, 7, 6)
+    created = 0
 
-    with sf() as session:
-        for item in ITEMS:
-            days_left = (item["date_fin"] - today).days
-            is_late = days_left < 0 and item["statut"] not in ("TERMINE", "ANNULE")
-            flag = "⚠ LATE" if is_late else ("✓" if item["statut"] == "TERMINE" else "→")
-            orm = FeuilleDeRouteORM(
-                titre=item["titre"],
-                description=item["description"],
-                date_debut=item["date_debut"],
-                date_fin=item["date_fin"],
-                statut=item["statut"],
-                priorite=item["priorite"],
-                projet_id=item.get("projet_id"),
-                responsable_id=item.get("responsable_id"),
-                annee=2026,
-            )
-            session.add(orm)
-            proj = item.get("projet_id") or "transversal"
+    for item in ITEMS:
+        days_left = (item["date_fin"] - today).days
+        is_late = days_left < 0 and item["statut"] not in ("TERMINE", "ANNULE")
+        flag = "⚠ LATE" if is_late else ("✓" if item["statut"] == "TERMINE" else "→")
+        proj = item.get("projet_id") or "transversal"
+
+        if save_feuille_de_route_sync(
+            titre=item["titre"], description=item["description"],
+            date_debut=item["date_debut"], date_fin=item["date_fin"],
+            projet_id=item.get("projet_id"), statut=item["statut"],
+            priorite=item["priorite"], annee=2026,
+            responsable_id=item.get("responsable_id"),
+        ):
+            created += 1
             print(f"  {flag} [{proj:10}] {item['titre'][:55]}")
+        else:
+            print(f"  (déjà présent) [{proj:10}] {item['titre'][:55]}")
 
-        session.commit()
-        print(f"\n✓ {len(ITEMS)} jalons créés.")
+    print(f"\n✓ {created} jalons créés ({len(ITEMS) - created} déjà présents, ignorés).")
+
+    await close_mongodb()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

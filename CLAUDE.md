@@ -314,15 +314,24 @@ are relative to `backend/`.
   Mongo-only upload path never generated a notification — a real bug, not just a
   migration-status inaccuracy.
 - **Seed/demo scripts** (`scripts/seed_demo.py`, `seed_users.py`,
-  `seed_budget_actuals.py`) — write to MongoDB via `sync_mongo_repository.py`
-  (`SyncMongo*Repository.save()` plus new `create_user_sync`,
+  `seed_budget_actuals.py`, `seed_projects.py`, `seed_risks.py`,
+  `seed_roadmap.py`) — write to MongoDB via `sync_mongo_repository.py`
+  (`SyncMongo*Repository.save()` plus `create_user_sync`,
   `save_charte_projet_sync`, `save_phase_sync`, `save_livrable_sync`,
-  `save_ligne_budget_sync`, `save_feuille_de_route_sync`). **Every write is
-  idempotent (upsert-by-id / skip-if-exists) — these scripts no longer wipe the
-  database by default.** That was safe when they targeted a disposable SQLite
-  file; it is not safe now that they write to the same shared MongoDB the app
-  reads from. `--append` is kept only for CLI compatibility and has no effect
-  on this idempotency.
+  `save_ligne_budget_sync`, `save_feuille_de_route_sync`, `save_risque_sync`).
+  **Every write is idempotent (upsert-by-id / skip-if-exists) — these scripts
+  no longer wipe the database by default.** That was safe when they targeted a
+  disposable SQLite file; it is not safe now that they write to the same
+  shared MongoDB the app reads from. `--append` is kept only for CLI
+  compatibility and has no effect on this idempotency. `seed_projects.py`,
+  `seed_risks.py`, and `seed_roadmap.py` were migrated off SQLAlchemy/SQLite
+  onto this Mongo-native path in a 2026-07 cleanup pass — before that they
+  silently wrote `CharteProjetORM`/`PhaseORM`/`RisqueORM`/`FeuilleDeRouteORM`
+  rows into SQLite while the live roadmap/risk/project routers only read from
+  Mongo, so running them had no visible effect on the real UI. The former
+  `scripts/seed_risks_par_projet.py` (an undocumented, unmerged duplicate of
+  `seed_risks.py` seeding the same 3 demo projects) was folded into
+  `seed_risks.py` and deleted in the same pass.
 - **`PATCH /ai/invoices/{id}/classification`** (classification-feedback endpoint)
   — reads/writes the invoice via `SyncMongoInvoiceRepository`, writes feedback via
   `save_classification_feedback_sync()`/`count_classification_feedback_sync()`
