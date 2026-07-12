@@ -72,9 +72,12 @@ def get_risk_summary(db: Session) -> dict:
         ):
             overdue.append({"id": str(r.id), "titre": r.titre, "date_echeance_mitigation": r.date_echeance_mitigation.isoformat()})
 
+    def _aware(dt: datetime) -> datetime:
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
     top_critical = sorted(
         [r for r in all_risks if r.niveau_criticite == "CRITIQUE" and r.statut not in ("CLOTURE", "MAITRISE")],
-        key=lambda r: r.created_at,
+        key=lambda r: _aware(r.created_at),
         reverse=True,
     )[:5]
 
