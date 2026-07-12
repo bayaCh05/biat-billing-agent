@@ -9,7 +9,6 @@ After any pass: Ollama generates classification_reason in French.
 from __future__ import annotations
 
 import logging
-import time
 
 from src.ai_agents.base_agent import BaseAgent
 from src.ai_agents.agent_schemas import AgentResult
@@ -31,11 +30,11 @@ class ClassificationAgent(BaseAgent):
 
     def run(self, context: dict) -> AgentResult:
         """context keys: invoice (InvoiceRecord), degraded_mode (bool)"""
-        start = time.monotonic()
         invoice = context["invoice"]
         degraded = context.get("degraded_mode", False)
 
-        try:
+        def _do() -> dict:
+            nonlocal invoice
             # Direction classification (rule-based, always)
             invoice = self._classifier.classify(invoice)
 
@@ -76,10 +75,7 @@ class ClassificationAgent(BaseAgent):
             invoice.classification_reason = reason
             invoice.classification_pass = pass_used
 
-            return AgentResult(
-                agent_name=self.name,
-                success=True,
-                duration_ms=(time.monotonic() - start) * 1000,
+            return dict(
                 output={
                     "catalog_id": invoice.cost_catalog_id,
                     "compte": invoice.accounting_compte,
@@ -91,18 +87,9 @@ class ClassificationAgent(BaseAgent):
                 },
                 confidence=conf,
                 explanation=reason,
-                ollama_calls_made=self._call_count,
             )
 
-        except Exception as exc:
-            logger.error("classification_agent_error: %s", exc)
-            return AgentResult(
-                agent_name=self.name,
-                success=False,
-                duration_ms=(time.monotonic() - start) * 1000,
-                error=str(exc),
-                ollama_calls_made=self._call_count,
-            )
+        return self._run_safely(_do)
 
     def _try_rag_pass(self, invoice) -> str:
         try:

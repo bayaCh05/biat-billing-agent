@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from datetime import date, timedelta
 
 from src.ai_agents.base_agent import BaseAgent
@@ -36,10 +35,9 @@ class AccountingAgent(BaseAgent):
 
     def run(self, context: dict) -> AgentResult:
         """context keys: invoice (InvoiceRecord)"""
-        start = time.monotonic()
         invoice: InvoiceRecord = context["invoice"]
 
-        try:
+        def _do() -> dict:
             catalog_entry = None
             if invoice.cost_catalog_id:
                 catalog_entry = self._catalog.get(invoice.cost_catalog_id)
@@ -61,10 +59,7 @@ class AccountingAgent(BaseAgent):
             if getattr(invoice, "payment_term_days", None):
                 installment_ids = self._create_payment_schedule(invoice)
 
-            return AgentResult(
-                agent_name=self.name,
-                success=True,
-                duration_ms=(time.monotonic() - start) * 1000,
+            return dict(
                 output={
                     "journal_entry_id": journal_id,
                     "is_balanced": is_balanced,
@@ -77,18 +72,9 @@ class AccountingAgent(BaseAgent):
                     "installment_ids": installment_ids,
                 },
                 explanation=explanation,
-                ollama_calls_made=self._call_count,
             )
 
-        except Exception as exc:
-            logger.error("accounting_agent_error: %s", exc)
-            return AgentResult(
-                agent_name=self.name,
-                success=False,
-                duration_ms=(time.monotonic() - start) * 1000,
-                error=str(exc),
-                ollama_calls_made=self._call_count,
-            )
+        return self._run_safely(_do)
 
     # ── Journal entry ─────────────────────────────────────────────────────────
 

@@ -63,10 +63,33 @@ class BaseAgent(ABC):
         except (TypeError, ValueError):
             return None
 
-    def _timed_run(self, fn) -> tuple[AgentResult, float]:
+    def _run_safely(self, fn) -> AgentResult:
+        """Standard run()/sub-capability wrapper: times execution and converts
+        any exception into a uniform success=False AgentResult instead of
+        letting it propagate to the orchestrator.
+
+        `fn` is a zero-arg callable doing the agent's actual work; it returns
+        a dict of AgentResult kwargs for the success case (output=...,
+        confidence=..., explanation=...) — agent_name, success, duration_ms,
+        and ollama_calls_made are filled in here so each agent only writes
+        its own logic once.
+        """
         start = time.monotonic()
-        result = fn()
-        duration = (time.monotonic() - start) * 1000
-        result.duration_ms = duration
-        result.ollama_calls_made = self._call_count
-        return result, duration
+        try:
+            kwargs = fn()
+            return AgentResult(
+                agent_name=self.name,
+                success=True,
+                duration_ms=(time.monotonic() - start) * 1000,
+                ollama_calls_made=self._call_count,
+                **kwargs,
+            )
+        except Exception as exc:
+            logger.error("%s_error: %s", self.name, exc)
+            return AgentResult(
+                agent_name=self.name,
+                success=False,
+                duration_ms=(time.monotonic() - start) * 1000,
+                error=str(exc),
+                ollama_calls_made=self._call_count,
+            )

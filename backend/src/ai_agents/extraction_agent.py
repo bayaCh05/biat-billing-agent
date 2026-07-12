@@ -7,7 +7,6 @@ Wraps the existing HybridExtractor and adds:
 from __future__ import annotations
 
 import logging
-import time
 
 from src.ai_agents.base_agent import BaseAgent
 from src.ai_agents.agent_schemas import AgentResult
@@ -24,10 +23,10 @@ class ExtractionAgent(BaseAgent):
 
     def run(self, context: dict) -> AgentResult:
         """context keys: invoice (InvoiceRecord)"""
-        start = time.monotonic()
         invoice = context["invoice"]
 
-        try:
+        def _do() -> dict:
+            nonlocal invoice
             invoice = self._extractor.extract(invoice)
 
             # Extract payment_term_days if due_date and invoice_date are both present
@@ -48,10 +47,7 @@ class ExtractionAgent(BaseAgent):
                     invoice.id, min_conf,
                 )
 
-            return AgentResult(
-                agent_name=self.name,
-                success=True,
-                duration_ms=(time.monotonic() - start) * 1000,
+            return dict(
                 output={
                     "extraction_method": method,
                     "min_confidence": min_conf,
@@ -60,18 +56,9 @@ class ExtractionAgent(BaseAgent):
                 },
                 confidence=min_conf,
                 explanation=f"Méthode: {method}, confiance min: {min_conf:.0%}",
-                ollama_calls_made=self._call_count,
             )
 
-        except Exception as exc:
-            logger.error("extraction_agent_error: %s", exc)
-            return AgentResult(
-                agent_name=self.name,
-                success=False,
-                duration_ms=(time.monotonic() - start) * 1000,
-                error=str(exc),
-                ollama_calls_made=self._call_count,
-            )
+        return self._run_safely(_do)
 
     @staticmethod
     def _min_confidence(invoice) -> float:

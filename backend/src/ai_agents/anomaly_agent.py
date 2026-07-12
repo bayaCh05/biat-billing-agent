@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import re
-import time
 
 from src.ai_agents.base_agent import BaseAgent
 from src.ai_agents.agent_schemas import AgentResult
@@ -37,10 +36,10 @@ class AnomalyAgent(BaseAgent):
 
     def run(self, context: dict) -> AgentResult:
         """context keys: invoice (InvoiceRecord)"""
-        start = time.monotonic()
         invoice: InvoiceRecord = context["invoice"]
 
-        try:
+        def _do() -> dict:
+            nonlocal invoice
             # Run existing validators (field, coherence, duplicate, anomaly)
             invoice = self._fv.validate(invoice)
             invoice = self._cc.check(invoice)
@@ -60,28 +59,16 @@ class AnomalyAgent(BaseAgent):
             error_count = sum(1 for f in all_flags if f.severity == FlagSeverity.ERROR)
             requires_review = error_count > 0 or invoice.human_review_required
 
-            return AgentResult(
-                agent_name=self.name,
-                success=True,
-                duration_ms=(time.monotonic() - start) * 1000,
+            return dict(
                 output={
                     "anomaly_count": len(all_flags),
                     "error_count": error_count,
                     "requires_human_review": requires_review,
                     "flag_types": [f.flag_type.value for f in all_flags],
                 },
-                ollama_calls_made=self._call_count,
             )
 
-        except Exception as exc:
-            logger.error("anomaly_agent_error: %s", exc)
-            return AgentResult(
-                agent_name=self.name,
-                success=False,
-                duration_ms=(time.monotonic() - start) * 1000,
-                error=str(exc),
-                ollama_calls_made=self._call_count,
-            )
+        return self._run_safely(_do)
 
     def _check_category_price(self, invoice: InvoiceRecord) -> None:
         catalog_id = invoice.cost_catalog_id

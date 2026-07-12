@@ -53,29 +53,15 @@ class RiskAgent(BaseAgent):
         (service_bridge.py's create_risk_native() etc.), so this bridges
         once here rather than needing async up the whole call chain.
         """
-        start = time.monotonic()
-        try:
+        def _do() -> dict:
             output = asyncio.run(self._scan_roadmap_async(context.get("item_id")))
             logger.info(
                 "risk_scan_complete created=%d skipped=%d",
                 output["risks_created"], output["items_skipped"],
             )
-            return AgentResult(
-                agent_name=self.name,
-                success=True,
-                duration_ms=(time.monotonic() - start) * 1000,
-                output=output,
-                ollama_calls_made=self._call_count,
-            )
-        except Exception as exc:
-            logger.error("risk_scan_error: %s", exc)
-            return AgentResult(
-                agent_name=self.name,
-                success=False,
-                duration_ms=(time.monotonic() - start) * 1000,
-                error=str(exc),
-                ollama_calls_made=self._call_count,
-            )
+            return dict(output=output)
+
+        return self._run_safely(_do)
 
     async def _scan_roadmap_async(self, item_id_filter: str | None) -> dict:
         from types import SimpleNamespace
