@@ -6,8 +6,7 @@ conditions de règlement, et mentions légales.
 """
 from __future__ import annotations
 
-import os
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 from fpdf import FPDF
@@ -166,7 +165,6 @@ class PDFGenerator:
 
     def _parties_block(self, pdf: _InvoicePDF, inv: ClientInvoice) -> None:
         page_w = pdf.w - pdf.l_margin - pdf.r_margin
-        y0     = pdf.get_y()
 
         # "Facturé à" label
         pdf.set_font("Helvetica", "B", 8)

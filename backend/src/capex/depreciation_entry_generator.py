@@ -15,7 +15,6 @@ from __future__ import annotations
 from datetime import date
 
 from src.utils.date_utils import last_day_int as _last_day_of_month
-from uuid import UUID
 
 from src.accounting.plan_comptable import ComptesAmortissement
 from src.models.asset import Asset

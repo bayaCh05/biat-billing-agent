@@ -1,7 +1,7 @@
 """Chargement et accès au fichier config/client_templates.yaml."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml

@@ -5,7 +5,7 @@ Décision Phase 0 : FichePhase et AvanceProgrammee sont embarquées
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 

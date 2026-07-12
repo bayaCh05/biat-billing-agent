@@ -61,7 +61,6 @@ class InvoiceRepository:
 
     def delete(self, invoice_id: str | UUID) -> None:
         """Hard-delete an invoice and its related rows (flags, line items, history)."""
-        from sqlalchemy import delete as sa_delete
         uid = UUID(str(invoice_id)) if isinstance(invoice_id, str) else invoice_id
         uid_str = uid.hex  # SQLite stores UUIDs as hex strings without dashes
         # Delete child rows in FK order before the parent to satisfy constraints.

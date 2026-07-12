@@ -39,7 +39,7 @@ from src.models.enums import (
     InvoiceDirection, InvoiceStatus,
 )
 from src.models.invoice import ConfidenceField, InvoiceRecord, LineItem, ValidationFlag
-from src.models.journal import JournalEntry, JournalLine
+from src.models.journal import JournalEntry
 
 if TYPE_CHECKING:
     from src.models.audit import AuditLogCreate

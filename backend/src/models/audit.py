@@ -1,7 +1,6 @@
 """Audit trail Pydantic models — BCT compliance (Circulaire 2025-13)."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel

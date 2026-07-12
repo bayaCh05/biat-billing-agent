@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Float, Index, Integer, String, Text, Uuid
+from sqlalchemy import Date, DateTime, Float, Index, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.storage.db import Base

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 
-from src.models.enums import InvoiceDirection, InvoiceStatus
+from src.models.enums import InvoiceStatus
 from src.models.invoice import InvoiceRecord
 from src.utils.logging import get_logger
 

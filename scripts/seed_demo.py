@@ -32,7 +32,7 @@ import hashlib
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))

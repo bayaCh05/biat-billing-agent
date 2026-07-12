@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from src.ai_agents.base_agent import BaseAgent
 from src.ai_agents.agent_schemas import AgentResult
 from src.ai_agents.ollama_client import OllamaClient
-from src.models.enums import ChargeType, InvoiceDirection
+from src.models.enums import ChargeType
 from src.models.invoice import InvoiceRecord
 
 logger = logging.getLogger(__name__)

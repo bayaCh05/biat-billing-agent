@@ -25,7 +25,6 @@ class EasyOCREngine(OCREngineBase):
 
     def extract(self, images: list, languages: list[str] | None = None) -> str:
         reader = self._get_reader()
-        langs = languages or self.languages
         page_texts: list[str] = []
         for image in images:
             arr = np.array(image)

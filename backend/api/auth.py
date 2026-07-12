@@ -27,10 +27,6 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from api.security.jwt_handler import (
-    create_access_token,
-    create_refresh_token,
-    create_token,        # legacy shim
-    decode_any,
     verify_access_token,
 )
 

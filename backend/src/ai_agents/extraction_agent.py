@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import logging
 import time
-from pathlib import Path
 
 from src.ai_agents.base_agent import BaseAgent
 from src.ai_agents.agent_schemas import AgentResult
-from src.ai_agents.ollama_client import OllamaClient
 
 logger = logging.getLogger(__name__)
 

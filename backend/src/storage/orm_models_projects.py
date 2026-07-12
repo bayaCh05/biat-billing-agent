@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     Boolean, Date, DateTime, Float, ForeignKey,
-    Index, Integer, String, Text, UniqueConstraint, func,
+    Index, Integer, String, Text, UniqueConstraint,
 )
 from sqlalchemy import Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from src.classification.matcher import contains_any, fuzzy_match
+from src.classification.matcher import contains_any
 from src.models.enums import FlagSeverity, FlagType, InvoiceDirection
 from src.models.invoice import InvoiceRecord, ValidationFlag
 from src.utils.logging import get_logger

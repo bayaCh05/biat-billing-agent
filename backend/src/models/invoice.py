@@ -4,10 +4,9 @@ from datetime import date, datetime, timezone
 from typing import Generic, TypeVar
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from src.models.enums import (
-    ChargeFlux,
     ChargeNature,
     ChargeType,
     ExtractionMethod,

@@ -11,8 +11,6 @@ Les lignes de la même facture portant le même compte_produit sont agrégées.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
-from uuid import UUID
 
 from src.accounting.plan_comptable import ComptesTVA, ComptesTiers
 from src.models.client_invoice import ClientInvoice

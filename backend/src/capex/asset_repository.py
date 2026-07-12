@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 from uuid import UUID as _UUID
 
-from sqlalchemy import Boolean, Date, DateTime, Float, Index, Integer, String, Text, func, select, and_
+from sqlalchemy import Boolean, Date, DateTime, Float, Index, Integer, String, Text, func, select
 from sqlalchemy import Uuid
 from sqlalchemy.orm import Mapped, Session, mapped_column
 

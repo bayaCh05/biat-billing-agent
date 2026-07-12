@@ -267,7 +267,6 @@ class CostAnalyzer:
         self, catalog_id: str, ref_year: int, ref_month: int, lookback: int = 12
     ) -> list[float]:
         """Monthly totals for catalog_id over the lookback months before ref_year/ref_month."""
-        end = _last_day(ref_year, ref_month)
         # go back 'lookback' months from the month before ref_month
         start_year, start_month = _subtract_months(ref_year, ref_month - 1, lookback)
         start = date(start_year, start_month, 1)
