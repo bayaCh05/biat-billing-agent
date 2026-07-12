@@ -21,6 +21,29 @@ Violating this is a compliance failure for a banking subsidiary.
 
 ---
 
+## Working Conventions
+
+- **Reports and prompts in French.** Status updates, findings, and questions
+  to the project owner should be written in French — this is an internship at
+  a Tunisian bank and the owner works in French. Code, identifiers, commit
+  messages, and this file stay in English/technical French mix as already
+  established below.
+- **Stage multi-step work explicitly, wait for validation before acting.** For
+  any non-trivial cleanup/refactor pass (multiple files, deletions, dependency
+  or doc changes), break the work into steps, give a detailed inventory of
+  what was found at each step, and wait for explicit go-ahead before making
+  changes — don't bundle "here's what I found" and "here's what I already did"
+  into one message.
+- **Never delete or rename a file without explicit confirmation for that
+  specific file/action** — a prior approval for one file or one category does
+  not extend to others found later in the same pass.
+- **One atomic commit per lot, never automatic.** Each logically-distinct
+  change (a dependency fix, a dead-code removal, a doc correction) gets its
+  own commit with its own message — don't squash unrelated fixes together,
+  and don't commit without being asked to for that lot.
+
+---
+
 ## Runtime
 
 | Item | Value |
@@ -35,6 +58,7 @@ Violating this is a compliance failure for a banking subsidiary.
 | DB (primary, in migration) | MongoDB via Beanie/Motor — `docker-compose` service `biat_mongo`, `MONGODB_URI`/`MONGODB_DB` in `.env`. **Auth required**: `mongod --auth`, credentials via `MONGO_ROOT_USER`/`MONGO_ROOT_PASSWORD` in `.env` (embedded in `MONGODB_URI` as `mongodb://user:pass@host/?authSource=admin`) |
 | LLM | Ollama `qwen2.5:3b` on `http://localhost:11434` |
 | OCR | Tesseract (not EasyOCR — not installed) |
+| RAG (Classification Pass C) | ChromaDB (local vector store) + `sentence-transformers` for embeddings — `backend/src/ai_agents/rag/embedder.py` (`PCEEmbedder`), `pce_vectorstore.py` (`PCEVectorStore`). Both lazy-imported (heavy ML deps) and declared in `pyproject.toml` |
 
 **Two persistence layers coexist.** See "MongoDB Migration Status" below before touching any storage code — reads/writes for most domains now go to MongoDB, not SQLite, and the rule for which one differs by file.
 
@@ -97,7 +121,8 @@ touches it, unlike the dev/prod volume above which requires auth by design).
 > `backend/api/` (routers under `backend/api/routers/`: `invoices.py`, `auth.py`,
 > `admin.py`, `users.py`, `security.py`, `billing.py`, `payments.py`, `budget.py`,
 > `capex.py`, `projet_budget.py`, `roadmap.py`, `risks.py`, `livrables.py`,
-> `notifications.py`, `review.py`, `journal.py`, `suivi.py`, `ai.py`, plus
+> `notifications.py`, `review.py`, `journal.py`, `suivi.py`, `ai.py`, `audit.py`,
+> `kpi.py`, `nl_query.py`, `projects.py`, plus
 > `backend/api/scheduler.py` for nightly jobs). `POST /api/invoices/upload` runs
 > invoices through `backend/src/ai_agents/orchestrator.py::AIOrchestrator` (see
 > below) — this is the **only** invoice-processing entry point left. The old
@@ -183,6 +208,10 @@ src/
     orchestrator.py      # ← AIOrchestrator — the real invoice-processing entry point
     extraction_agent.py, classification_agent.py, anomaly_agent.py, accounting_agent.py
     risk_agent.py, insight_agent.py  # secondary flows (roadmap risk scan, health-summary)
+    rag/
+      embedder.py         # PCEEmbedder (sentence-transformers)
+      pce_vectorstore.py  # PCEVectorStore (ChromaDB) — used by Classification Pass C
+      rag_classifier.py   # RAGClassifier — top-K similarity lookup
   models/
     invoice.py           # InvoiceRecord with ConfidenceField[T] generics
     enums.py             # InvoiceStatus, FlagType, etc.
@@ -201,7 +230,9 @@ src/
   classification/
     accounting_coder.py  # Level A (rules) + Level B (ML) coding
     ml_classifier.py     # TF-IDF + LogisticRegression fallback
-    catalog.py           # CostCatalog fuzzy keyword matching
+    classifier.py, matcher.py  # RAG-assisted Pass C helpers
+  cost_catalog/
+    catalog.py           # CostCatalog.from_yaml() — fuzzy keyword matching (NOT under classification/)
   validation/            # field_validator, coherence_checker, duplicate_detector, anomaly_detector
   accounting/            # entry_generator.py — journal entry patterns
   billing/               # client invoice generation + PDF (fpdf2)
@@ -209,6 +240,14 @@ src/
   capex/                 # DepreciationCalculator (linear/degressive), AssetRepository
   suivi/                 # aggregator, lifecycle_tracker (orphaned since the daemon/Streamlit
                           # removal — zero live callers, kept only for its own tests), reconciler
+  notifications/
+    notification_service.py  # flagged-invoice notifications (GET /notifications/*)
+  query/
+    nl_query_engine.py   # NLQueryEngine — NL → MongoDB aggregation pipeline (POST /nl-query)
+  services/              # risk_service.py (calculate_criticite), ldap_service.py, ldif_parser.py,
+                          # email_service.py, audit_service.py (IP/UA helpers only — see
+                          # "MongoDB Migration Status" re: log_action()), mock_ldap_auth.py,
+                          # password_verification_service.py
   utils/
     date_utils.py        # last_day_of_month(), last_day_int()
     logging.py           # structlog setup
@@ -482,12 +521,20 @@ summary = tracker.summary(year=2026, through_month=6)
 
 ## Accounting (PCE Tunisien)
 
-Plan Comptable des Entreprises tunisien. Key accounts:
+Plan Comptable des Entreprises tunisien (PCE), établi par la loi n° 96-112 du
+30 décembre 1996 relative au système comptable des entreprises. Key accounts:
 - `401` Fournisseurs, `411` Clients
 - `4366` TVA déductible, `4367` TVA collectée
 - `6xxx` Charges (OPEX), `2xxx` Immobilisations (CAPEX)
 - `6811` Dotations amortissements, `28xx` Amortissements cumulés
 - TVA rates allowed: 0%, 7%, 13%, 19% — validate against `tva_rates_allowed` in settings
+
+**All TND amounts are rounded/stored to 3 decimal places** (the millime is
+1/1000 of a dinar — Tunisia's smallest currency subunit), not 2. Enforced via
+`round(x, 3)` throughout — `classification/accounting_coder.py` (confidence
+scores excepted), `accounting/entry_generator.py` (ht/tva/ttc), `models/journal.py`
+(`total_debit`/`total_credit`, and the `< 0.005 TND` double-entry tolerance is
+half a millime). Don't round to 2 decimals anywhere in the money path.
 
 ---
 
