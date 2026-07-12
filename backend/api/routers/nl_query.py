@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from api.auth import require_role
-from api.deps import get_engine, get_config
+from api.deps import get_config
 from api.schemas import NLQueryRequest, NLQueryResult
 
 router = APIRouter(prefix="/nl-query", tags=["analytics"])
@@ -27,7 +27,6 @@ _COMPTABLE_DIRECTION = Depends(require_role("Comptable", "Direction"))
 def nl_query(
     body: NLQueryRequest,
     _: dict = _COMPTABLE_DIRECTION,
-    engine=Depends(get_engine),
     cfg: dict = Depends(get_config),
 ):
     from src.query.nl_query_engine import NLQueryEngine
@@ -36,7 +35,7 @@ def nl_query(
     ollama_url = cfg.get("llm", {}).get("base_url", "http://localhost:11434")
 
     try:
-        nl_engine = NLQueryEngine(engine=engine, ollama_url=ollama_url, model=model)
+        nl_engine = NLQueryEngine(ollama_url=ollama_url, model=model)
         result = nl_engine.query(body.question)
     except Exception as e:
         return NLQueryResult(sql="", columns=[], rows=[], row_count=0, error=str(e))

@@ -11,12 +11,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-from src.models.enums import InvoiceStatus
 from src.storage.documents.service_bridge import (
     _asset_doc_to_pydantic,
     _client_invoice_doc_to_pydantic,
     _consumed_jh_by_project,
-    _ensure_invoice_notification_mirrored,
+    _ensure_invoice_notification_native,
     _flag_to_dict,
     _get_by_str_id,
     _invoice_doc_to_record,
@@ -231,108 +230,95 @@ class TestRejectInvoiceNative:
         mock_audit.assert_awaited_once()
 
 
-# ── Flagged-invoice notification sync (SQLAlchemy source-of-truth + Mongo mirror) ─
+# ── Flagged-invoice notification sync (100% Mongo — InvoiceDocument + NotificationDocument) ─
 
 class TestSyncFlaggedInvoicesMirrored:
-    def test_mirrors_notification_for_each_flagged_invoice_needing_review(self):
+    def test_creates_notification_for_each_flagged_invoice_needing_review(self):
         needs_review = SimpleNamespace(
-            id=uuid4(), human_review_required=True, status=InvoiceStatus.FLAGGED,
-            issuer_name=SimpleNamespace(value="Ooredoo"),
+            id=uuid4(), human_review_required=True, status="FLAGGED",
+            issuer_name="Ooredoo",
         )
-        rejected = SimpleNamespace(  # terminal status -> excluded even if flagged
-            id=uuid4(), human_review_required=True, status=InvoiceStatus.REJECTED,
-            issuer_name=None,
-        )
-        not_flagged = SimpleNamespace(
-            id=uuid4(), human_review_required=False, status=InvoiceStatus.VALIDATED,
-            issuer_name=None,
-        )
-        fake_repo = MagicMock()
-        fake_repo.list_all.return_value = [needs_review, rejected, not_flagged]
+        fake_find = MagicMock(to_list=AsyncMock(return_value=[needs_review]))
 
         with (
-            patch("src.storage.repository.InvoiceRepository", return_value=fake_repo),
+            patch("src.storage.documents.invoice.InvoiceDocument.find", return_value=fake_find) as mock_find,
             patch(
-                "src.storage.documents.service_bridge._ensure_invoice_notification_mirrored",
+                "src.storage.documents.service_bridge._ensure_invoice_notification_native",
                 new=AsyncMock(),
             ) as mock_ensure,
         ):
-            _run(sync_flagged_invoices_mirrored(MagicMock()))
+            _run(sync_flagged_invoices_mirrored())
 
-        mock_ensure.assert_awaited_once()
-        call_args = mock_ensure.call_args[0]
-        assert call_args[1] == needs_review.id
-        assert call_args[2] == "Ooredoo"
-        assert call_args[3] == "FLAGGED"
+        query = mock_find.call_args[0][0]
+        assert query["human_review_required"] is True
+        assert set(query["status"]["$nin"]) == {"REJECTED", "ERROR"}
+        mock_ensure.assert_awaited_once_with(needs_review.id, "Ooredoo", "FLAGGED")
 
     def test_no_matching_invoices_is_a_noop(self):
-        fake_repo = MagicMock()
-        fake_repo.list_all.return_value = []
+        fake_find = MagicMock(to_list=AsyncMock(return_value=[]))
         with (
-            patch("src.storage.repository.InvoiceRepository", return_value=fake_repo),
+            patch("src.storage.documents.invoice.InvoiceDocument.find", return_value=fake_find),
             patch(
-                "src.storage.documents.service_bridge._ensure_invoice_notification_mirrored",
+                "src.storage.documents.service_bridge._ensure_invoice_notification_native",
                 new=AsyncMock(),
             ) as mock_ensure,
         ):
-            _run(sync_flagged_invoices_mirrored(MagicMock()))
+            _run(sync_flagged_invoices_mirrored())
         mock_ensure.assert_not_awaited()
 
 
-class TestEnsureInvoiceNotificationMirrored:
+class TestEnsureInvoiceNotificationNative:
     def test_skips_when_notification_already_exists(self):
-        session = MagicMock()
-        session.execute.return_value.scalar_one_or_none.return_value = SimpleNamespace(id="existing-notif")
-        with patch(
-            "src.notifications.notification_service.create_notification",
-        ) as mock_create:
-            _run(_ensure_invoice_notification_mirrored(session, uuid4(), "Ooredoo", "FLAGGED"))
-        mock_create.assert_not_called()
+        with (
+            patch(
+                "src.storage.documents.notification.NotificationDocument.find_one",
+                new=AsyncMock(return_value=SimpleNamespace(id="existing-notif")),
+            ),
+            patch(
+                "src.storage.documents.notification.NotificationDocument.get_pymongo_collection",
+            ) as mock_coll,
+        ):
+            _run(_ensure_invoice_notification_native(uuid4(), "Ooredoo", "FLAGGED"))
+        mock_coll.return_value.insert_one.assert_not_called()
 
-    def test_creates_and_mirrors_notification_when_absent(self):
-        session = MagicMock()
-        session.execute.return_value.scalar_one_or_none.return_value = None
-        created_notif = SimpleNamespace(
-            id=uuid4(), type="INVOICE_FLAGGED", title="t", body="b",
-            is_read=False, created_at=datetime.now(timezone.utc), invoice_id=uuid4(),
-        )
+    def test_creates_notification_when_absent(self):
+        invoice_id = uuid4()
         coll = MagicMock()
         coll.insert_one = AsyncMock()
         with (
             patch(
-                "src.notifications.notification_service.create_notification",
-                return_value=created_notif,
-            ) as mock_create,
+                "src.storage.documents.notification.NotificationDocument.find_one",
+                new=AsyncMock(return_value=None),
+            ),
             patch(
                 "src.storage.documents.notification.NotificationDocument.get_pymongo_collection",
                 return_value=coll,
             ),
         ):
-            _run(_ensure_invoice_notification_mirrored(session, uuid4(), "Ooredoo", "FLAGGED"))
+            _run(_ensure_invoice_notification_native(invoice_id, "Ooredoo", "FLAGGED"))
 
-        mock_create.assert_called_once()
-        assert mock_create.call_args.kwargs["notif_type"] == "INVOICE_FLAGGED"
-        session.commit.assert_called_once()
         coll.insert_one.assert_awaited_once()
+        doc = coll.insert_one.call_args[0][0]
+        assert doc["type"] == "INVOICE_FLAGGED"
+        assert doc["invoice_id"] == str(invoice_id)
+        assert doc["is_read"] is False
 
     def test_escalated_status_uses_escalated_notif_type(self):
-        session = MagicMock()
-        session.execute.return_value.scalar_one_or_none.return_value = None
-        created_notif = SimpleNamespace(
-            id=uuid4(), type="INVOICE_ESCALATED", title="t", body="b",
-            is_read=False, created_at=datetime.now(timezone.utc), invoice_id=uuid4(),
-        )
+        coll = MagicMock()
+        coll.insert_one = AsyncMock()
         with (
             patch(
-                "src.notifications.notification_service.create_notification",
-                return_value=created_notif,
-            ) as mock_create,
+                "src.storage.documents.notification.NotificationDocument.find_one",
+                new=AsyncMock(return_value=None),
+            ),
             patch(
                 "src.storage.documents.notification.NotificationDocument.get_pymongo_collection",
+                return_value=coll,
             ),
         ):
-            _run(_ensure_invoice_notification_mirrored(session, uuid4(), "Ooredoo", "ESCALATED"))
-        assert mock_create.call_args.kwargs["notif_type"] == "INVOICE_ESCALATED"
+            _run(_ensure_invoice_notification_native(uuid4(), "Ooredoo", "ESCALATED"))
+        doc = coll.insert_one.call_args[0][0]
+        assert doc["type"] == "INVOICE_ESCALATED"
 
 
 # ── Doc -> Pydantic converters ──────────────────────────────────────────────────

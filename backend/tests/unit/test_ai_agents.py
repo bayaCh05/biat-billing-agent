@@ -315,7 +315,7 @@ def insight_agent():
     _reset_ollama_singleton()
     with patch("src.ai_agents.base_agent.OllamaClient.get", return_value=_mock_ollama()):
         from src.ai_agents.insight_agent import InsightAgent
-        yield InsightAgent(engine=MagicMock())
+        yield InsightAgent()
 
 
 class TestInsightAgentNLQuery:
@@ -353,54 +353,72 @@ class TestInsightAgentNLQuery:
 
 
 class TestInsightAgentHealthSummary:
-    def _mock_db(self):
-        db = MagicMock()
-        db.execute.return_value.fetchone.return_value = None
-        return db
+    """_gather_kpis() reads MongoDB (sync_mongo_repository) — mocked here so these
+    stay hermetic unit tests, independent of a live Mongo connection."""
+
+    def _patched_kpis(self, insight_agent):
+        return patch.object(insight_agent, "_gather_kpis", return_value={})
 
     def test_ollama_unavailable_returns_degraded_summary(self, insight_agent):
-        db = self._mock_db()
-        with patch("src.ai_agents.insight_agent.OllamaClient.get",
+        with self._patched_kpis(insight_agent), \
+             patch("src.ai_agents.insight_agent.OllamaClient.get",
                    return_value=_mock_ollama(available=False)):
-            result = insight_agent.run({"task": "health_summary", "db": db})
+            result = insight_agent.run({"task": "health_summary"})
         assert result.success is True
         assert "Ollama" in result.output["summary"]
 
     def test_status_label_satisfaisant(self, insight_agent):
-        db = self._mock_db()
-        with patch("src.ai_agents.insight_agent.OllamaClient.get",
+        with self._patched_kpis(insight_agent), \
+             patch("src.ai_agents.insight_agent.OllamaClient.get",
                    return_value=_mock_ollama(available=True, response="Satisfaisant. Tout va bien.")):
-            result = insight_agent.run({"task": "health_summary", "db": db})
+            result = insight_agent.run({"task": "health_summary"})
         assert result.output["status_label"] == "Satisfaisant"
 
     def test_status_label_vigilance(self, insight_agent):
-        db = self._mock_db()
-        with patch("src.ai_agents.insight_agent.OllamaClient.get",
+        with self._patched_kpis(insight_agent), \
+             patch("src.ai_agents.insight_agent.OllamaClient.get",
                    return_value=_mock_ollama(available=True, response="Vigilance requise. Budget tendu.")):
-            result = insight_agent.run({"task": "health_summary", "db": db})
+            result = insight_agent.run({"task": "health_summary"})
         assert result.output["status_label"] == "Vigilance requise"
 
     def test_status_label_critique(self, insight_agent):
-        db = self._mock_db()
-        with patch("src.ai_agents.insight_agent.OllamaClient.get",
+        with self._patched_kpis(insight_agent), \
+             patch("src.ai_agents.insight_agent.OllamaClient.get",
                    return_value=_mock_ollama(available=True, response="Situation critique. 3 risques.")):
-            result = insight_agent.run({"task": "health_summary", "db": db})
+            result = insight_agent.run({"task": "health_summary"})
         assert result.output["status_label"] == "Critique"
 
     def test_kpis_in_output(self, insight_agent):
-        db = self._mock_db()
-        with patch("src.ai_agents.insight_agent.OllamaClient.get",
+        with self._patched_kpis(insight_agent), \
+             patch("src.ai_agents.insight_agent.OllamaClient.get",
                    return_value=_mock_ollama(available=True, response="Satisfaisant. Tout va bien.")):
-            result = insight_agent.run({"task": "health_summary", "db": db})
+            result = insight_agent.run({"task": "health_summary"})
         # When Ollama available, KPIs are grouped under kpis_snapshot
         assert "kpis_snapshot" in result.output
         assert "summary" in result.output
 
     def test_no_db_still_returns_success(self, insight_agent):
-        with patch("src.ai_agents.insight_agent.OllamaClient.get",
+        with self._patched_kpis(insight_agent), \
+             patch("src.ai_agents.insight_agent.OllamaClient.get",
                    return_value=_mock_ollama(available=False)):
             result = insight_agent.run({"task": "health_summary"})
         assert result.success is True
+
+    def test_gather_kpis_survives_partial_mongo_failure(self, insight_agent):
+        """If one KPI collector raises, the others still populate the dict."""
+        with patch("src.storage.sync_mongo_repository.invoice_pending_rejected_30d_sync",
+                   side_effect=RuntimeError("mongo down")), \
+             patch("src.storage.sync_mongo_repository.roadmap_kpis_sync",
+                   return_value={"n_overdue_milestones": 2, "pct_done": 50.0}), \
+             patch("src.storage.sync_mongo_repository.risks_kpis_sync",
+                   return_value={"n_critique": 1, "n_overdue_mitigation": 0}), \
+             patch("src.storage.sync_mongo_repository.budget_variance_kpis_sync",
+                   return_value={"n_total": 3, "n_over_budget": 1, "variance_pct": 5.0}):
+            kpis = insight_agent._gather_kpis()
+        assert kpis["n_overdue_milestones"] == 2
+        assert kpis["n_critique"] == 1
+        assert kpis["n_total"] == 3
+        assert "pending_count" not in kpis
 
 
 # ── AnomalyAgent ──────────────────────────────────────────────────────────────

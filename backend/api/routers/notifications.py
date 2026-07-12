@@ -3,12 +3,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
-from api.deps import get_session
-from src.storage.orm_models_notifications import NotificationORM
+from src.storage.documents.notification import NotificationDocument
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -29,7 +27,7 @@ class NotificationCountOut(BaseModel):
     count: int
 
 
-def _to_out(n: NotificationORM) -> NotificationOut:
+def _to_out(n: NotificationDocument) -> NotificationOut:
     return NotificationOut(
         id=str(n.id),
         type=n.type,
@@ -52,12 +50,12 @@ def _to_out(n: NotificationORM) -> NotificationOut:
     ),
     response_description="Compteur de notifications non lues",
 )
-async def get_count(session: Session = Depends(get_session)):
+async def get_count():
     from src.storage.documents.service_bridge import (
         count_unread_notifications_mongo, sync_flagged_invoices_mirrored,
     )
 
-    await sync_flagged_invoices_mirrored(session)
+    await sync_flagged_invoices_mirrored()
     mongo_count = await count_unread_notifications_mongo()
     if mongo_count is None:
         # Notifications are written Mongo-only (see CLAUDE.md) — the old
@@ -78,12 +76,12 @@ async def get_count(session: Session = Depends(get_session)):
     ),
     response_description="Liste de notifications avec statut de lecture",
 )
-async def list_notifications(session: Session = Depends(get_session)):
+async def list_notifications():
     from src.storage.documents.service_bridge import (
         list_notifications_mongo, sync_flagged_invoices_mirrored,
     )
 
-    await sync_flagged_invoices_mirrored(session)
+    await sync_flagged_invoices_mirrored()
     mongo_rows = await list_notifications_mongo()
     if mongo_rows is None:
         _log.warning("list_notifications: MongoDB indisponible — retour d'une liste vide.")

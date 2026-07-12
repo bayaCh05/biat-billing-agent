@@ -6,11 +6,9 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 from api.auth import require_role
-from api.deps import get_components, get_session
+from api.deps import get_components
 
 logger = logging.getLogger(__name__)
 
@@ -43,22 +41,15 @@ class ClassificationCorrectionRequest(BaseModel):
         "Requiert Ollama actif ; retourne un message dégradé sinon."
     ),
 )
-def get_health_summary(
-    session: Session = Depends(get_session),
-):
-    components = get_components()
-    try:
-        from src.ai_agents.insight_agent import InsightAgent
-        engine = session.get_bind()
-        agent = InsightAgent(engine)
-        result = agent.run({"task": "health_summary", "db": session})
-        return {
-            **result.output,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "ollama_available": result.success,
-        }
-    finally:
-        components.close()
+def get_health_summary():
+    from src.ai_agents.insight_agent import InsightAgent
+    agent = InsightAgent()
+    result = agent.run({"task": "health_summary"})
+    return {
+        **result.output,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "ollama_available": result.success,
+    }
 
 
 # ── Risk scan ─────────────────────────────────────────────────────────────────
@@ -217,16 +208,16 @@ def get_ai_activity(
 def correct_classification(
     invoice_id: str,
     body: ClassificationCorrectionRequest,
-    session: Session = Depends(get_session),
     user=Depends(require_role("Comptable", "Admin")),
 ):
     from uuid import UUID
-    from src.storage.repository import InvoiceRepository
-    from src.storage.orm_models_payments import ClassificationFeedbackORM
-    from uuid import uuid4
-    from datetime import datetime, timezone
 
-    repo = InvoiceRepository(session)
+    from src.storage.sync_mongo_repository import (
+        SyncMongoInvoiceRepository, count_classification_feedback_sync,
+        save_classification_feedback_sync,
+    )
+
+    repo = SyncMongoInvoiceRepository()
     try:
         uid = UUID(invoice_id)
     except ValueError:
@@ -237,8 +228,7 @@ def correct_classification(
         raise HTTPException(404, "Invoice not found")
 
     original_compte = inv.accounting_compte or ""
-    feedback = ClassificationFeedbackORM(
-        id=uuid4(),
+    save_classification_feedback_sync(
         invoice_id=invoice_id,
         original_compte=original_compte,
         corrected_compte=body.accounting_compte,
@@ -246,25 +236,21 @@ def correct_classification(
         corrected_catalog_id=body.cost_catalog_id,
         invoice_text=body.invoice_text or inv.raw_extracted_text or "",
         corrected_by=getattr(user, "email", str(user)),
-        corrected_at=datetime.now(timezone.utc),
     )
-    session.add(feedback)
 
     # Apply correction to invoice
     inv.accounting_compte = body.accounting_compte
     inv.cost_catalog_id = body.cost_catalog_id
     repo.save(inv)
 
-    session.commit()
-
     # Count feedback and trigger retrain if threshold reached
-    count = session.execute(text("SELECT COUNT(*) FROM classification_feedback")).scalar() or 0
+    count = count_classification_feedback_sync()
     retrain_triggered = False
     if count >= 10 and count % 10 == 0:
         try:
             components = get_components()
             try:
-                components.coder.ml_classifier.retrain_from_repo(components.repository)
+                components.coder.ml_classifier.retrain_from_repo(SyncMongoInvoiceRepository())
                 retrain_triggered = True
                 logger.info("ml_retrain_triggered feedback_count=%d", count)
             finally:

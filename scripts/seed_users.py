@@ -1,4 +1,4 @@
-"""Seed demo users into the users table with bcrypt-hashed passwords.
+"""Seed demo users into MongoDB with bcrypt-hashed passwords.
 
 Usage:
     python scripts/seed_users.py            # seed all 4 demo users
@@ -10,23 +10,20 @@ Reads passwords from env vars (falls back to dev defaults):
     DEMO_DIRECTION_PASSWORD   default: biat2026
     DEMO_ADMIN_PASSWORD       default: admin2026
 
-Idempotent — skips any user whose email is already in the DB.
+Idempotent — skips any user whose email already exists.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_ROOT, "backend"))
 sys.path.insert(0, _ROOT)
-os.environ.setdefault("DATABASE_URL", "sqlite:///./data/invoices.db")
-
-from sqlalchemy import select
 
 from api.auth import hash_password
-from src.storage.db import build_engine, build_session_factory, init_db
-from src.storage.orm_models_users import UserORM
+from src.storage.mongodb import close_mongodb, init_beanie
 
 DRY_RUN = "--dry-run" in sys.argv
 
@@ -66,46 +63,41 @@ DEMO_USERS = [
 ]
 
 
-def main() -> None:
-    db_url = os.getenv("DATABASE_URL", "sqlite:///./data/invoices.db")
-    engine = build_engine(db_url)
-    init_db(engine)
-    sf = build_session_factory(engine)
+async def main() -> None:
+    if not await init_beanie():
+        print("MONGODB_URI non défini ou connexion impossible — abandon.")
+        sys.exit(1)
+
+    from src.storage.documents.service_bridge import create_user_native, get_user_by_email_native
 
     inserted = 0
     skipped = 0
 
-    with sf() as session:
-        for u in DEMO_USERS:
-            existing = session.execute(
-                select(UserORM).where(UserORM.email == u["email"])
-            ).scalar_one_or_none()
+    for u in DEMO_USERS:
+        existing = await get_user_by_email_native(u["email"])
+        if existing:
+            print(f"  SKIP  {u['email']} (already exists, role={existing.role})")
+            skipped += 1
+            continue
 
-            if existing:
-                print(f"  SKIP  {u['email']} (already exists, role={existing.role})")
-                skipped += 1
-                continue
+        if DRY_RUN:
+            print(f"  DRY   {u['email']} → role={u['role']}")
+            continue
 
-            if DRY_RUN:
-                print(f"  DRY   {u['email']} → role={u['role']}")
-                continue
-
-            user = UserORM(
-                nom=u["nom"],
-                prenom=u["prenom"],
-                email=u["email"],
-                hashed_password=hash_password(u["password"]),
-                role=u["role"],
-                departement=u["departement"],
-                is_first_login=False,
-                is_active=True,
-            )
-            session.add(user)
+        created = await create_user_native(
+            nom=u["nom"], prenom=u["prenom"], email=u["email"],
+            hashed_password=hash_password(u["password"]),
+            role=u["role"], departement=u["departement"],
+            is_first_login=False,
+        )
+        if created is None:
+            print(f"  SKIP  {u['email']} (already exists — race)")
+            skipped += 1
+        else:
             print(f"  INSERT {u['email']} → role={u['role']}")
             inserted += 1
 
-        if not DRY_RUN:
-            session.commit()
+    await close_mongodb()
 
     print()
     if DRY_RUN:
@@ -115,4 +107,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

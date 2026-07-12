@@ -259,6 +259,19 @@ def health():
         components["database"] = "error"
         status = "degraded"
 
+    # MongoDB check — MONGODB_URI absent est un mode SQLite-only documenté, pas une panne
+    from src.storage.mongodb import MONGODB_URI
+    if not MONGODB_URI:
+        components["mongodb"] = "not_configured"
+    else:
+        try:
+            from src.storage.sync_mongo_repository import _get_db
+            _get_db().client.admin.command("ping")
+            components["mongodb"] = "ok"
+        except Exception:
+            components["mongodb"] = "error"
+            status = "degraded"
+
     # Ollama check
     try:
         from src.ai_agents.ollama_client import OllamaClient
@@ -290,20 +303,39 @@ def health_live():
 
 @app.get("/api/health/ready", tags=["admin"], summary="Readiness probe")
 def health_ready():
-    """Kubernetes readiness : l'application peut recevoir du trafic (DB disponible)."""
+    """Kubernetes readiness : l'application peut recevoir du trafic (au moins un store disponible).
+
+    SQLite et MongoDB coexistent durant la migration — on n'échoue la sonde que si
+    les DEUX sont indisponibles, pas si un seul l'est (voir CLAUDE.md "MongoDB
+    Migration Status" pour la répartition des domaines entre les deux stores).
+    """
+    sqlite_ok = False
     try:
         from api.deps import get_engine
         from sqlalchemy import text as _text
         with get_engine().connect() as conn:
             conn.execute(_text("SELECT 1"))
-        return {"status": "ready"}
+        sqlite_ok = True
     except Exception:
-        from fastapi import Response
-        return Response(
-            content='{"status":"not_ready","reason":"database_unavailable"}',
-            status_code=503,
-            media_type="application/json",
-        )
+        pass
+
+    mongo_ok = False
+    try:
+        from src.storage.sync_mongo_repository import _get_db
+        _get_db().client.admin.command("ping")
+        mongo_ok = True
+    except Exception:
+        pass
+
+    if sqlite_ok or mongo_ok:
+        return {"status": "ready", "sqlite": sqlite_ok, "mongodb": mongo_ok}
+
+    from fastapi import Response
+    return Response(
+        content='{"status":"not_ready","reason":"no_datastore_available"}',
+        status_code=503,
+        media_type="application/json",
+    )
 
 
 # ── Serve React SPA (production / Docker) ─────────────────────────────────────

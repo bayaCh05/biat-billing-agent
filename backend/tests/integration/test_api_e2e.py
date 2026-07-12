@@ -429,6 +429,24 @@ class TestUsersMe:
 # ── Notifications endpoint ────────────────────────────────────────────────────
 
 class TestNotifications:
+    @pytest.fixture(autouse=True)
+    def _reset_notification_state(self):
+        """Notifications now sync from real InvoiceDocument data (Lot A4 — no
+        more SQLite scan that silently ignored Mongo-only uploads). Other
+        tests in this module (e.g. TestInvoices' real-upload test) create
+        flagged invoices in the same shared test Mongo DB, so this class's
+        "empty db" tests need their own reset to hold."""
+        import pymongo
+
+        from src.storage.mongodb import MONGODB_DB, MONGODB_URI
+        if MONGODB_URI:
+            db = pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=2_000)[MONGODB_DB]
+            db["notifications"].delete_many({})
+            db["invoices"].update_many(
+                {"human_review_required": True}, {"$set": {"human_review_required": False}}
+            )
+        yield
+
     def test_count_returns_zero_on_empty_db(self):
         token = _login("comptable@biat-it.tn", "biat2026")
         r = client.get("/api/notifications/count", headers=_auth(token))

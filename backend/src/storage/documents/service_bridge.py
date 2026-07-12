@@ -832,71 +832,60 @@ async def risks_for_project_mongo(projet_id: str) -> list | None:
         return None
 
 
-# ── Étape 5, Lot 3 : notifications (lecture + miroir de sync additive) ───────
+# ── Étape 5, Lot 3 : notifications (100% Mongo — plus de source SQLite) ──────
 
-async def _ensure_invoice_notification_mirrored(
-    session, invoice_id: UUID, issuer: str | None, status: str,
-) -> None:
-    """Comme notification_service.ensure_invoice_notification(), mais miroir
-    aussi le document créé vers MongoDB (best-effort, additive uniquement).
+async def _ensure_invoice_notification_native(invoice_id: UUID, issuer: str | None, status: str) -> None:
+    """Crée une notification pour une facture signalée si elle n'existe pas déjà.
 
-    SQLAlchemy reste la source de vérité pour la décision "existe déjà ?" —
-    seule la création est répliquée vers Mongo pour que list/count Mongo-first
-    restent à jour sans double-écriture des routes mark_read/mark_all_read.
+    100% Mongo : InvoiceDocument est déjà la source primaire des factures, et
+    NotificationDocument sert à la fois de source de vérité pour la dédup et
+    de store de lecture (list/count) — plus de SQLAlchemy dans ce chemin.
     """
-    from sqlalchemy import select
-    from src.notifications.notification_service import _TYPE_LABELS, create_notification
-    from src.storage.orm_models_notifications import NotificationORM
+    from src.notifications.notification_service import _TYPE_LABELS
+    from src.storage.documents.notification import NotificationDocument
 
-    existing = session.execute(
-        select(NotificationORM).where(NotificationORM.invoice_id == invoice_id)
-    ).scalar_one_or_none()
+    existing = await NotificationDocument.find_one({"invoice_id": str(invoice_id)})
     if existing:
         return
 
     notif_type = "INVOICE_ESCALATED" if status == "ESCALATED" else "INVOICE_FLAGGED"
     label = issuer or "Fournisseur inconnu"
-    notif = create_notification(
-        session,
-        notif_type=notif_type,
-        title=f"{_TYPE_LABELS[notif_type]} — {label}",
-        body=f"La facture de {label} requiert une révision humaine (statut : {status}).",
-        invoice_id=invoice_id,
-    )
-    session.commit()
 
-    try:
-        # Insertion via pymongo brut (pas Document.insert()) : Beanie encoderait
-        # les champs UUID en BSON Binary natif, alors que le script de migration
-        # stocke tous les _id/soft-refs comme des chaînes (voir get_invoice_mongo).
-        # Mélanger les deux formats dans la même collection casserait toute
-        # requête future filtrant par _id ou invoice_id.
-        from src.storage.documents.notification import NotificationDocument
-        coll = NotificationDocument.get_pymongo_collection()
-        await coll.insert_one({
-            "_id": str(notif.id),
-            "type": notif.type,
-            "title": notif.title,
-            "body": notif.body,
-            "is_read": notif.is_read,
-            "created_at": notif.created_at,
-            "invoice_id": str(notif.invoice_id) if notif.invoice_id else None,
-        })
-    except Exception as exc:
-        logger.debug("_ensure_invoice_notification_mirrored: miroir Mongo échoué — %s", exc)
+    # Insertion via pymongo brut (pas Document.insert()) : Beanie encoderait
+    # les champs UUID en BSON Binary natif, alors que le reste de la migration
+    # stocke tous les _id/soft-refs comme des chaînes (voir "Conventions" —
+    # CLAUDE.md). Mélanger les deux formats casserait toute requête future
+    # filtrant par _id ou invoice_id.
+    coll = NotificationDocument.get_pymongo_collection()
+    await coll.insert_one({
+        "_id": str(uuid4()),
+        "type": notif_type,
+        "title": f"{_TYPE_LABELS[notif_type]} — {label}",
+        "body": f"La facture de {label} requiert une révision humaine (statut : {status}).",
+        "is_read": False,
+        "created_at": datetime.now(timezone.utc),
+        "invoice_id": str(invoice_id),
+    })
 
 
-async def sync_flagged_invoices_mirrored(session) -> None:
-    """Comme notification_service.sync_flagged_invoices(), avec miroir Mongo additif."""
-    from src.storage.repository import InvoiceRepository
+async def sync_flagged_invoices_mirrored(session=None) -> None:
+    """Crée les notifications manquantes pour les factures signalées.
+
+    `session` n'est plus utilisé — conservé uniquement pour ne pas casser les
+    appelants existants (routes notifications.py) tant qu'ils n'ont pas été
+    nettoyés (Lot B, suppression SQLAlchemy).
+    """
     from src.models.enums import InvoiceStatus
+    from src.storage.documents.invoice import InvoiceDocument
 
-    repo = InvoiceRepository(session)
-    terminal = {InvoiceStatus.REJECTED, InvoiceStatus.ERROR}
-    for inv in repo.list_all():
-        if inv.human_review_required and inv.status not in terminal:
-            issuer = inv.issuer_name.value if inv.issuer_name else None
-            await _ensure_invoice_notification_mirrored(session, inv.id, issuer, inv.status.value)
+    terminal = {InvoiceStatus.REJECTED.value, InvoiceStatus.ERROR.value}
+    docs = await InvoiceDocument.find({
+        "human_review_required": True,
+        "status": {"$nin": list(terminal)},
+    }).to_list()
+
+    for inv in docs:
+        await _ensure_invoice_notification_native(inv.id, inv.issuer_name, inv.status)
 
 
 async def list_notifications_mongo() -> list | None:
@@ -2284,7 +2273,7 @@ async def get_user_by_email_native(email: str) -> Any:
 
 async def create_user_native(
     nom: str, prenom: str, email: str, hashed_password: str,
-    role: str, departement: str = "",
+    role: str, departement: str = "", is_first_login: bool = True,
 ) -> Any:
     """Retourne None si l'email existe déjà (409 côté appelant).
 
@@ -2308,7 +2297,7 @@ async def create_user_native(
         "_id": str(uuid4()),
         "nom": nom, "prenom": prenom, "email": email,
         "hashed_password": hashed_password, "role": role, "departement": departement,
-        "is_first_login": True, "is_active": True, "created_at": now,
+        "is_first_login": is_first_login, "is_active": True, "created_at": now,
         "failed_login_attempts": 0, "locked_until": None, "last_failed_login": None,
         "last_login_at": None, "last_login_ip": None, "profile_picture": None,
     }

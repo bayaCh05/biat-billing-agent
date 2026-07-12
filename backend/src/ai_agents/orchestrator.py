@@ -247,10 +247,10 @@ class AIOrchestrator:
         })
         return result.output.get("suggestion", "")
 
-    def generate_health_summary(self, db: Session) -> dict:
+    def generate_health_summary(self) -> dict:
         from src.ai_agents.insight_agent import InsightAgent
-        agent = InsightAgent(self._db.get_bind())
-        result = agent.run({"task": "health_summary", "db": db})
+        agent = InsightAgent()
+        result = agent.run({"task": "health_summary"})
         return result.output
 
     def check_accounting_consistency(self) -> dict:

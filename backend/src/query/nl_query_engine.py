@@ -1,20 +1,47 @@
-"""Natural language to SQL query engine for BIAT IT billing data.
+"""Natural language to MongoDB aggregation query engine for BIAT IT billing data.
 
 All inference is local — Ollama qwen2.5:3b. No cloud calls.
+
+Migrated from the SQLite/SQLAlchemy version (raw SQL generation) to MongoDB —
+the LLM now generates an aggregation pipeline (JSON) against a single
+collection instead of a SQL string. Cross-collection joins ($lookup) are
+deliberately not supported: the schema below documents which data now lives
+embedded within a single document (journal_entries.lines, client_invoices
+line items) precisely so most questions don't need one.
 """
 from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
+from uuid import UUID
 
-from sqlalchemy import text  # noqa: I001
+_ALLOWED_COLLECTIONS = {
+    "invoices", "journal_entries", "assets", "client_invoices",
+    "chartes_projet", "phases",
+}
 
-_SYSTEM_PROMPT = """\
+# Aggregation stages that write, execute arbitrary JS, or expose server
+# internals — never allowed in an LLM-generated pipeline. $lookup is banned
+# too: not unsafe, just unsupported (see module docstring) — a pipeline that
+# tries to join now gets a clear rejection instead of a confusing Mongo error.
+_FORBIDDEN_STAGES = {
+    "$out", "$merge", "$function", "$accumulator", "$where",
+    "$currentOp", "$collStats", "$indexStats", "$planCacheStats",
+    "$listSessions", "$listLocalSessions", "$lookup", "$graphLookup",
+}
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?Z?)?$")
+
+
+def _build_system_prompt() -> str:
+    current_year = datetime.now().year
+    return f"""\
 Tu es un assistant financier pour BIAT IT (filiale informatique de la banque BIAT, Tunisie).
-Tu as accès à une base de données SQLite avec les tables suivantes:
+Tu as accès à une base de données MongoDB avec les collections suivantes:
 
-TABLE: invoices  (factures fournisseurs reçues)
-  id, issuer_name, invoice_number, invoice_date, due_date,
+COLLECTION: invoices  (factures fournisseurs reçues)
+  issuer_name, invoice_number, invoice_date, due_date,
   amount_ht, tva_rate, tva_amount, amount_ttc,
   status, direction, cost_catalog_id, charge_type,
   accounting_compte, human_review_required, paid_at
@@ -28,91 +55,126 @@ TABLE: invoices  (factures fournisseurs reçues)
     fournitures_bureau, gardiennage_securite,
     maintenance_informatique, electricite_steg
 
-TABLE: journal_entries  (écritures comptables)
-  id, reference, date_ecriture, description,
-  source_invoice_id, source_asset_id
-
-TABLE: journal_lines  (lignes de chaque écriture)
-  id, entry_id, compte, libelle, debit, credit
+COLLECTION: journal_entries  (écritures comptables — double partie)
+  reference, date_ecriture, description,
+  source_invoice_id, source_asset_id,
+  lines: [ {{ compte, libelle, debit, credit }}, ... ]   ← tableau EMBARQUÉ
   Comptes importants: 401 (fournisseurs), 4366 (TVA déductible),
     6xxx (charges OPEX), 2xxx (immobilisations CAPEX),
     6811 (dotations amortissements), 28xx (amortissements cumulés)
+  IMPORTANT : il n'existe PAS de collection "journal_lines" séparée. Les
+  lignes d'écriture sont dans le champ "lines" du document journal_entries.
+  Pour filtrer/sommer par compte, utilise $unwind sur "lines" d'abord.
 
-TABLE: assets  (immobilisations CAPEX)
-  id, designation, compte_immobilisation, compte_amortissement,
+COLLECTION: assets  (immobilisations CAPEX)
+  designation, compte_immobilisation, compte_amortissement,
   acquisition_date, acquisition_cost_ht,
   useful_life_years, depreciation_method, fully_depreciated
 
-TABLE: client_invoices  (factures émises à BIAT groupe)
-  id, invoice_number, invoice_date, due_date,
+COLLECTION: client_invoices  (factures émises à BIAT groupe)
+  invoice_number, invoice_date, due_date,
   client_name, amount_ht, tva_amount, amount_ttc,
   status, paid_at
   Valeurs status: draft, sent, paid, cancelled
 
-TABLE: chartes_projet  (contrats projets)
-  id, project_id, project_name, budget_jh, taux_jh, valid_from
+COLLECTION: chartes_projet  (contrats projets)
+  project_id, project_name, budget_jh, taux_jh, valid_from
 
-TABLE: phases  (phases de chaque projet)
-  id, project_id, name, planned_jh, consumed_jh, status, closed_date
-
-TABLE: asset_project_links  (clé de répartition CAPEX → projets)
-  asset_id, project_id, allocation_pct
+COLLECTION: phases  (phases de chaque projet)
+  project_id, name, planned_jh, consumed_jh, status, closed_date
 
 Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans explication en dehors du JSON:
-{
-  "sql": "SELECT ...",
+{{
+  "collection": "invoices",
+  "pipeline": [ {{"$match": {{...}}}}, {{"$group": {{...}}}}, ... ],
   "explanation": "courte explication en français de ce qui est calculé"
-}
+}}
 
-Règles SQL importantes:
-- SQLite uniquement — utilise strftime('%Y', colonne) pour extraire l'année
-- Factures traitées (dépense réelle): status IN ('VALIDATED','EXPORTED','JOURNALED','PAID')
-- Factures fournisseurs: direction = 'SUPPLIER'
-- Année courante: strftime('%Y', invoice_date) = '2026'
-- Pour les VNC (valeur nette comptable): acquisition_cost_ht - (acquisition_cost_ht/useful_life_years) * (strftime('%Y','now') - strftime('%Y',acquisition_date))
-- N'utilise JAMAIS INSERT, UPDATE, DELETE, DROP, ALTER, CREATE
-- Si la question ne peut pas être répondue avec ces tables, retourne:
-  {"sql": null, "explanation": "raison pour laquelle la question ne peut pas être répondue"}
-
-Agrégats — règle OBLIGATOIRE pour éviter NULL:
-- Pour tout SUM(): COALESCE(SUM(colonne), 0)  — SUM sur 0 lignes retourne NULL en SQLite
-- Pour tout COUNT(): COALESCE(COUNT(*), 0)    — COUNT ne retourne jamais NULL mais COALESCE est recommandé par cohérence
-- Pour tout AVG(): COALESCE(AVG(colonne), 0)
-- Exemple correct: SELECT COALESCE(SUM(amount_ttc), 0) AS total_ttc FROM invoices WHERE ...
-- Exemple correct: SELECT COALESCE(COUNT(*), 0) AS nb_factures FROM invoices WHERE ...
+Règles de pipeline importantes:
+- Une seule collection par requête — PAS de $lookup, PAS de jointure entre collections.
+- N'utilise JAMAIS $out, $merge, $function, $accumulator, $where (exécution de code).
+- "Combien de..." / "Nombre de..." = TOUJOURS terminer le pipeline par une étape
+  {{"$count": "nb"}} — ne retourne JAMAIS les documents bruts pour une question de
+  comptage. Exemple correct (combien de factures FLAGGED) : collection "invoices",
+  pipeline: [{{"$match": {{"status": "FLAGGED"}}}}, {{"$count": "nb"}}]
+- Pour les dates : écris-les comme des chaînes ISO "AAAA-MM-JJ" (ex: "2026-06-01") —
+  jamais new Date(...) ou ISODate(...), ce ne serait pas du JSON valide.
+  Elles seront converties automatiquement en date avant exécution.
+- Année courante : {current_year}. Pour filtrer par année, utilise
+  {{"$expr": {{"$eq": [{{"$year": "$invoice_date"}}, {current_year}]}}}}
+  ou une plage $gte/$lt sur le mois si plus précis.
+- Factures traitées (dépense réelle): status in ["VALIDATED","EXPORTED","JOURNALED","PAID"]
+- Factures fournisseurs: direction = "SUPPLIER"
+- Toujours terminer un $group par un $project qui renomme "_id" en un nom de
+  champ lisible (n'affiche jamais un champ brut nommé "_id"). Exemple:
+  {{"$project": {{"_id": 0, "categorie": "$_id", "total": 1}}}}
+- Pour une question "liste" / "quelles sont" (pas un agrégat), termine TOUJOURS le
+  pipeline par un $project qui ne garde QUE les 3-5 champs utiles à la réponse
+  (jamais le document entier — il contient des dizaines de champs internes et des
+  tableaux imbriqués illisibles). Exemple (les 5 factures les plus chères) :
+  [{{"$match": {{...}}}}, {{"$sort": {{"amount_ttc": -1}}}}, {{"$limit": 5}},
+   {{"$project": {{"_id": 0, "issuer_name": 1, "invoice_number": 1, "amount_ttc": 1}}}}]
+- Si la question ne peut pas être répondue avec ces collections, retourne:
+  {{"collection": null, "pipeline": null, "explanation": "raison pour laquelle la question ne peut pas être répondue"}}
 
 Pièges à éviter:
-- cost_catalog_id est une colonne texte directe dans la table invoices (ex: 'telecommunications', 'formation_personnel'). Il n'existe PAS de table cost_catalog séparée.
-- "En attente de validation" ou "à valider" signifie status = 'FLAGGED' (factures bloquées pour revue humaine).
-- date_ecriture est une colonne de journal_entries, PAS de journal_lines. Pour filtrer les écritures par date, toujours faire: SELECT SUM(jl.debit) FROM journal_lines jl JOIN journal_entries je ON jl.entry_id = je.id WHERE strftime('%Y-%m', je.date_ecriture) = '2026-06'
-- "Montant total des écritures" d'un mois = SUM(jl.debit) des lignes de ce mois. Exemple correct: SELECT SUM(jl.debit) AS total FROM journal_lines jl JOIN journal_entries je ON jl.entry_id = je.id WHERE strftime('%Y-%m', je.date_ecriture) = '2026-06'
-- IMPORTANT: La table journal_entries n'a PAS de colonne direction, direction_supplier, status, ou issuer_name. Ses seules colonnes sont: id, reference, date_ecriture, description, source_invoice_id, source_asset_id. N'utilise JAMAIS je.direction ni je.status.
-- La table assets ne contient PAS de colonne charge_type. Tous les enregistrements de assets sont des immobilisations CAPEX.
-- "Factures en retard de paiement" = status = 'EXPORTED' AND due_date < date('now')  (expédiées mais pas encore payées)
-- TVA déductible (compte 4366) apparaît en DEBIT dans journal_lines. Utilise SUM(debit) pour le solde TVA déductible. Exemple correct: SELECT SUM(debit) FROM journal_lines WHERE compte = '4366'
-- TVA collectée (compte 4367) apparaît en CREDIT dans journal_lines. Utilise SUM(credit) pour le solde TVA collectée.
-- IMPORTANT: Les factures émises aux clients (BIAT groupe, etc.) sont EXCLUSIVEMENT dans la table client_invoices, PAS dans invoices. La table invoices contient UNIQUEMENT les factures reçues de fournisseurs. Pour "ce qu'on a facturé à BIAT / un client", utilise TOUJOURS client_invoices. Exemple: SELECT SUM(amount_ttc) FROM client_invoices WHERE client_name LIKE '%BIAT%' AND strftime('%Y-%m', invoice_date) = '2026-05' AND status != 'cancelled'
-- Pour la VNC, utilise EXACTEMENT cette formule avec les parenthèses: acquisition_cost_ht - (acquisition_cost_ht/useful_life_years) * (strftime('%Y','now') - strftime('%Y',acquisition_date)). Exemple: SELECT SUM(acquisition_cost_ht - (acquisition_cost_ht/useful_life_years) * (strftime('%Y','now') - strftime('%Y',acquisition_date))) AS vnc FROM assets WHERE fully_depreciated = 0
+- cost_catalog_id est un champ texte direct du document invoices (ex: 'telecommunications',
+  'formation_personnel'). Il n'existe PAS de collection cost_catalog séparée.
+- "En attente de validation" ou "à valider" signifie status = "FLAGGED" (factures bloquées
+  pour revue humaine).
+- Les lignes d'écriture sont dans invoices... non, dans journal_entries.lines (tableau
+  embarqué) — $unwind obligatoire avant de filtrer/sommer par compte. Exemple correct
+  (montant total des écritures d'un mois) :
+  collection "journal_entries", pipeline:
+  [
+    {{"$match": {{"$expr": {{"$eq": [{{"$dateToString": {{"format": "%Y-%m", "date": "$date_ecriture"}}}}, "2026-06"]}}}}}},
+    {{"$unwind": "$lines"}},
+    {{"$group": {{"_id": null, "total": {{"$sum": "$lines.debit"}}}}}},
+    {{"$project": {{"_id": 0, "total": 1}}}}
+  ]
+- TVA déductible (compte 4366) apparaît en "debit" dans lines. TVA collectée (compte 4367)
+  apparaît en "credit". Exemple (TVA déductible) : collection "journal_entries",
+  [{{"$unwind": "$lines"}}, {{"$match": {{"lines.compte": "4366"}}}},
+   {{"$group": {{"_id": null, "total": {{"$sum": "$lines.debit"}}}}}},
+   {{"$project": {{"_id": 0, "total": 1}}}}]
+- IMPORTANT: Les factures émises aux clients (BIAT groupe, etc.) sont EXCLUSIVEMENT dans la
+  collection client_invoices, PAS dans invoices. La collection invoices contient UNIQUEMENT
+  les factures reçues de fournisseurs. Pour "ce qu'on a facturé à BIAT / un client", utilise
+  TOUJOURS client_invoices.
+- "Factures en retard de paiement" = status = "EXPORTED" AND due_date < aujourd'hui
+  (expédiées mais pas encore payées). Utilise {{"$expr": {{"$lt": ["$due_date", "$$NOW"]}}}}.
+- Pour la VNC (valeur nette comptable), utilise EXACTEMENT ce calcul avec $addFields puis
+  $group, collection "assets":
+  [
+    {{"$addFields": {{"annees_ecoulees": {{"$subtract": [{{"$year": "$$NOW"}}, {{"$year": "$acquisition_date"}}]}}}}}},
+    {{"$addFields": {{"vnc": {{"$subtract": [
+        "$acquisition_cost_ht",
+        {{"$multiply": [{{"$divide": ["$acquisition_cost_ht", "$useful_life_years"]}}, "$annees_ecoulees"]}}
+    ]}}}}}},
+    {{"$match": {{"fully_depreciated": false}}}},
+    {{"$group": {{"_id": null, "vnc": {{"$sum": "$vnc"}}}}}},
+    {{"$project": {{"_id": 0, "vnc": 1}}}}
+  ]
 """
 
 
 class NLQueryEngine:
-    """Converts a French question into SQL, runs it, returns a French answer.
+    """Converts a French question into a MongoDB aggregation pipeline, runs it,
+    returns a French answer.
 
     Processing chain:
-      French question → Ollama (local) → SQL → SQLite → French answer
+      French question → Ollama (local) → pipeline JSON → MongoDB → French answer
     No data leaves the server.
     """
 
     def __init__(
         self,
-        engine,
         ollama_url: str = "http://localhost:11434",
         model: str = "qwen2.5:3b",
     ) -> None:
-        self.engine = engine
         self.ollama_url = ollama_url.rstrip("/")
         self.model = model
+        self._call_count = 0
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -122,7 +184,7 @@ class NLQueryEngine:
         Returns:
             {
               "question":    str,
-              "sql":         str | None,
+              "sql":         str | None,  # display string, "db.<coll>.aggregate([...])"
               "result":      list[dict] | None,
               "answer":      str,        # formatted French answer
               "explanation": str,        # one-line description of the query
@@ -134,56 +196,61 @@ class NLQueryEngine:
         if parsed is None:
             return self._err(question, "Réponse LLM non parsable.", raw[:200])
 
-        sql = parsed.get("sql")
+        collection = parsed.get("collection")
+        pipeline = parsed.get("pipeline")
         explanation = parsed.get("explanation", "")
 
-        if not sql:
+        if not collection or not pipeline:
             return {
                 "question": question, "sql": None, "result": None,
                 "answer": explanation or "Je ne peux pas répondre à cette question.",
                 "explanation": explanation,
             }
 
-        if not self._is_safe(sql):
-            return self._err(question, "Seules les requêtes SELECT sont autorisées.",
-                             explanation)
+        safe, reason = self._is_safe(collection, pipeline)
+        if not safe:
+            return self._err(question, reason, explanation)
 
-        sql = self._sanitize_sql(sql)
-        rows, exec_error = self._run_sql(sql)
+        rows, exec_error = self._run_pipeline(collection, pipeline)
         if exec_error:
-            # One automatic retry: feed the SQL error back to the LLM
+            # One automatic retry: feed the error back to the LLM
             retry_question = (
                 f"{question}\n\n"
-                f"[ERREUR SQL précédente: {exec_error}]\n"
-                f"[SQL incorrect: {sql}]\n"
-                "Génère une nouvelle requête SQL corrigée qui évite cette erreur."
+                f"[ERREUR précédente: {exec_error}]\n"
+                f"[Pipeline incorrect: collection={collection}, pipeline={json.dumps(pipeline)}]\n"
+                "Génère une nouvelle collection + pipeline corrigés qui évitent cette erreur."
             )
             raw2 = self._ask_llm(retry_question)
             parsed2 = self._parse_llm_response(raw2)
-            if parsed2 and parsed2.get("sql") and self._is_safe(parsed2["sql"]):
-                sql = self._sanitize_sql(parsed2["sql"])
-                explanation = parsed2.get("explanation", explanation)
-                rows, exec_error = self._run_sql(sql)
+            if parsed2 and parsed2.get("collection") and parsed2.get("pipeline"):
+                safe2, _ = self._is_safe(parsed2["collection"], parsed2["pipeline"])
+                if safe2:
+                    collection = parsed2["collection"]
+                    pipeline = parsed2["pipeline"]
+                    explanation = parsed2.get("explanation", explanation)
+                    rows, exec_error = self._run_pipeline(collection, pipeline)
             if exec_error:
-                return self._err(question, f"Erreur SQL: {exec_error}", explanation)
+                return self._err(question, f"Erreur requête: {exec_error}", explanation)
 
         answer = self._format_answer(explanation, rows)
         return {
-            "question": question, "sql": sql, "result": rows,
-            "answer": answer, "explanation": explanation,
+            "question": question,
+            "sql": self._display_pipeline(collection, pipeline),
+            "result": rows, "answer": answer, "explanation": explanation,
         }
 
     # ── LLM call ─────────────────────────────────────────────────────────────
 
     def _ask_llm(self, question: str) -> str:
         import requests
+        self._call_count += 1
         try:
             resp = requests.post(
                 f"{self.ollama_url}/api/chat",
                 json={
                     "model": self.model,
                     "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "system", "content": _build_system_prompt()},
                         {"role": "user",   "content": question},
                     ],
                     "stream": False,
@@ -195,11 +262,11 @@ class NLQueryEngine:
             return resp.json()["message"]["content"]
         except requests.exceptions.ConnectionError:
             return json.dumps({
-                "sql": None,
+                "collection": None, "pipeline": None,
                 "explanation": "Ollama n'est pas disponible. Démarrez-le avec `ollama serve`.",
             })
         except Exception as e:
-            return json.dumps({"sql": None, "explanation": f"Erreur LLM: {e}"})
+            return json.dumps({"collection": None, "pipeline": None, "explanation": f"Erreur LLM: {e}"})
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -220,35 +287,65 @@ class NLQueryEngine:
             return None
 
     @staticmethod
-    def _sanitize_sql(sql: str) -> str:
-        """Strip column references that don't exist on journal_entries."""
-        # Remove AND/WHERE conditions referencing non-existent columns on journal_entries
-        # e.g. "AND je.direction = 'SUPPLIER'" or "WHERE je.direction = 'SUPPLIER'"
-        invalid_je_cols = re.compile(
-            r'\s+AND\s+\w+\.(direction|status|issuer_name|charge_type)\s*=\s*\'[^\']*\'',
-            re.IGNORECASE,
-        )
-        return invalid_je_cols.sub("", sql)
+    def _is_safe(collection: object, pipeline: object) -> tuple[bool, str]:
+        if collection not in _ALLOWED_COLLECTIONS:
+            return False, f"Collection non autorisée : {collection!r}."
+        if not isinstance(pipeline, list) or not pipeline:
+            return False, "Pipeline vide ou invalide."
+        for stage in pipeline:
+            if not isinstance(stage, dict) or len(stage) != 1:
+                return False, "Étape de pipeline invalide."
+            key = next(iter(stage))
+            if not isinstance(key, str) or not key.startswith("$"):
+                return False, f"Étape invalide : {key!r}."
+            if key in _FORBIDDEN_STAGES:
+                return False, f"Étape non autorisée : {key}."
+        return True, ""
 
-    @staticmethod
-    def _is_safe(sql: str) -> bool:
-        first_word = sql.strip().split()[0].upper() if sql.strip() else ""
-        if first_word != "SELECT":
-            return False
-        forbidden = re.compile(
-            r'\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE)\b',
-            re.IGNORECASE,
-        )
-        return not forbidden.search(sql)
+    @classmethod
+    def _coerce_dates(cls, obj):
+        """JSON has no date type — turn ISO date/datetime strings the LLM
+        emitted for $match literals into real datetimes so they compare
+        correctly against BSON Date fields (plain strings never match)."""
+        if isinstance(obj, dict):
+            return {k: cls._coerce_dates(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [cls._coerce_dates(v) for v in obj]
+        if isinstance(obj, str) and _DATE_RE.match(obj):
+            try:
+                if "T" in obj:
+                    return datetime.fromisoformat(obj.replace("Z", "+00:00")).replace(tzinfo=None)
+                return datetime.strptime(obj, "%Y-%m-%d")
+            except ValueError:
+                return obj
+        return obj
 
-    def _run_sql(self, sql: str) -> tuple[list[dict], str | None]:
+    def _run_pipeline(self, collection: str, pipeline: list) -> tuple[list[dict], str | None]:
+        from src.storage.sync_mongo_repository import _get_db
         try:
-            with self.engine.connect() as conn:
-                result = conn.execute(text(sql))
-                rows = [dict(r._mapping) for r in result]
-            return rows, None
+            coerced = self._coerce_dates(pipeline)
+            cursor = _get_db()[collection].aggregate(coerced, maxTimeMS=10_000)
+            return [self._jsonify(doc) for doc in cursor], None
         except Exception as e:
             return [], str(e)
+
+    @staticmethod
+    def _jsonify(doc: dict) -> dict:
+        """BSON round-trips datetimes/UUIDs as Python objects — make them
+        JSON-serializable before returning to the caller."""
+        out = {}
+        for k, v in doc.items():
+            if isinstance(v, datetime):
+                out[k] = v.date().isoformat() if v.time().isoformat() == "00:00:00" else v.isoformat()
+            elif isinstance(v, UUID):
+                out[k] = str(v)
+            else:
+                out[k] = v
+        return out
+
+    @staticmethod
+    def _display_pipeline(collection: str, pipeline: list) -> str:
+        return f"db.{collection}.aggregate({json.dumps(pipeline, ensure_ascii=False, default=str, indent=2)})"
 
     @staticmethod
     def _format_answer(explanation: str, rows: list[dict]) -> str:
@@ -271,13 +368,21 @@ class NLQueryEngine:
             lines = []
             for row in rows:
                 parts = []
+                # Defensive cap independent of prompt quality: if the pipeline
+                # forgot a $project and a row still carries the full raw
+                # document (40+ fields, embedded arrays), don't dump it all —
+                # skip list/dict values and stop after 8 scalar fields.
                 for k, v in row.items():
+                    if isinstance(v, (list, dict)):
+                        continue
                     if isinstance(v, float):
                         parts.append(f"{k}: {v:,.3f}")
                     elif v is None:
                         parts.append(f"{k}: —")
                     else:
                         parts.append(f"{k}: {v}")
+                    if len(parts) >= 8:
+                        break
                 lines.append("• " + " | ".join(parts))
             header = explanation + "\n" if explanation else ""
             return header + "\n".join(lines)

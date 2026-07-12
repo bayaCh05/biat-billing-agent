@@ -43,6 +43,23 @@ jobs:
     name: Run tests
     runs-on: ubuntu-latest
 
+    # Ephemeral, isolated CI container — no real data ever touches it, so it
+    # deliberately skips docker-compose.yml's `--auth` requirement (that's a
+    # data-residency control for the persistent dev/prod volume, not needed
+    # here). Mongo-native code paths gate cleanly on MONGODB_URI being unset
+    # (see CLAUDE.md), so this is additive: it only makes those paths actually
+    # exercised in CI instead of silently skipped.
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ping:1})' --quiet"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v7.0.0
@@ -72,6 +89,9 @@ jobs:
         run: alembic upgrade head
 
       - name: Run tests
+        env:
+          MONGODB_URI: mongodb://localhost:27017
+          MONGODB_DB: biat_billing_ci
         run: pytest --tb=short -q --junitxml=test-results.xml
 
       - name: Upload test results

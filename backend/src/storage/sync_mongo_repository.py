@@ -634,3 +634,242 @@ class SyncMongoClientInvoiceRepository:
             if parsed and parsed[0] == year:
                 max_seq = max(max_seq, parsed[1])
         return max_seq
+
+
+# ── Insights (health-summary KPIs) ──────────────────────────────────────────
+# Réplique InsightAgent._gather_kpis' raw SQL, backend Mongo synchrone (la route
+# GET /ai/health-summary est sync — pas de Beanie/await ici, voir docstring en
+# tête de fichier).
+
+def invoice_pending_rejected_30d_sync() -> dict:
+    """Compte les factures en attente / rejetées sur les 30 derniers jours."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    coll = _get_db()["invoices"]
+    total = coll.count_documents({"received_at": {"$gte": cutoff}})
+    pending = coll.count_documents({
+        "received_at": {"$gte": cutoff},
+        "status": {"$in": [
+            "RECEIVED", "EXTRACTING", "EXTRACTED",
+            "CLASSIFYING", "CLASSIFIED", "VALIDATING",
+        ]},
+    })
+    rejected = coll.count_documents({
+        "received_at": {"$gte": cutoff},
+        "status": {"$in": ["REJECTED", "EXTRACTION_FAILED", "ERROR"]},
+    })
+    return {
+        "pending_count": pending,
+        "rejection_rate": round(rejected / max(total, 1) * 100, 1),
+    }
+
+
+def roadmap_kpis_sync() -> dict:
+    """Jalons en retard et % complété — collection feuilles_de_route."""
+    coll = _get_db()["feuilles_de_route"]
+    today = _to_midnight_utc(date.today())
+    n_overdue = coll.count_documents({
+        "date_fin": {"$lt": today},
+        "statut": {"$nin": ["TERMINE", "ANNULE"]},
+    })
+    done = coll.count_documents({"statut": "TERMINE"})
+    total = coll.count_documents({})
+    return {
+        "n_overdue_milestones": n_overdue,
+        "pct_done": round(done / max(total, 1) * 100, 1),
+    }
+
+
+def risks_kpis_sync() -> dict:
+    """Risques critiques actifs et plans de mitigation en retard — collection risques."""
+    coll = _get_db()["risques"]
+    today = _to_midnight_utc(date.today())
+    n_critique = coll.count_documents({
+        "niveau_criticite": "CRITIQUE",
+        "statut": {"$nin": ["CLOTURE", "MAITRISE"]},
+    })
+    n_overdue_mitigation = coll.count_documents({
+        "date_echeance_mitigation": {"$lt": today},
+        "statut": {"$nin": ["CLOTURE", "MAITRISE"]},
+    })
+    return {
+        "n_critique": n_critique,
+        "n_overdue_mitigation": n_overdue_mitigation,
+    }
+
+
+def budget_variance_kpis_sync() -> dict:
+    """Lignes budgétaires en dépassement et écart global — année courante, YTD au mois courant.
+
+    Même logique que service_bridge.budget_summary_mongo() (async) mais en pymongo
+    synchrone, pour un appelant sync (InsightAgent._gather_kpis).
+    """
+    db = _get_db()
+    today = date.today()
+    year, month = today.year, today.month
+
+    entries = list(db["budget_plan_entries"].find({"year": year}))
+    budget_ytd = {
+        e["catalog_id"]: sum(float(m) for m in (e.get("monthly") or [])[:month])
+        for e in entries
+    }
+
+    start = datetime(year, 1, 1, tzinfo=timezone.utc)
+    end = datetime.now(timezone.utc)
+    rows = db["invoices"].aggregate([
+        {"$match": {
+            "status": {"$in": ["VALIDATED", "EXPORTED", "PAID", "JOURNALED"]},
+            "direction": "SUPPLIER",
+            "invoice_date": {"$gte": start, "$lte": end},
+            "cost_catalog_id": {"$ne": None},
+            "amount_ht": {"$ne": None},
+        }},
+        {"$group": {"_id": "$cost_catalog_id", "total": {"$sum": "$amount_ht"}}},
+    ])
+    actual_ytd = {r["_id"]: float(r["total"] or 0) for r in rows}
+
+    total_budget = sum(budget_ytd.values())
+    total_actual = sum(actual_ytd.get(cid, 0.0) for cid in budget_ytd)
+
+    return {
+        "n_total": len(budget_ytd),
+        "n_over_budget": sum(
+            1 for cid, b in budget_ytd.items() if actual_ytd.get(cid, 0.0) > b
+        ),
+        "variance_pct": (
+            round((total_actual - total_budget) / total_budget * 100, 1)
+            if total_budget else 0.0
+        ),
+    }
+
+
+# ── Seed helpers (scripts/seed_demo.py, seed_users.py) ──────────────────────
+# Domaines sans écrivain Mongo dédié avant Lot A5 — les Documents Beanie
+# existent déjà (mongodb.py::_all_document_models()), il ne manquait qu'un
+# chemin d'écriture synchrone pour les scripts de seed (pas de boucle asyncio
+# à porter, cohérent avec le reste de ce module).
+
+def create_user_sync(
+    nom: str, prenom: str, email: str, hashed_password: str,
+    role: str, departement: str = "", is_first_login: bool = True,
+) -> bool:
+    """Retourne False si l'email existe déjà, True si créé."""
+    coll = _get_db()["users"]
+    if coll.find_one({"email": email}):
+        return False
+    coll.insert_one({
+        "_id": str(uuid4()),
+        "nom": nom, "prenom": prenom, "email": email,
+        "hashed_password": hashed_password, "role": role, "departement": departement,
+        "is_first_login": is_first_login, "is_active": True,
+        "created_at": datetime.now(timezone.utc),
+        "failed_login_attempts": 0, "locked_until": None, "last_failed_login": None,
+        "last_login_at": None, "last_login_ip": None, "profile_picture": None,
+    })
+    return True
+
+
+def save_charte_projet_sync(
+    id: str, project_id: str, project_name: str, client: str,
+    valid_from: date, valid_until: date | None,
+    budget_jh: float, taux_jh: float, is_active: bool = True,
+) -> bool:
+    """Retourne False si `id` existe déjà, True si créé."""
+    coll = _get_db()["chartes_projet"]
+    if coll.find_one({"_id": id}):
+        return False
+    coll.insert_one({
+        "_id": id, "project_id": project_id, "project_name": project_name,
+        "client": client,
+        "valid_from": _to_midnight_utc(valid_from),
+        "valid_until": _to_midnight_utc(valid_until),
+        "budget_jh": budget_jh, "taux_jh": taux_jh, "is_active": is_active,
+    })
+    return True
+
+
+def save_phase_sync(
+    id: str, project_id: str, name: str, description: str,
+    planned_jh: float, consumed_jh: float, status: str,
+    closed_date: date | None, livrables: str = "[]",
+) -> bool:
+    """Retourne False si `id` existe déjà, True si créé."""
+    coll = _get_db()["phases"]
+    if coll.find_one({"_id": id}):
+        return False
+    coll.insert_one({
+        "_id": id, "project_id": project_id, "name": name, "description": description,
+        "planned_jh": planned_jh, "consumed_jh": consumed_jh, "status": status,
+        "closed_date": _to_midnight_utc(closed_date), "livrables": livrables,
+    })
+    return True
+
+
+def save_livrable_sync(
+    phase_id: str, titre: str, description: str,
+    date_prevue: date, date_reelle: date | None, statut: str, created_by: str,
+) -> None:
+    coll = _get_db()["livrables"]
+    coll.insert_one({
+        "_id": str(uuid4()), "phase_id": phase_id, "titre": titre, "description": description,
+        "date_livraison_prevue": _to_midnight_utc(date_prevue),
+        "date_livraison_reelle": _to_midnight_utc(date_reelle),
+        "statut": statut, "fichier_path": None, "created_by": created_by,
+    })
+
+
+def phase_has_livrables_sync(phase_id: str) -> bool:
+    return _get_db()["livrables"].find_one({"phase_id": phase_id}) is not None
+
+
+def save_ligne_budget_sync(
+    projet_id: str, categorie: str, montant_prevu: float,
+    montant_consomme: float = 0.0, devise: str = "TND",
+) -> bool:
+    """Retourne False si une ligne (projet_id, categorie) existe déjà, True si créée."""
+    coll = _get_db()["lignes_budget"]
+    if coll.find_one({"projet_id": projet_id, "categorie": categorie}):
+        return False
+    coll.insert_one({
+        "_id": str(uuid4()), "projet_id": projet_id, "categorie": categorie,
+        "montant_prevu": montant_prevu, "montant_consomme": montant_consomme,
+        "devise": devise, "created_at": datetime.now(timezone.utc),
+    })
+    return True
+
+
+def save_feuille_de_route_sync(
+    titre: str, description: str, date_debut: date, date_fin: date,
+    projet_id: str | None, statut: str, priorite: str, annee: int,
+    responsable_id: str | None = None,
+) -> bool:
+    """Retourne False si un item (titre, annee) existe déjà, True si créé."""
+    coll = _get_db()["feuilles_de_route"]
+    if coll.find_one({"titre": titre, "annee": annee}):
+        return False
+    coll.insert_one({
+        "_id": str(uuid4()), "titre": titre, "description": description,
+        "date_debut": _to_midnight_utc(date_debut), "date_fin": _to_midnight_utc(date_fin),
+        "projet_id": projet_id, "responsable_id": responsable_id,
+        "statut": statut, "priorite": priorite, "annee": annee,
+    })
+    return True
+
+
+# ── Classification feedback (PATCH /ai/invoices/{id}/classification) ────────
+
+def save_classification_feedback_sync(
+    invoice_id: str, original_compte: str, corrected_compte: str,
+    original_catalog_id: str | None, corrected_catalog_id: str | None,
+    invoice_text: str, corrected_by: str,
+) -> None:
+    _get_db()["classification_feedback"].insert_one({
+        "_id": str(uuid4()), "invoice_id": invoice_id,
+        "original_compte": original_compte, "corrected_compte": corrected_compte,
+        "original_catalog_id": original_catalog_id, "corrected_catalog_id": corrected_catalog_id,
+        "invoice_text": invoice_text, "corrected_by": corrected_by,
+        "corrected_at": datetime.now(timezone.utc),
+    })
+
+
+def count_classification_feedback_sync() -> int:
+    return _get_db()["classification_feedback"].count_documents({})

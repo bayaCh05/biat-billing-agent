@@ -1,6 +1,7 @@
-"""Unit tests for NLQueryEngine — LLM and DB calls mocked."""
+"""Unit tests for NLQueryEngine — LLM and MongoDB calls mocked."""
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,67 +12,74 @@ from src.query.nl_query_engine import NLQueryEngine
 # ── Static / pure methods (no mocking needed) ─────────────────────────────────
 
 class TestIsSafe:
-    def test_select_is_safe(self):
-        assert NLQueryEngine._is_safe("SELECT * FROM invoices") is True
+    def test_allowed_collection_and_simple_pipeline_is_safe(self):
+        safe, reason = NLQueryEngine._is_safe("invoices", [{"$match": {"status": "PAID"}}])
+        assert safe is True
+        assert reason == ""
 
-    def test_select_with_subquery(self):
-        assert NLQueryEngine._is_safe("SELECT id FROM (SELECT * FROM invoices)") is True
+    def test_disallowed_collection_is_unsafe(self):
+        safe, reason = NLQueryEngine._is_safe("users", [{"$match": {}}])
+        assert safe is False
+        assert "non autorisée" in reason
 
-    def test_insert_is_unsafe(self):
-        assert NLQueryEngine._is_safe("INSERT INTO invoices VALUES (1)") is False
+    def test_empty_pipeline_is_unsafe(self):
+        safe, _ = NLQueryEngine._is_safe("invoices", [])
+        assert safe is False
 
-    def test_update_is_unsafe(self):
-        assert NLQueryEngine._is_safe("UPDATE invoices SET status = 'PAID'") is False
+    def test_non_list_pipeline_is_unsafe(self):
+        safe, _ = NLQueryEngine._is_safe("invoices", {"$match": {}})
+        assert safe is False
 
-    def test_delete_is_unsafe(self):
-        assert NLQueryEngine._is_safe("DELETE FROM invoices") is False
+    def test_out_stage_is_unsafe(self):
+        safe, reason = NLQueryEngine._is_safe("invoices", [{"$out": "evil"}])
+        assert safe is False
+        assert "$out" in reason
 
-    def test_drop_is_unsafe(self):
-        assert NLQueryEngine._is_safe("DROP TABLE invoices") is False
+    def test_merge_stage_is_unsafe(self):
+        safe, _ = NLQueryEngine._is_safe("invoices", [{"$merge": "evil"}])
+        assert safe is False
 
-    def test_alter_is_unsafe(self):
-        assert NLQueryEngine._is_safe("ALTER TABLE invoices ADD COLUMN x TEXT") is False
+    def test_lookup_stage_is_unsafe(self):
+        safe, _ = NLQueryEngine._is_safe("invoices", [{"$lookup": {}}])
+        assert safe is False
 
-    def test_create_is_unsafe(self):
-        assert NLQueryEngine._is_safe("CREATE TABLE foo (id INT)") is False
+    def test_where_stage_is_unsafe(self):
+        safe, _ = NLQueryEngine._is_safe("invoices", [{"$where": "1==1"}])
+        assert safe is False
 
-    def test_truncate_is_unsafe(self):
-        assert NLQueryEngine._is_safe("TRUNCATE TABLE invoices") is False
+    def test_multi_key_stage_is_unsafe(self):
+        safe, _ = NLQueryEngine._is_safe("invoices", [{"$match": {}, "$sort": {}}])
+        assert safe is False
 
-    def test_embedded_delete_is_unsafe(self):
-        assert NLQueryEngine._is_safe("SELECT 1; DELETE FROM invoices") is False
-
-    def test_empty_string_is_unsafe(self):
-        assert NLQueryEngine._is_safe("") is False
+    def test_non_dollar_stage_is_unsafe(self):
+        safe, _ = NLQueryEngine._is_safe("invoices", [{"match": {}}])
+        assert safe is False
 
 
-class TestSanitizeSql:
-    def test_removes_and_direction_condition(self):
-        sql = (
-            "SELECT SUM(jl.debit) FROM journal_lines jl "
-            "JOIN journal_entries je ON jl.entry_id = je.id "
-            "AND je.direction = 'SUPPLIER'"
-        )
-        result = NLQueryEngine._sanitize_sql(sql)
-        assert "je.direction" not in result
+class TestCoerceDates:
+    def test_converts_iso_date_string(self):
+        result = NLQueryEngine._coerce_dates({"invoice_date": "2026-06-01"})
+        assert result["invoice_date"].year == 2026
+        assert result["invoice_date"].month == 6
+        assert result["invoice_date"].day == 1
 
-    def test_removes_and_status_condition(self):
-        sql = "SELECT * FROM journal_entries je AND je.status = 'PAID'"
-        result = NLQueryEngine._sanitize_sql(sql)
-        assert "je.status" not in result
+    def test_converts_iso_datetime_string(self):
+        result = NLQueryEngine._coerce_dates({"paid_at": "2026-06-01T12:30:00Z"})
+        assert result["paid_at"].year == 2026
+        assert result["paid_at"].hour == 12
 
-    def test_removes_and_issuer_name_condition(self):
-        sql = "SELECT * FROM journal_entries je AND je.issuer_name = 'Acme'"
-        result = NLQueryEngine._sanitize_sql(sql)
-        assert "je.issuer_name" not in result
+    def test_leaves_non_date_strings_untouched(self):
+        result = NLQueryEngine._coerce_dates({"status": "PAID"})
+        assert result["status"] == "PAID"
 
-    def test_keeps_valid_sql_unchanged(self):
-        sql = "SELECT COALESCE(SUM(amount_ttc), 0) AS total FROM invoices WHERE status = 'PAID'"
-        assert NLQueryEngine._sanitize_sql(sql) == sql
+    def test_recurses_into_nested_pipeline(self):
+        pipeline = [{"$match": {"invoice_date": {"$gte": "2026-01-01"}}}]
+        result = NLQueryEngine._coerce_dates(pipeline)
+        assert result[0]["$match"]["invoice_date"]["$gte"].year == 2026
 
-    def test_keeps_valid_where_direction_on_invoices(self):
-        sql = "SELECT * FROM invoices WHERE direction = 'SUPPLIER'"
-        assert NLQueryEngine._sanitize_sql(sql) == sql
+    def test_leaves_non_string_values_untouched(self):
+        result = NLQueryEngine._coerce_dates({"n": 5, "flag": True, "x": None})
+        assert result == {"n": 5, "flag": True, "x": None}
 
 
 class TestFormatAnswer:
@@ -118,48 +126,45 @@ class TestFormatAnswer:
         assert "5" in result
 
 
-# ── query() with mocked LLM and DB ────────────────────────────────────────────
+# ── query() with mocked LLM and MongoDB ───────────────────────────────────────
 
-@pytest.fixture
-def engine_mock():
-    """SQLAlchemy engine mock that returns a configurable result set."""
-    engine = MagicMock()
-    conn = MagicMock()
-    conn.__enter__ = MagicMock(return_value=conn)
-    conn.__exit__ = MagicMock(return_value=False)
-    engine.connect.return_value = conn
-    return engine, conn
+class _FakeCursor(list):
+    """aggregate() returns a cursor; iterating it yields the docs."""
 
 
-def _make_rows(*dicts):
-    """Build mock SQLAlchemy Row objects from dicts."""
-    rows = []
-    for d in dicts:
-        row = MagicMock()
-        row._mapping = d
-        rows.append(row)
-    return rows
+def _mock_collection(return_value=None, side_effect=None):
+    coll = MagicMock()
+    if side_effect is not None:
+        coll.aggregate.side_effect = side_effect
+    else:
+        coll.aggregate.return_value = _FakeCursor(return_value or [])
+    return coll
 
 
 class TestNLQueryEngineQuery:
-    def test_successful_query_returns_all_fields(self, engine_mock):
-        engine, conn = engine_mock
-        conn.execute.return_value = _make_rows({"nb": 42})
-        nl = NLQueryEngine(engine=engine)
-
-        llm_json = '{"sql": "SELECT COUNT(*) AS nb FROM invoices", "explanation": "Comptage factures"}'
-        with patch.object(nl, "_ask_llm", return_value=llm_json):
+    def test_successful_query_returns_all_fields(self):
+        nl = NLQueryEngine()
+        coll = _mock_collection([{"nb": 42}])
+        llm_json = json.dumps({
+            "collection": "invoices",
+            "pipeline": [{"$count": "nb"}],
+            "explanation": "Comptage factures",
+        })
+        with patch.object(nl, "_ask_llm", return_value=llm_json), \
+             patch("src.storage.sync_mongo_repository._get_db", return_value={"invoices": coll}):
             result = nl.query("Combien de factures?")
 
-        assert result["sql"] == "SELECT COUNT(*) AS nb FROM invoices"
         assert result["explanation"] == "Comptage factures"
         assert result["result"] == [{"nb": 42}]
         assert "42" in result["answer"]
+        assert "invoices" in result["sql"]
 
-    def test_null_sql_from_llm_returns_explanation(self, engine_mock):
-        engine, _ = engine_mock
-        nl = NLQueryEngine(engine=engine)
-        llm_json = '{"sql": null, "explanation": "Je ne peux pas répondre."}'
+    def test_null_pipeline_from_llm_returns_explanation(self):
+        nl = NLQueryEngine()
+        llm_json = json.dumps({
+            "collection": None, "pipeline": None,
+            "explanation": "Je ne peux pas répondre.",
+        })
         with patch.object(nl, "_ask_llm", return_value=llm_json):
             result = nl.query("Quelle est la météo?")
 
@@ -167,35 +172,51 @@ class TestNLQueryEngineQuery:
         assert result["result"] is None
         assert "Je ne peux pas répondre." in result["answer"]
 
-    def test_unsafe_sql_rejected(self, engine_mock):
-        engine, _ = engine_mock
-        nl = NLQueryEngine(engine=engine)
-        llm_json = '{"sql": "DELETE FROM invoices", "explanation": "Suppression"}'
+    def test_disallowed_collection_rejected(self):
+        nl = NLQueryEngine()
+        llm_json = json.dumps({
+            "collection": "users", "pipeline": [{"$match": {}}],
+            "explanation": "Liste utilisateurs",
+        })
+        with patch.object(nl, "_ask_llm", return_value=llm_json):
+            result = nl.query("Liste les utilisateurs")
+
+        assert result["sql"] is None
+        assert "non autorisée" in result["answer"]
+
+    def test_out_stage_rejected(self):
+        nl = NLQueryEngine()
+        llm_json = json.dumps({
+            "collection": "invoices", "pipeline": [{"$out": "evil"}],
+            "explanation": "Suppression déguisée",
+        })
         with patch.object(nl, "_ask_llm", return_value=llm_json):
             result = nl.query("Supprime tout")
 
         assert result["sql"] is None
-        assert "SELECT" in result["answer"]  # error message mentions SELECT
+        assert "$out" in result["answer"]
 
-    def test_sql_error_triggers_retry(self, engine_mock):
-        engine, conn = engine_mock
-        nl = NLQueryEngine(engine=engine)
-
-        first_llm = '{"sql": "SELECT bad_col FROM invoices", "explanation": "Mauvaise requête"}'
-        second_llm = '{"sql": "SELECT COUNT(*) AS nb FROM invoices", "explanation": "Requête corrigée"}'
-        conn.execute.side_effect = [
-            Exception("no such column: bad_col"),  # first attempt fails
-            _make_rows({"nb": 3}),                  # retry succeeds
-        ]
-
-        with patch.object(nl, "_ask_llm", side_effect=[first_llm, second_llm]):
+    def test_pipeline_error_triggers_retry(self):
+        nl = NLQueryEngine()
+        first_llm = json.dumps({
+            "collection": "invoices", "pipeline": [{"$badStage": {}}],
+            "explanation": "Mauvaise requête",
+        })
+        second_llm = json.dumps({
+            "collection": "invoices", "pipeline": [{"$count": "nb"}],
+            "explanation": "Requête corrigée",
+        })
+        coll = _mock_collection(
+            side_effect=[Exception("unknown stage $badStage"), _FakeCursor([{"nb": 3}])]
+        )
+        with patch.object(nl, "_ask_llm", side_effect=[first_llm, second_llm]), \
+             patch("src.storage.sync_mongo_repository._get_db", return_value={"invoices": coll}):
             result = nl.query("Test avec erreur")
 
         assert result["result"] == [{"nb": 3}]
 
-    def test_unparsable_llm_response_returns_error(self, engine_mock):
-        engine, _ = engine_mock
-        nl = NLQueryEngine(engine=engine)
+    def test_unparsable_llm_response_returns_error(self):
+        nl = NLQueryEngine()
         with patch.object(nl, "_ask_llm", return_value="not json at all"):
             result = nl.query("Question sans réponse")
 
@@ -203,40 +224,43 @@ class TestNLQueryEngineQuery:
         assert result["result"] is None
         assert "non parsable" in result["answer"]
 
-    def test_ollama_connection_error_returns_graceful_response(self, engine_mock):
-        engine, _ = engine_mock
-        nl = NLQueryEngine(engine=engine, ollama_url="http://localhost:99999")
+    def test_ollama_connection_error_returns_graceful_response(self):
+        nl = NLQueryEngine(ollama_url="http://localhost:99999")
         # _ask_llm catches ConnectionError and returns JSON fallback internally
         result = nl.query("Test connexion")
-        # Should not raise — just return None SQL
+        # Should not raise — just return None collection/pipeline
         assert "question" in result
 
-    def test_empty_result_set(self, engine_mock):
-        engine, conn = engine_mock
-        conn.execute.return_value = []
-        nl = NLQueryEngine(engine=engine)
-
-        llm_json = '{"sql": "SELECT * FROM invoices WHERE issuer_name = \'Inconnu\'", "explanation": "Recherche"}'
-        with patch.object(nl, "_ask_llm", return_value=llm_json):
+    def test_empty_result_set(self):
+        nl = NLQueryEngine()
+        coll = _mock_collection([])
+        llm_json = json.dumps({
+            "collection": "invoices",
+            "pipeline": [{"$match": {"issuer_name": "Inconnu"}}],
+            "explanation": "Recherche",
+        })
+        with patch.object(nl, "_ask_llm", return_value=llm_json), \
+             patch("src.storage.sync_mongo_repository._get_db", return_value={"invoices": coll}):
             result = nl.query("Factures de Inconnu")
 
         assert result["result"] == []
         assert "Aucun résultat" in result["answer"]
 
-    def test_sanitize_applied_to_llm_sql(self, engine_mock):
-        engine, conn = engine_mock
-        conn.execute.return_value = _make_rows({"total": 1000.0})
-        nl = NLQueryEngine(engine=engine)
+    def test_date_literal_coerced_before_execution(self):
+        nl = NLQueryEngine()
+        coll = _mock_collection([{"total": 1000.0}])
+        llm_json = json.dumps({
+            "collection": "invoices",
+            "pipeline": [
+                {"$match": {"invoice_date": {"$gte": "2026-06-01"}}},
+                {"$group": {"_id": None, "total": {"$sum": "$amount_ttc"}}},
+            ],
+            "explanation": "Total juin",
+        })
+        with patch.object(nl, "_ask_llm", return_value=llm_json), \
+             patch("src.storage.sync_mongo_repository._get_db", return_value={"invoices": coll}):
+            nl.query("Total de juin")
 
-        dirty_sql = (
-            "SELECT SUM(jl.debit) FROM journal_lines jl "
-            "JOIN journal_entries je ON jl.entry_id = je.id "
-            "AND je.direction = 'SUPPLIER'"
-        )
-        llm_json = f'{{"sql": "{dirty_sql}", "explanation": "Test"}}'
-        with patch.object(nl, "_ask_llm", return_value=llm_json):
-            result = nl.query("Total débit fournisseurs")
-
-        # sanitize should strip the invalid je.direction condition before execution
-        executed_sql = conn.execute.call_args[0][0].text
-        assert "je.direction" not in executed_sql
+        executed_pipeline = coll.aggregate.call_args[0][0]
+        gte_value = executed_pipeline[0]["$match"]["invoice_date"]["$gte"]
+        assert hasattr(gte_value, "year")  # coerced to a real datetime, not a string

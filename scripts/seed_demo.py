@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""BIAT IT — Demo database seeder (unified).
+"""BIAT IT — Demo database seeder (unified, MongoDB).
 
-Usage (from project root):
-    python scripts/seed_demo.py            # wipe DB and seed fresh
-    python scripts/seed_demo.py --append   # keep existing rows, add only new ones
+Usage (from project root, MONGODB_URI/MONGODB_DB set in .env):
+    python scripts/seed_demo.py            # idempotent — safe to re-run
+    python scripts/seed_demo.py --append   # same effect (see --help)
     python scripts/seed_demo.py --dry-run  # validate imports without writing
+
+Every write is upsert-by-id or skip-if-exists — this seeds the SAME MongoDB
+the app reads from (not a disposable demo-only file, unlike the old SQLite
+version), so re-running never wipes existing data.
 
 Populates (in order):
   1.  24 supplier invoices spanning all statuses + all cost catalogue entries
@@ -23,11 +27,12 @@ Populates (in order):
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -35,15 +40,18 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 # ── Early import check ────────────────────────────────────────────────────────
 try:
-    from sqlalchemy import select
-    from src.storage.db import build_engine, build_session_factory, init_db
-    from src.storage.repository import InvoiceRepository
-    from src.storage.orm_models_users import UserORM
-    from src.storage.orm_models_roadmap import LigneBudgetORM, FeuilleDeRouteORM, LivrableORM
-    from src.storage.orm_models_audit import AuditLogORM
-    from src.accounting.journal_store import JournalRepository
-    from src.capex.asset_repository import AssetRepository
-    from src.billing.client_invoice_store import ClientInvoiceRepository
+    # api.auth must be imported first — it's what loads .env (MONGODB_URI
+    # included) before src.storage.mongodb reads it as a module-level
+    # constant. Importing mongodb.py first would freeze MONGODB_URI at "".
+    from api.auth import hash_password
+    from src.storage.mongodb import close_mongodb, init_beanie
+    from src.storage.sync_mongo_repository import (
+        SyncMongoAssetRepository, SyncMongoClientInvoiceRepository,
+        SyncMongoInvoiceRepository, SyncMongoJournalRepository,
+        create_user_sync, phase_has_livrables_sync, save_charte_projet_sync,
+        save_feuille_de_route_sync, save_ligne_budget_sync, save_livrable_sync,
+        save_phase_sync,
+    )
     from src.models.invoice import ConfidenceField, InvoiceRecord, LineItem, ValidationFlag
     from src.models.asset import Asset
     from src.models.journal import JournalEntry, JournalLine
@@ -52,13 +60,11 @@ try:
         ChargeNature, ChargeType, ExtractionMethod,
         FlagSeverity, FlagType, InvoiceDirection, InvoiceStatus,
     )
-    from api.auth import hash_password
 except ImportError as exc:
     print(f"[seed] Import error: {exc}")
     print("  Make sure you activated the venv: source .venv/bin/activate")
     sys.exit(1)
 
-DB_URL   = "sqlite:///./data/invoices.db"
 SEED_KEY = "biat-demo-2026-v2"
 
 
@@ -594,13 +600,17 @@ ROADMAP_ITEMS = [
 
 # ── Seeder ────────────────────────────────────────────────────────────────────
 
-def seed(session, *, append: bool = False) -> None:
-    inv_repo   = InvoiceRepository(session)
-    jnl_repo   = JournalRepository(session)
-    asset_repo = AssetRepository(session)
-    ci_repo    = ClientInvoiceRepository(session)
+def seed() -> None:
+    from src.storage.sync_mongo_repository import _get_db
 
-    existing_hashes = {inv.file_hash.value for inv in inv_repo.list_all()}
+    db = _get_db()
+    inv_repo   = SyncMongoInvoiceRepository()
+    jnl_repo   = SyncMongoJournalRepository()
+    asset_repo = SyncMongoAssetRepository()
+    ci_repo    = SyncMongoClientInvoiceRepository()
+
+    def _journal_exists(reference: str) -> bool:
+        return db["journal_entries"].find_one({"reference": reference}) is not None
 
     # ── 1. Supplier invoices + journal entries ────────────────────────────────
     print("\n[1/10] Supplier invoices…")
@@ -609,7 +619,7 @@ def seed(session, *, append: bool = False) -> None:
 
     for spec in SUPPLIER_SPECS:
         num = spec["num"]
-        if fh(num) in existing_hashes and append:
+        if inv_repo.get_by_hash(fh(num)) is not None:
             skipped += 1
             continue
 
@@ -631,28 +641,44 @@ def seed(session, *, append: bool = False) -> None:
         status_str = spec["status"].value if isinstance(spec["status"], InvoiceStatus) else spec["status"]
         print(f"  {num}  →  {status_str}")
 
-    print(f"  {created} created, {skipped} skipped (--append)")
+    print(f"  {created} created, {skipped} skipped (already exist)")
 
     print(f"\n[2/10] Journal entries ({len(journal_queue)})…")
+    jnl_created = 0
     for inv, compte in journal_queue:
-        jnl_repo.save(make_journal(inv, compte))
+        entry = make_journal(inv, compte)
+        if not _journal_exists(entry.reference):
+            jnl_repo.save(entry)
+            jnl_created += 1
+    print(f"  {jnl_created} created, {len(journal_queue) - jnl_created} skipped (already exist)")
 
     # ── 3. CAPEX assets + depreciation ───────────────────────────────────────
     print("\n[3/10] CAPEX assets + depreciation (Jan–Jun 2026)…")
     assets: list[Asset] = []
+    assets_created = 0
     for spec in ASSET_SPECS:
         asset = Asset(**spec)
-        asset_repo.save(asset)
+        existing = db["assets"].find_one({"designation": asset.designation})
+        if existing is None:
+            asset_repo.save(asset)
+            assets_created += 1
+        else:
+            asset.id = UUID(existing["_id"])
         assets.append(asset)
         print(f"  {asset.designation}")
+    print(f"  {assets_created} created, {len(assets) - assets_created} skipped (already exist)")
 
-    dep_count = 0
+    dep_count = dep_skipped = 0
     for asset in assets:
         amort = asset.monthly_depreciation
         for m in range(1, 7):
             ld = last_day(2026, m)
+            reference = f"AMORT-{asset.designation[:15].replace(' ','-')}-2026{m:02d}"
+            if _journal_exists(reference):
+                dep_skipped += 1
+                continue
             jnl_repo.save(JournalEntry(
-                reference=f"AMORT-{asset.designation[:15].replace(' ','-')}-2026{m:02d}",
+                reference=reference,
                 date_ecriture=ld,
                 description=f"Dotation amortissement {ld.strftime('%B %Y')} — {asset.designation}",
                 source_asset_id=asset.id,
@@ -666,10 +692,9 @@ def seed(session, *, append: bool = False) -> None:
                 ],
             ))
             dep_count += 1
-    print(f"  {dep_count} depreciation entries (5 assets × 6 months)")
+    print(f"  {dep_count} created, {dep_skipped} skipped (already exist)")
 
     # ── 4. Projects + phases ──────────────────────────────────────────────────
-    from src.storage.orm_models_projects import CharteProjetORM, PhaseORM  # noqa: PLC0415
     print("\n[4/10] Projects + phases…")
     proj_data = [
         dict(id="CHR-2026-0001", project_id="PRJ-CBK", project_name="Migration Core Banking System",
@@ -721,19 +746,31 @@ def seed(session, *, append: bool = False) -> None:
              closed_date=None, livrables='[]'),
     ]
     for pd in proj_data:
-        if not session.get(CharteProjetORM, pd["id"]):
-            session.add(CharteProjetORM(**pd))
+        save_charte_projet_sync(
+            id=pd["id"], project_id=pd["project_id"], project_name=pd["project_name"],
+            client=pd["client"], valid_from=pd["valid_from"], valid_until=pd["valid_until"],
+            budget_jh=pd["budget_jh"], taux_jh=pd["taux_jh"], is_active=pd["is_active"],
+        )
     for phd in phase_data:
-        if not session.get(PhaseORM, phd["id"]):
-            session.add(PhaseORM(**phd))
-    session.flush()
+        save_phase_sync(
+            id=phd["id"], project_id=phd["project_id"], name=phd["name"],
+            description=phd["description"], planned_jh=phd["planned_jh"],
+            consumed_jh=phd["consumed_jh"], status=phd["status"],
+            closed_date=phd["closed_date"], livrables=phd["livrables"],
+        )
     print(f"  {len(proj_data)} projects, {len(phase_data)} phases")
 
     # ── 5. Client invoices ────────────────────────────────────────────────────
     print("\n[5/10] Client invoices…")
+    ci_created = ci_skipped = 0
     for ci in _make_client_invoices():
+        if db["client_invoices"].find_one({"invoice_number": ci.invoice_number}):
+            ci_skipped += 1
+            continue
         ci_repo.save(ci)
+        ci_created += 1
         print(f"  {ci.invoice_number}  HT={ci.amount_ht:,.3f} TND  [{ci.status.value}]")
+    print(f"  {ci_created} created, {ci_skipped} skipped (already exist)")
 
     # ── 6. Budget plan YAML ───────────────────────────────────────────────────
     print("\n[6/10] Updating budget_plan.yaml…")
@@ -743,23 +780,14 @@ def seed(session, *, append: bool = False) -> None:
     print("\n[7/10] Demo users…")
     created_users = []
     for spec in DEMO_USERS:
-        existing = session.execute(
-            select(UserORM).where(UserORM.email == spec["email"])
-        ).scalar_one_or_none()
-        if existing:
-            continue
-        session.add(UserORM(
-            nom=spec["nom"], prenom=spec["prenom"],
-            email=spec["email"],
+        created = create_user_sync(
+            nom=spec["nom"], prenom=spec["prenom"], email=spec["email"],
             hashed_password=hash_password(spec["password"]),
-            role=spec["role"],
-            departement=spec["departement"],
+            role=spec["role"], departement=spec["departement"],
             is_first_login=False,
-            is_active=True,
-            created_at=datetime.now(timezone.utc),
-        ))
-        created_users.append(spec["email"])
-    session.flush()
+        )
+        if created:
+            created_users.append(spec["email"])
     if created_users:
         for email in created_users:
             print(f"  {email}")
@@ -771,74 +799,41 @@ def seed(session, *, append: bool = False) -> None:
     n_liv = 0
     for phase_spec in LIVRABLES_DATA:
         phase_id = phase_spec["phase_id"]
-        existing = session.execute(
-            select(LivrableORM).where(LivrableORM.phase_id == phase_id)
-        ).scalars().all()
-        if existing:
+        if phase_has_livrables_sync(phase_id):
             continue
         for lv in phase_spec["livrables"]:
-            session.add(LivrableORM(
-                phase_id=phase_id,
-                titre=lv["titre"],
-                description=lv["description"],
-                date_livraison_prevue=lv["date_prevue"],
-                date_livraison_reelle=lv["date_reelle"],
-                statut=lv["statut"],
-                created_by=lv["created_by"],
-            ))
+            save_livrable_sync(
+                phase_id=phase_id, titre=lv["titre"], description=lv["description"],
+                date_prevue=lv["date_prevue"], date_reelle=lv["date_reelle"],
+                statut=lv["statut"], created_by=lv["created_by"],
+            )
             n_liv += 1
-    session.flush()
     print(f"  {n_liv} livrables created" if n_liv else "  Already seeded — skipped")
 
     # ── 9. Budget lines ───────────────────────────────────────────────────────
     print("\n[9/10] Budget lines…")
     n_budget = 0
     for spec in BUDGET_LINES:
-        existing = session.execute(
-            select(LigneBudgetORM).where(
-                LigneBudgetORM.projet_id == spec["projet_id"],
-                LigneBudgetORM.categorie == spec["categorie"],
-            )
-        ).scalar_one_or_none()
-        if existing:
-            continue
-        session.add(LigneBudgetORM(
-            projet_id=spec["projet_id"],
-            categorie=spec["categorie"],
-            montant_prevu=spec["montant_prevu"],
-            montant_consomme=spec["montant_consomme"],
-            devise="TND",
-            created_at=datetime.now(timezone.utc),
-        ))
-        n_budget += 1
-    session.flush()
+        created = save_ligne_budget_sync(
+            projet_id=spec["projet_id"], categorie=spec["categorie"],
+            montant_prevu=spec["montant_prevu"], montant_consomme=spec["montant_consomme"],
+        )
+        if created:
+            n_budget += 1
     print(f"  {n_budget} budget lines created" if n_budget else "  Already seeded — skipped")
 
     # ── 10. Roadmap 2026 ──────────────────────────────────────────────────────
     print("\n[10/10] Feuille de route 2026…")
     n_road = 0
     for spec in ROADMAP_ITEMS:
-        existing = session.execute(
-            select(FeuilleDeRouteORM).where(
-                FeuilleDeRouteORM.titre == spec["titre"],
-                FeuilleDeRouteORM.annee == spec["annee"],
-            )
-        ).scalar_one_or_none()
-        if existing:
-            continue
-        session.add(FeuilleDeRouteORM(
-            titre=spec["titre"],
-            description=spec["description"],
-            date_debut=spec["date_debut"],
-            date_fin=spec["date_fin"],
-            projet_id=spec["projet_id"],
-            responsable_id=None,
-            statut=spec["statut"],
-            priorite=spec["priorite"],
-            annee=spec["annee"],
-        ))
-        n_road += 1
-    session.flush()
+        created = save_feuille_de_route_sync(
+            titre=spec["titre"], description=spec["description"],
+            date_debut=spec["date_debut"], date_fin=spec["date_fin"],
+            projet_id=spec["projet_id"], statut=spec["statut"],
+            priorite=spec["priorite"], annee=spec["annee"],
+        )
+        if created:
+            n_road += 1
     print(f"  {n_road} roadmap items created" if n_road else "  Already seeded — skipped")
 
 
@@ -872,23 +867,22 @@ def _update_budget_plan() -> None:
     print(f"  {updated} catalogue entries updated in {plan_path.name}")
 
 
-def print_summary(session) -> None:
+def print_summary() -> None:
     from collections import Counter
-    from sqlalchemy import text
 
-    inv_repo   = InvoiceRepository(session)
-    jnl_repo   = JournalRepository(session)
-    asset_repo = AssetRepository(session)
-    ci_repo    = ClientInvoiceRepository(session)
+    from src.storage.sync_mongo_repository import _get_db
 
-    invs    = inv_repo.list_all()
-    entries = jnl_repo.list_entries()
-    assets  = asset_repo.list_all()
-    cis     = ci_repo.list_all()
+    db = _get_db()
+    invoice_docs = list(db["invoices"].find({}))
+    journal_docs = list(db["journal_entries"].find({}))
+    asset_docs   = list(db["assets"].find({}))
+    ci_docs      = list(db["client_invoices"].find({}))
 
-    counts = Counter(i.status.value for i in invs)
-    total  = sum(i.amount_ttc.value or 0 for i in invs
-                 if i.direction == InvoiceDirection.SUPPLIER and i.amount_ttc.value)
+    counts = Counter(i["status"] for i in invoice_docs)
+    total  = sum(
+        i.get("amount_ttc") or 0 for i in invoice_docs
+        if i.get("direction") == InvoiceDirection.SUPPLIER.value
+    )
 
     tables = [
         "users", "invoices", "journal_entries", "assets",
@@ -902,7 +896,7 @@ def print_summary(session) -> None:
     print("═" * w)
 
     for tbl in tables:
-        n = session.execute(text(f"SELECT COUNT(*) FROM {tbl}")).scalar_one()
+        n = db[tbl].count_documents({})
         print(f"  {tbl:<25} {n:>4}")
 
     print(f"\n  Invoice statuses:")
@@ -910,36 +904,64 @@ def print_summary(session) -> None:
         print(f"    {status:<22} {n:>3}")
     print(f"  Total TTC fournisseurs : {total:>12,.3f} TND")
 
-    inv_jnl = sum(1 for e in entries if e.source_invoice_id)
-    dep_jnl = sum(1 for e in entries if e.source_asset_id)
-    print(f"\n  Journal entries   : {len(entries)}")
+    inv_jnl = sum(1 for e in journal_docs if e.get("source_invoice_id"))
+    dep_jnl = sum(1 for e in journal_docs if e.get("source_asset_id"))
+    print(f"\n  Journal entries   : {len(journal_docs)}")
     print(f"    Invoice         : {inv_jnl}")
     print(f"    Depreciation    : {dep_jnl}")
 
-    gross = asset_repo.total_gross_value()
-    billed = sum(ci.amount_ht for ci in cis)
-    print(f"\n  CAPEX assets      : {len(assets)}")
+    gross = sum(a.get("acquisition_cost_ht") or 0 for a in asset_docs)
+    billed = sum(c.get("amount_ht") or 0 for c in ci_docs)
+    print(f"\n  CAPEX assets      : {len(asset_docs)}")
     print(f"  Gross value       : {gross:>12,.3f} TND")
-    print(f"\n  Client invoices   : {len(cis)}")
+    print(f"\n  Client invoices   : {len(ci_docs)}")
     print(f"  Total billed HT   : {billed:>12,.3f} TND")
 
+    today = _to_midnight_utc_local(date.today())
     overdue_count = sum(
-        1 for i in invs
-        if i.status == InvoiceStatus.EXPORTED
-        and i.due_date.value
-        and i.due_date.value < date.today()
-        and not i.paid_at
+        1 for i in invoice_docs
+        if i.get("status") == InvoiceStatus.EXPORTED.value
+        and i.get("due_date") and i["due_date"] < today
+        and not i.get("paid_at")
     )
     print(f"\n  Overdue invoices  : {overdue_count}")
     print("\n" + "═" * w)
 
 
+def _to_midnight_utc_local(d: date) -> datetime:
+    # pymongo decodes BSON dates as naive UTC by default (no tz_aware=True on
+    # the client) — must compare against a naive datetime too, not an aware one.
+    return datetime(d.year, d.month, d.day)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
+
+async def _async_main() -> None:
+    if not await init_beanie():
+        print("\n  ❌ MONGODB_URI non défini ou connexion MongoDB impossible.")
+        sys.exit(1)
+
+    try:
+        seed()
+        print("\n  ✅ Seed terminé")
+        print_summary()
+    except Exception as exc:
+        print(f"\n  ❌ Error: {exc}")
+        raise
+    finally:
+        await close_mongodb()
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="BIAT IT demo database seeder")
     parser.add_argument("--append",  action="store_true",
-                        help="Keep existing rows; skip duplicates (by file hash)")
+                        help=(
+                            "Kept for CLI compatibility — every write here is "
+                            "idempotent (upsert-by-id or skip-if-exists), so "
+                            "re-running is always safe. This flag only affects "
+                            "whether re-seeding an existing supplier invoice "
+                            "(same file hash) is silently skipped."
+                        ))
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate imports and config; do not write to DB")
     args = parser.parse_args()
@@ -951,37 +973,13 @@ def main() -> None:
     if args.dry_run:
         print("\n  [dry-run] Imports OK. Config files:")
         print(f"    {ROOT / 'config' / 'budget_plan.yaml'}")
-        print(f"    DB: {DB_URL}")
+        print("    DB: MongoDB (MONGODB_URI / MONGODB_DB)")
         print("  Pass without --dry-run to seed.")
         return
 
-    db_path = ROOT / "data" / "invoices.db"
+    asyncio.run(_async_main())
 
-    if not args.append:
-        if db_path.exists():
-            db_path.unlink()
-            print(f"\n  Removed existing database.")
-        (ROOT / "data").mkdir(exist_ok=True)
-
-    engine  = build_engine(DB_URL)
-    init_db(engine)
-    sf      = build_session_factory(engine)
-    session = sf()
-
-    try:
-        seed(session, append=args.append)
-        session.commit()
-        print("\n  ✅ Commit successful")
-        print_summary(session)
-    except Exception as exc:
-        session.rollback()
-        print(f"\n  ❌ Error: {exc}")
-        raise
-    finally:
-        session.close()
-
-    print(f"\n  Database : {db_path}")
-    print("  API      : python scripts/run_api.py")
+    print("\n  API      : python scripts/run_api.py")
     print("  Frontend : cd frontend && npm run dev")
     print()
 

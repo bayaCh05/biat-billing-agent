@@ -9,20 +9,28 @@ Budget tab shows meaningful bar charts (budget vs réel) with varied states:
 
 Usage:
     python scripts/seed_budget_actuals.py
+
+Idempotent — skips any (catalog_id, month) pair whose file_hash already exists.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import sys
 from datetime import date
 from pathlib import Path
-from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.storage.db import build_engine, build_session_factory, init_db
-from src.storage.orm_models import InvoiceORM
+# api.auth must be imported first (before src.storage.mongodb) — it's what
+# loads .env (MONGODB_URI included), which mongodb.py reads as a module-level
+# constant at import time.
+import api.auth  # noqa: F401
+from src.storage.mongodb import close_mongodb, init_beanie
+from src.storage.sync_mongo_repository import SyncMongoInvoiceRepository, _get_db
+from src.models.invoice import ConfidenceField, InvoiceRecord
+from src.models.enums import InvoiceDirection, InvoiceStatus
 
 TVA = 0.19
 
@@ -31,6 +39,9 @@ def _ttc(ht: float) -> float:
 
 def _hash(label: str, month: int) -> str:
     return hashlib.sha256(f"seed-budget-{label}-{month}".encode()).hexdigest()[:64]
+
+def _cf(value, conf: float = 0.99) -> ConfidenceField:
+    return ConfidenceField(value=value, confidence=conf)
 
 # Each entry: (catalog_id, issuer_name, monthly_ht per month Jan-Jun)
 # Budget YTD Jan-Jun from YAML for reference is in comments
@@ -114,74 +125,62 @@ MONTHS = [1, 2, 3, 4, 5, 6]
 MONTH_DAY = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30}
 
 
-def main() -> None:
-    engine = build_engine("sqlite:///./data/invoices.db")
-    init_db(engine)
-    sf = build_session_factory(engine)
+async def main() -> None:
+    if not await init_beanie():
+        print("MONGODB_URI non défini ou connexion impossible — abandon.")
+        sys.exit(1)
 
+    inv_repo = SyncMongoInvoiceRepository()
     created = 0
     skipped = 0
 
-    with sf() as session:
-        for catalog_id, issuer, monthly_ht in LINES:
-            for i, month in enumerate(MONTHS):
-                ht = monthly_ht[i]
-                if ht == 0:
-                    skipped += 1
-                    continue
+    for catalog_id, issuer, monthly_ht in LINES:
+        for i, month in enumerate(MONTHS):
+            ht = monthly_ht[i]
+            if ht == 0:
+                skipped += 1
+                continue
 
-                h = _hash(catalog_id, month)
-                existing = session.query(InvoiceORM).filter_by(file_hash=h).first()
-                if existing:
-                    skipped += 1
-                    continue
+            h = _hash(catalog_id, month)
+            if inv_repo.get_by_hash(h) is not None:
+                skipped += 1
+                continue
 
-                inv = InvoiceORM(
-                    file_hash=h,
-                    raw_file_path=f"seeds/budget/{catalog_id}_{month:02d}_2026.pdf",
-                    direction="SUPPLIER",
-                    status="JOURNALED",
-                    issuer_name=issuer,
-                    issuer_name_conf=0.99,
-                    invoice_date=date(2026, month, MONTH_DAY[month]),
-                    invoice_date_conf=0.99,
-                    invoice_number=f"{catalog_id.upper()[:8]}-2026-{month:02d}",
-                    invoice_number_conf=0.99,
-                    amount_ht=float(ht),
-                    amount_ht_conf=0.99,
-                    tva_rate=TVA * 100,
-                    tva_rate_conf=0.99,
-                    tva_amount=round(ht * TVA, 3),
-                    tva_amount_conf=0.99,
-                    amount_ttc=_ttc(ht),
-                    amount_ttc_conf=0.99,
-                    currency="TND",
-                    cost_catalog_id=catalog_id,
-                    classification_pass="A",
-                    human_review_required=False,
-                )
-                session.add(inv)
-                created += 1
-
-        session.commit()
+            inv = InvoiceRecord(
+                file_hash=h,
+                raw_file_path=f"seeds/budget/{catalog_id}_{month:02d}_2026.pdf",
+                direction=InvoiceDirection.SUPPLIER,
+                status=InvoiceStatus.JOURNALED,
+                issuer_name=_cf(issuer),
+                invoice_date=_cf(date(2026, month, MONTH_DAY[month])),
+                invoice_number=_cf(f"{catalog_id.upper()[:8]}-2026-{month:02d}"),
+                amount_ht=_cf(float(ht)),
+                tva_rate=_cf(TVA * 100),
+                tva_amount=_cf(round(ht * TVA, 3)),
+                amount_ttc=_cf(_ttc(ht)),
+                currency="TND",
+                cost_catalog_id=catalog_id,
+                classification_pass="A",
+                human_review_required=False,
+            )
+            inv_repo.save(inv)
+            created += 1
 
     print(f"\n✓ {created} factures créées, {skipped} ignorées (déjà présentes ou montant 0).")
 
     # Print summary
-    engine2 = build_engine("sqlite:///./data/invoices.db")
-    sf2 = build_session_factory(engine2)
-    from sqlalchemy import select, func
-    with sf2() as s:
-        rows = s.execute(
-            select(InvoiceORM.cost_catalog_id, func.sum(InvoiceORM.amount_ht).label("total"))
-            .where(InvoiceORM.direction == "SUPPLIER", InvoiceORM.cost_catalog_id.isnot(None))
-            .group_by(InvoiceORM.cost_catalog_id)
-            .order_by(func.sum(InvoiceORM.amount_ht).desc())
-        ).all()
-        print(f"\nActuels par catégorie (Jan–Juin 2026) :")
-        for r in rows:
-            print(f"  {r.cost_catalog_id:35} {r.total:>10.0f} TND HT")
+    db = _get_db()
+    rows = db["invoices"].aggregate([
+        {"$match": {"direction": "SUPPLIER", "cost_catalog_id": {"$ne": None}}},
+        {"$group": {"_id": "$cost_catalog_id", "total": {"$sum": "$amount_ht"}}},
+        {"$sort": {"total": -1}},
+    ])
+    print(f"\nActuels par catégorie (Jan–Juin 2026) :")
+    for r in rows:
+        print(f"  {r['_id']:35} {r['total']:>10.0f} TND HT")
+
+    await close_mongodb()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

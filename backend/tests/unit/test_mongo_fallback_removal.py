@@ -107,7 +107,6 @@ class TestSilentFallbacksRemoved:
         assert any("MongoDB indisponible" in r.message for r in caplog.records)
 
     def test_notifications_count_returns_zero_and_warns_when_mongo_down(self, caplog):
-        session = MagicMock()
         with (
             patch(
                 "src.storage.documents.service_bridge.sync_flagged_invoices_mirrored",
@@ -119,13 +118,12 @@ class TestSilentFallbacksRemoved:
             ),
             caplog.at_level(logging.WARNING),
         ):
-            result = _run(notifications.get_count(session=session))
+            result = _run(notifications.get_count())
 
         assert result.count == 0
         assert any("MongoDB indisponible" in r.message for r in caplog.records)
 
     def test_list_notifications_returns_empty_and_warns_when_mongo_down(self, caplog):
-        session = MagicMock()
         with (
             patch(
                 "src.storage.documents.service_bridge.sync_flagged_invoices_mirrored",
@@ -137,7 +135,7 @@ class TestSilentFallbacksRemoved:
             ),
             caplog.at_level(logging.WARNING),
         ):
-            result = _run(notifications.list_notifications(session=session))
+            result = _run(notifications.list_notifications())
 
         assert result == []
         assert any("MongoDB indisponible" in r.message for r in caplog.records)
