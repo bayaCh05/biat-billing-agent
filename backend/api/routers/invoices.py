@@ -119,8 +119,8 @@ async def upload_invoice(
         class _Mock(LLMBackendBase):
             def complete(self, system, user): return _MOCK
 
-        from src.agent.config_loader import build_pipeline_components
-        components, _ = build_pipeline_components(llm_backend=_Mock())
+        from src.agent.config_loader import build_ai_components
+        components = build_ai_components(llm_backend=_Mock())
 
     try:
         file_hash = sha256(tmp_path)

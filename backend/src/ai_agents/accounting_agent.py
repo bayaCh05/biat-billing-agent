@@ -25,7 +25,10 @@ _LATE_PENALTY_RATE = float(os.getenv("LATE_PAYMENT_PENALTY_RATE", "0.10"))
 class AccountingAgent(BaseAgent):
     name = "AccountingAgent"
 
-    def __init__(self, entry_generator, journal_repo, cost_catalog) -> None:
+    def __init__(self, entry_generator, journal_repo=None, cost_catalog=None) -> None:
+        """journal_repo is required for run() (posts journal entries) but
+        unused by check_consistency() (queries Mongo directly — see its
+        docstring), so callers that only need the consistency check can omit it."""
         super().__init__()
         self._entry_gen = entry_generator
         self._journal_repo = journal_repo

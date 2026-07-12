@@ -131,11 +131,7 @@ def accounting_check(
     components = get_components()
     try:
         from src.ai_agents.accounting_agent import AccountingAgent
-        agent = AccountingAgent(
-            components.entry_generator,
-            components.journal_repository,
-            components.cost_catalog,
-        )
+        agent = AccountingAgent(components.entry_generator, cost_catalog=components.cost_catalog)
         return agent.check_consistency()
     finally:
         components.close()

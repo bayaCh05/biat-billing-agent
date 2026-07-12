@@ -7,8 +7,8 @@ from typing import Generator
 
 from sqlalchemy.orm import Session
 
-from src.agent.config_loader import build_pipeline_components, load_config
-from src.agent.pipeline import PipelineComponents
+from src.agent.config_loader import build_ai_components, load_config
+from src.agent.config_loader import AIComponents
 from src.storage.db import build_engine, build_session_factory, init_db
 from src.cost_catalog.catalog import CostCatalog
 from src.budget.budget_tracker import BudgetPlan
@@ -54,10 +54,9 @@ def get_engine():
     return engine
 
 
-def get_components() -> PipelineComponents:
-    """Build a fresh PipelineComponents (Ollama backend). Close after use."""
-    components, _ = build_pipeline_components()
-    return components
+def get_components() -> AIComponents:
+    """Build a fresh AIComponents (Ollama backend) for AIOrchestrator. Close after use."""
+    return build_ai_components()
 
 
 @contextmanager

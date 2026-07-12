@@ -1,7 +1,9 @@
-"""AI Orchestrator — coordinates all agents for invoice processing and secondary flows.
+"""AI Orchestrator — coordinates all agents for invoice processing.
 
-Integrates with the existing PipelineComponents system.
-Built as synchronous to match the existing FastAPI + SQLAlchemy patterns.
+Takes an AIComponents bundle (agent/config_loader.py) of stateless stage
+objects. Built as synchronous to match the existing FastAPI + SQLAlchemy
+patterns (the `db: Session` param is used by ValidationAgent/AccountingAgent
+directly — see their `.run()` calls below).
 """
 from __future__ import annotations
 
@@ -20,7 +22,7 @@ from src.models.enums import InvoiceStatus
 from src.models.invoice import InvoiceRecord
 
 if TYPE_CHECKING:
-    from src.agent.pipeline import PipelineComponents
+    from src.agent.config_loader import AIComponents
 
 logger = logging.getLogger(__name__)
 
@@ -28,24 +30,23 @@ logger = logging.getLogger(__name__)
 class AIOrchestrator:
     """Coordinates AI agents for the complete invoice processing pipeline."""
 
-    def __init__(self, components: "PipelineComponents", db: Session) -> None:
+    def __init__(self, components: "AIComponents", db: Session) -> None:
         self._c = components
         self._db = db
         self._steps: list[PipelineStep] = []
 
         # Mongo primaire pour le chemin de traitement d'une facture — voir
         # sync_mongo_repository.py pour le pourquoi (pipeline synchrone,
-        # Beanie/Motor est async-only). Ce sont des clones du duplicate/
-        # anomaly detector partagés (mêmes seuils de config), pas les
-        # instances de PipelineComponents elles-mêmes : le daemon headless
-        # (agent/pipeline.py) continue d'utiliser SQLAlchemy sans changement.
+        # Beanie/Motor est async-only). components.duplicate_detector/
+        # anomaly_detector sont déjà liés à SyncMongoInvoiceRepository par
+        # build_ai_components() — pas besoin de les relier ici.
         from src.storage.sync_mongo_repository import (
             SyncMongoInvoiceRepository, SyncMongoJournalRepository,
         )
         self._repo = SyncMongoInvoiceRepository()
         self._journal_repo = SyncMongoJournalRepository()
-        self._duplicate_detector = self._c.duplicate_detector.with_repository(self._repo)
-        self._anomaly_detector = self._c.anomaly_detector.with_repository(self._repo)
+        self._duplicate_detector = self._c.duplicate_detector
+        self._anomaly_detector = self._c.anomaly_detector
 
     def process_invoice(self, invoice: InvoiceRecord) -> OrchestratorResult:
         """Run a pre-loaded InvoiceRecord through the full AI pipeline.
@@ -229,43 +230,6 @@ class AIOrchestrator:
             degraded_mode=degraded,
             human_review_required=False,
         )
-
-    # ── Secondary flows ───────────────────────────────────────────────────────
-
-    def scan_risks(self) -> dict:
-        from src.ai_agents.risk_agent import RiskAgent
-        result = RiskAgent().run({"task": "scan_roadmap"})
-        return result.output
-
-    def suggest_mitigation(self, titre: str, type_risque: str,
-                            probabilite: str, impact: str) -> str:
-        from src.ai_agents.risk_agent import RiskAgent
-        result = RiskAgent().run({
-            "task": "draft_mitigation",
-            "titre": titre, "type_risque": type_risque,
-            "probabilite": probabilite, "impact": impact,
-        })
-        return result.output.get("suggestion", "")
-
-    def generate_health_summary(self) -> dict:
-        from src.ai_agents.insight_agent import InsightAgent
-        agent = InsightAgent()
-        result = agent.run({"task": "health_summary"})
-        return result.output
-
-    def check_accounting_consistency(self) -> dict:
-        from src.ai_agents.accounting_agent import AccountingAgent
-        agent = AccountingAgent(
-            self._c.entry_generator, self._journal_repo, self._c.cost_catalog
-        )
-        return agent.check_consistency()
-
-    def retrain_models(self) -> dict:
-        try:
-            self._c.coder.ml_classifier.retrain_from_repo(self._c.repository)
-            return {"status": "ok", "message": "ML model retrained."}
-        except Exception as exc:
-            return {"status": "error", "message": str(exc)}
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

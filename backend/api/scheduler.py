@@ -37,11 +37,7 @@ def _job_accounting_consistency() -> None:
         from src.ai_agents.accounting_agent import AccountingAgent
         components = get_components()
         try:
-            agent = AccountingAgent(
-                components.entry_generator,
-                components.journal_repository,
-                components.cost_catalog,
-            )
+            agent = AccountingAgent(components.entry_generator, cost_catalog=components.cost_catalog)
             report = agent.check_consistency()
             logger.info("weekly_consistency_check: score=%.3f issues=%d",
                         report.get("consistency_score", 1.0), len(report.get("issues", [])))
