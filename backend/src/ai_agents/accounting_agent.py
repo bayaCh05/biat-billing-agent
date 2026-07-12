@@ -9,9 +9,6 @@ import logging
 import os
 import time
 from datetime import date, timedelta
-from uuid import uuid4
-
-from sqlalchemy.orm import Session
 
 from src.ai_agents.base_agent import BaseAgent
 from src.ai_agents.agent_schemas import AgentResult
@@ -35,10 +32,9 @@ class AccountingAgent(BaseAgent):
         self._catalog = cost_catalog
 
     def run(self, context: dict) -> AgentResult:
-        """context keys: invoice (InvoiceRecord), db (Session)"""
+        """context keys: invoice (InvoiceRecord)"""
         start = time.monotonic()
         invoice: InvoiceRecord = context["invoice"]
-        db: Session = context["db"]
 
         try:
             catalog_entry = None
@@ -46,7 +42,7 @@ class AccountingAgent(BaseAgent):
                 catalog_entry = self._catalog.get(invoice.cost_catalog_id)
 
             # 1) Journal entry
-            journal_id, is_balanced, explanation = self._post_journal(invoice, catalog_entry, db)
+            journal_id, is_balanced, explanation = self._post_journal(invoice, catalog_entry)
 
             # 2) CAPEX asset
             asset_id = None
@@ -54,13 +50,13 @@ class AccountingAgent(BaseAgent):
             amortization_source = None
             if invoice.charge_type == ChargeType.CAPEX:
                 asset_id, amortization_years, amortization_source = self._create_capex_asset(
-                    invoice, catalog_entry, db
+                    invoice, catalog_entry
                 )
 
             # 3) Payment schedule
             installment_ids = []
             if getattr(invoice, "payment_term_days", None):
-                installment_ids = self._create_payment_schedule(invoice, db)
+                installment_ids = self._create_payment_schedule(invoice)
 
             return AgentResult(
                 agent_name=self.name,
@@ -93,8 +89,7 @@ class AccountingAgent(BaseAgent):
 
     # ── Journal entry ─────────────────────────────────────────────────────────
 
-    def _post_journal(self, invoice: InvoiceRecord, catalog_entry,
-                      db: Session) -> tuple[str | None, bool, str]:
+    def _post_journal(self, invoice: InvoiceRecord, catalog_entry) -> tuple[str | None, bool, str]:
         if not catalog_entry:
             return None, False, ""
 
@@ -144,8 +139,8 @@ class AccountingAgent(BaseAgent):
 
     # ── CAPEX asset ───────────────────────────────────────────────────────────
 
-    def _create_capex_asset(self, invoice: InvoiceRecord, catalog_entry,
-                             db: Session) -> tuple[str | None, int | None, str | None]:
+    def _create_capex_asset(self, invoice: InvoiceRecord, catalog_entry
+                             ) -> tuple[str | None, int | None, str | None]:
         if not catalog_entry:
             return None, None, None
 
@@ -165,7 +160,7 @@ class AccountingAgent(BaseAgent):
 
         try:
             from src.models.asset import CapexAsset
-            from src.capex.asset_repository import AssetRepository
+            from src.storage.sync_mongo_repository import SyncMongoAssetRepository
 
             asset = CapexAsset(
                 designation=description,
@@ -178,8 +173,7 @@ class AccountingAgent(BaseAgent):
                 amortization_source=source,
                 supplier_invoice_id=str(invoice.id),
             )
-            repo = AssetRepository(db)
-            repo.save(asset)
+            SyncMongoAssetRepository().save(asset)
             return str(asset.id), amortization_years, source
         except Exception as exc:
             logger.warning("capex_asset_error: %s", exc)
@@ -216,7 +210,7 @@ class AccountingAgent(BaseAgent):
 
     # ── Payment schedule ──────────────────────────────────────────────────────
 
-    def _create_payment_schedule(self, invoice: InvoiceRecord, db: Session) -> list[str]:
+    def _create_payment_schedule(self, invoice: InvoiceRecord) -> list[str]:
         term = getattr(invoice, "payment_term_days", None)
         if not term or not invoice.amount_ttc.value:
             return []
@@ -233,28 +227,23 @@ class AccountingAgent(BaseAgent):
 
         ids = []
         try:
-            from src.storage.orm_models_payments import PaymentInstallmentORM
+            from src.storage.sync_mongo_repository import save_payment_installments_sync
 
+            rows = []
             for i in range(1, total + 1):
                 period_days = period if (i < total or remainder == 0) else remainder
                 cumulative_days = period * (i - 1) + period_days
                 due_date = received + timedelta(days=cumulative_days)
+                rows.append({
+                    "invoice_id": str(invoice.id),
+                    "installment_number": i,
+                    "total_installments": total,
+                    "base_amount": round(base_amount, 3),
+                    "current_amount": round(base_amount, 3),
+                    "due_date": due_date,
+                })
 
-                installment = PaymentInstallmentORM(
-                    id=uuid4(),
-                    invoice_id=str(invoice.id),
-                    installment_number=i,
-                    total_installments=total,
-                    base_amount=round(base_amount, 3),
-                    current_amount=round(base_amount, 3),
-                    due_date=due_date,
-                    status="PENDING",
-                    late_periods=0,
-                )
-                db.add(installment)
-                ids.append(str(installment.id))
-
-            db.commit()
+            ids = save_payment_installments_sync(rows)
             logger.info("payment_schedule_created invoice=%s installments=%d", invoice.id, total)
         except Exception as exc:
             logger.warning("payment_schedule_error: %s", exc)
@@ -263,32 +252,8 @@ class AccountingAgent(BaseAgent):
 
     # ── Consistency check ─────────────────────────────────────────────────────
 
-    def check_consistency(self, db: Session) -> dict:
-        """Audit journal entries for balance and coverage."""
-        from sqlalchemy import select, func, text
-
-        issues = []
-        total_checked = 0
-
-        try:
-            # Check 1: unbalanced journal entries
-            rows = db.execute(text(
-                "SELECT je.id, je.reference, "
-                "SUM(jl.debit) AS total_debit, SUM(jl.credit) AS total_credit "
-                "FROM journal_entries je "
-                "JOIN journal_lines jl ON jl.entry_id = je.id "
-                "GROUP BY je.id HAVING ABS(COALESCE(SUM(jl.debit),0) - COALESCE(SUM(jl.credit),0)) > 0.005"
-            )).fetchall()
-            total_checked += 1
-            if rows:
-                issues.append({"type": "UNBALANCED_ENTRIES", "count": len(rows),
-                                "detail": [{"id": str(r[0]), "reference": r[1]} for r in rows[:5]]})
-
-        except Exception as exc:
-            logger.warning("consistency_check_error: %s", exc)
-
-        return {
-            "consistency_score": round(1 - len(issues) / max(total_checked, 1), 3),
-            "total_checked": total_checked,
-            "issues": issues,
-        }
+    def check_consistency(self) -> dict:
+        """Audit journal entries for balance and coverage. Interroge Mongo directement —
+        indépendant du journal_repo injecté, pour toujours refléter l'état réel."""
+        from src.storage.sync_mongo_repository import journal_consistency_check_sync
+        return journal_consistency_check_sync()

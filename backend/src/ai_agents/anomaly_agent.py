@@ -11,9 +11,6 @@ import logging
 import re
 import time
 
-from sqlalchemy import text
-from sqlalchemy.orm import Session
-
 from src.ai_agents.base_agent import BaseAgent
 from src.ai_agents.agent_schemas import AgentResult
 from src.models.enums import FlagSeverity, FlagType
@@ -39,10 +36,9 @@ class AnomalyAgent(BaseAgent):
         self._ad = anomaly_detector
 
     def run(self, context: dict) -> AgentResult:
-        """context keys: invoice (InvoiceRecord), db (Session)"""
+        """context keys: invoice (InvoiceRecord)"""
         start = time.monotonic()
         invoice: InvoiceRecord = context["invoice"]
-        db: Session = context["db"]
 
         try:
             # Run existing validators (field, coherence, duplicate, anomaly)
@@ -52,10 +48,10 @@ class AnomalyAgent(BaseAgent):
             invoice = self._ad.detect(invoice)
 
             # New: category price comparison
-            self._check_category_price(invoice, db)
+            self._check_category_price(invoice)
 
             # New: payment term anomaly
-            self._check_payment_term(invoice, db)
+            self._check_payment_term(invoice)
 
             # New: semantic near-duplicate via embeddings
             self._check_semantic_duplicate(invoice)
@@ -87,24 +83,15 @@ class AnomalyAgent(BaseAgent):
                 ollama_calls_made=self._call_count,
             )
 
-    def _check_category_price(self, invoice: InvoiceRecord, db: Session) -> None:
+    def _check_category_price(self, invoice: InvoiceRecord) -> None:
         catalog_id = invoice.cost_catalog_id
         amount_ht = invoice.amount_ht.value
         if not catalog_id or not amount_ht:
             return
 
         try:
-            rows = db.execute(
-                text(
-                    "SELECT amount_ht FROM invoices "
-                    "WHERE cost_catalog_id = :cid "
-                    "AND status IN ('VALIDATED','EXPORTED','JOURNALED','PAID') "
-                    "AND id != :iid AND amount_ht IS NOT NULL"
-                ),
-                {"cid": catalog_id, "iid": str(invoice.id)},
-            ).fetchall()
-
-            amounts = [r[0] for r in rows if r[0] is not None]
+            from src.storage.sync_mongo_repository import historical_amounts_for_catalog_sync
+            amounts = historical_amounts_for_catalog_sync(catalog_id, invoice.id)
             if len(amounts) < 5:
                 return
 
@@ -130,7 +117,7 @@ class AnomalyAgent(BaseAgent):
         except Exception as exc:
             logger.debug("category_price_check_error: %s", exc)
 
-    def _check_payment_term(self, invoice: InvoiceRecord, db: Session) -> None:
+    def _check_payment_term(self, invoice: InvoiceRecord) -> None:
         term = getattr(invoice, "payment_term_days", None)
         if not term:
             return
@@ -140,23 +127,12 @@ class AnomalyAgent(BaseAgent):
             return
 
         try:
-            rows = db.execute(
-                text(
-                    "SELECT due_date - invoice_date AS days FROM invoices "
-                    "WHERE issuer_tax_id = :tid "
-                    "AND status IN ('VALIDATED','EXPORTED','JOURNALED','PAID') "
-                    "AND due_date IS NOT NULL AND invoice_date IS NOT NULL "
-                    "AND id != :iid "
-                    "LIMIT 20"
-                ),
-                {"tid": tax_id, "iid": str(invoice.id)},
-            ).fetchall()
-
-            if len(rows) < 3:
+            from src.storage.sync_mongo_repository import historical_payment_terms_sync
+            historical = historical_payment_terms_sync(tax_id, invoice.id)
+            if len(historical) < 3:
                 return
 
             import numpy as np
-            historical = [r[0] for r in rows if r[0] is not None]
             median_days = float(np.median(historical))
 
             if abs(term - median_days) > 15:
