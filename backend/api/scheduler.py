@@ -13,11 +13,9 @@ _scheduler: BackgroundScheduler | None = None
 
 def _job_scan_roadmap_risks() -> None:
     try:
-        from api.deps import get_session_ctx, get_components
         from src.ai_agents.risk_agent import RiskAgent
-        with get_session_ctx() as db:
-            result = RiskAgent().run({"task": "scan_roadmap", "db": db})
-            logger.info("nightly_risk_scan: %s", result.output)
+        result = RiskAgent().run({"task": "scan_roadmap"})
+        logger.info("nightly_risk_scan: %s", result.output)
     except Exception as exc:
         logger.error("nightly_risk_scan_error: %s", exc)
 

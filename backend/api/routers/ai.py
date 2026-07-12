@@ -73,11 +73,10 @@ def get_health_summary(
     ),
 )
 def scan_roadmap_risks(
-    session: Session = Depends(get_session),
     _user=Depends(require_role("Admin")),
 ):
     from src.ai_agents.risk_agent import RiskAgent
-    result = RiskAgent().run({"task": "scan_roadmap", "db": session})
+    result = RiskAgent().run({"task": "scan_roadmap"})
     if not result.success:
         raise HTTPException(500, detail=result.error or "Scan failed")
     return result.output
@@ -94,11 +93,10 @@ def scan_roadmap_risks(
 )
 def scan_item_risk(
     item_id: str,
-    session: Session = Depends(get_session),
     _user=Depends(require_role("Chef de Projet", "Admin")),
 ):
     from src.ai_agents.risk_agent import RiskAgent
-    result = RiskAgent().run({"task": "scan_roadmap", "db": session, "item_id": item_id})
+    result = RiskAgent().run({"task": "scan_roadmap", "item_id": item_id})
     if not result.success:
         raise HTTPException(500, detail=result.error or "Scan failed")
     return result.output

@@ -232,9 +232,9 @@ class AIOrchestrator:
 
     # ── Secondary flows ───────────────────────────────────────────────────────
 
-    def scan_risks(self, db: Session) -> dict:
+    def scan_risks(self) -> dict:
         from src.ai_agents.risk_agent import RiskAgent
-        result = RiskAgent().run({"task": "scan_roadmap", "db": db})
+        result = RiskAgent().run({"task": "scan_roadmap"})
         return result.output
 
     def suggest_mitigation(self, titre: str, type_risque: str,

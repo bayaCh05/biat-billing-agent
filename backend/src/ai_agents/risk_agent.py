@@ -5,13 +5,12 @@ Capability B: On-demand mitigation plan drafting.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 import time
 from datetime import date
-
-from sqlalchemy.orm import Session
 
 from src.ai_agents.base_agent import BaseAgent
 from src.ai_agents.agent_schemas import AgentResult
@@ -46,89 +45,28 @@ class RiskAgent(BaseAgent):
     # ── Capability A — nightly roadmap scan ───────────────────────────────────
 
     def _scan_roadmap(self, context: dict) -> AgentResult:
+        """Sync entry point — bridges to Mongo via asyncio.run().
+
+        Callers (scheduler.py's nightly job, the two /ai/scan-*-risk(s)
+        routes, which are plain `def` and so also run outside any event
+        loop) are all synchronous; real roadmap/risk data lives in Mongo
+        (service_bridge.py's create_risk_native() etc.), so this bridges
+        once here rather than needing async up the whole call chain.
+        """
         start = time.monotonic()
-        db: Session = context["db"]
-        today = date.today()
-
         try:
-            from sqlalchemy import text
-            from src.storage.orm_models_roadmap import FeuilleDeRouteORM, RisqueORM
-            from sqlalchemy import select
-            from uuid import UUID as _UUID
-
-            item_id_filter = context.get("item_id")
-
-            # Overdue roadmap items (optionally filtered to a single item)
-            q = select(FeuilleDeRouteORM).where(
-                FeuilleDeRouteORM.date_fin < today,
-                FeuilleDeRouteORM.statut.notin_(["TERMINE", "ANNULE"]),
+            output = asyncio.run(self._scan_roadmap_async(context.get("item_id")))
+            logger.info(
+                "risk_scan_complete created=%d skipped=%d",
+                output["risks_created"], output["items_skipped"],
             )
-            if item_id_filter:
-                q = q.where(FeuilleDeRouteORM.id == _UUID(item_id_filter))
-            overdue = db.execute(q).scalars().all()
-
-            created, skipped = 0, 0
-
-            for item in overdue:
-                # Skip if an AI-suggested risk already exists and is still IDENTIFIE
-                existing = db.execute(
-                    select(RisqueORM).where(
-                        RisqueORM.feuille_route_id == item.id,
-                        RisqueORM.created_by == "system:ai",
-                        RisqueORM.statut == "IDENTIFIE",
-                    )
-                ).scalar_one_or_none()
-
-                if existing:
-                    skipped += 1
-                    continue
-
-                days_overdue = (today - item.date_fin).days
-                risk_data = self._generate_risk_for_overdue(item, days_overdue)
-                if not risk_data:
-                    skipped += 1
-                    continue
-
-                from uuid import uuid4
-                from src.services.risk_service import calculate_criticite
-
-                type_risque = _validated_enum(risk_data.get("type_risque"), _VALID_TYPE_RISQUE, "DELAI")
-                probabilite = _validated_enum(risk_data.get("probabilite"), _VALID_PROBABILITE, "MOYENNE")
-                impact = _validated_enum(risk_data.get("impact"), _VALID_IMPACT, "ELEVE")
-
-                risk = RisqueORM(
-                    id=uuid4(),
-                    titre=risk_data.get("titre", f"Retard: {item.titre}"),
-                    description=f"Jalon en retard de {days_overdue} jours: {item.description}",
-                    type_risque=type_risque,
-                    probabilite=probabilite,
-                    impact=impact,
-                    niveau_criticite=calculate_criticite(probabilite, impact),
-                    statut="IDENTIFIE",
-                    plan_mitigation=risk_data.get("plan_mitigation", ""),
-                    feuille_route_id=item.id,
-                    projet_id=item.projet_id,
-                    created_by="system:ai",
-                    date_identification=today,
-                )
-                db.add(risk)
-                created += 1
-
-            db.commit()
-            logger.info("risk_scan_complete created=%d skipped=%d", created, skipped)
-
             return AgentResult(
                 agent_name=self.name,
                 success=True,
                 duration_ms=(time.monotonic() - start) * 1000,
-                output={
-                    "items_scanned": len(overdue),
-                    "risks_created": created,
-                    "items_skipped": skipped,
-                },
+                output=output,
                 ollama_calls_made=self._call_count,
             )
-
         except Exception as exc:
             logger.error("risk_scan_error: %s", exc)
             return AgentResult(
@@ -138,6 +76,76 @@ class RiskAgent(BaseAgent):
                 error=str(exc),
                 ollama_calls_made=self._call_count,
             )
+
+    async def _scan_roadmap_async(self, item_id_filter: str | None) -> dict:
+        from types import SimpleNamespace
+        from uuid import UUID as _UUID
+
+        from src.storage.documents.feuille_de_route import FeuilleDeRouteDocument
+        from src.storage.documents.risque import RisqueDocument
+        from src.storage.documents.service_bridge import _to_midnight_utc, create_risk_native
+
+        today = date.today()
+
+        # Overdue roadmap items (optionally filtered to a single item)
+        query: dict = {
+            "date_fin": {"$lt": _to_midnight_utc(today)},
+            "statut": {"$nin": ["TERMINE", "ANNULE"]},
+        }
+        if item_id_filter:
+            query["_id"] = str(_UUID(item_id_filter))
+        overdue = await FeuilleDeRouteDocument.find(query).to_list()
+
+        created, skipped = 0, 0
+
+        for item in overdue:
+            # Skip if an AI-suggested risk already exists and is still IDENTIFIE.
+            # Dict-filtered query (not a typed Document.field == value) — feuille_route_id
+            # is declared UUID in the Pydantic schema but stored as a string, per convention.
+            existing = await RisqueDocument.find_one({
+                "feuille_route_id": str(item.id),
+                "created_by": "system:ai",
+                "statut": "IDENTIFIE",
+            })
+            if existing:
+                skipped += 1
+                continue
+
+            days_overdue = (today - item.date_fin).days
+            risk_data = self._generate_risk_for_overdue(item, days_overdue)
+            if not risk_data:
+                skipped += 1
+                continue
+
+            type_risque = _validated_enum(risk_data.get("type_risque"), _VALID_TYPE_RISQUE, "DELAI")
+            probabilite = _validated_enum(risk_data.get("probabilite"), _VALID_PROBABILITE, "MOYENNE")
+            impact = _validated_enum(risk_data.get("impact"), _VALID_IMPACT, "ELEVE")
+
+            # create_risk_native() only reads attributes off `body` (no Pydantic
+            # validation) — a plain namespace avoids importing a router module's
+            # request schema into the agent layer.
+            body = SimpleNamespace(
+                titre=risk_data.get("titre", f"Retard: {item.titre}"),
+                description=f"Jalon en retard de {days_overdue} jours: {item.description}",
+                type_risque=type_risque,
+                probabilite=probabilite,
+                impact=impact,
+                statut="IDENTIFIE",
+                plan_mitigation=risk_data.get("plan_mitigation", ""),
+                responsable_id=None,
+                date_identification=today,
+                date_echeance_mitigation=None,
+                feuille_route_id=str(item.id),
+                projet_id=item.projet_id,
+            )
+            await create_risk_native(body, {"email": "system:ai"})
+            created += 1
+
+        return {
+            "items_scanned": len(overdue),
+            "risks_created": created,
+            "items_skipped": skipped,
+        }
 
     def _generate_risk_for_overdue(self, item, days_overdue: int) -> dict | None:
         if not OllamaClient.get().is_available():
