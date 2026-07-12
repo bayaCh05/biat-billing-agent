@@ -1,6 +1,7 @@
 """Invoice endpoints — upload + pipeline, list, detail."""
 from __future__ import annotations
 
+import logging
 import tempfile
 from pathlib import Path
 from uuid import UUID
@@ -17,11 +18,12 @@ from api.deps import get_session, get_components
 from api.schemas import InvoiceOut, InvoiceSummary, ActionResultOut
 from src.models.enums import InvoiceStatus
 from src.models.invoice import InvoiceRecord
-from src.storage.repository import InvoiceRepository
 from src.utils.file_utils import sha256
 from api.limiter import limiter, limit
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
+
+_log = logging.getLogger(__name__)
 
 _COMPTABLE_OR_ADMIN = Depends(require_role("Comptable", "Admin"))
 
@@ -177,16 +179,17 @@ async def upload_invoice(
 async def list_invoices(
     status: str | None = None,
     limit: int = 100,
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import list_invoices_mongo
 
     mongo_invoices = await list_invoices_mongo(limit)
-    if mongo_invoices is not None:
-        invoices = mongo_invoices
+    if mongo_invoices is None:
+        # Invoices are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("list_invoices: MongoDB indisponible — retour d'une liste vide.")
+        invoices = []
     else:
-        repo = InvoiceRepository(session)
-        invoices = repo.list_all(limit=limit)
+        invoices = mongo_invoices
     if status:
         try:
             s = InvoiceStatus(status)
@@ -205,16 +208,17 @@ async def list_invoices(
 async def export_invoices_csv(
     status: str | None = Query(None, description="Filtrer par statut (optionnel)"),
     limit: int = Query(5000, description="Nombre maximum de lignes"),
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import list_invoices_mongo
 
     mongo_invoices = await list_invoices_mongo(limit)
-    if mongo_invoices is not None:
-        invoices = mongo_invoices
+    if mongo_invoices is None:
+        # Invoices are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("export_invoices_csv: MongoDB indisponible — export vide.")
+        invoices = []
     else:
-        repo = InvoiceRepository(session)
-        invoices = repo.list_all(limit=limit)
+        invoices = mongo_invoices
     if status:
         try:
             s = InvoiceStatus(status)
@@ -269,7 +273,6 @@ async def export_invoices_csv(
 )
 async def get_invoice(
     invoice_id: str,
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import _NOT_FOUND, get_invoice_mongo
 
@@ -281,14 +284,12 @@ async def get_invoice(
     mongo_inv = await get_invoice_mongo(uid)
     if mongo_inv is _NOT_FOUND:
         raise HTTPException(404, "Invoice not found")
-    if mongo_inv is not None:
-        return InvoiceOut.from_record(mongo_inv)
-
-    repo = InvoiceRepository(session)
-    inv = repo.get_by_id(uid)
-    if not inv:
+    if mongo_inv is None:
+        # Invoices are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("get_invoice: MongoDB indisponible — %s introuvable.", invoice_id)
         raise HTTPException(404, "Invoice not found")
-    return InvoiceOut.from_record(inv)
+    return InvoiceOut.from_record(mongo_inv)
 
 
 @router.patch(
@@ -341,18 +342,15 @@ async def get_pipeline_status(
     except ValueError:
         raise HTTPException(400, "Invalid UUID")
 
-    use_mongo = True
     mongo_inv = await get_invoice_mongo(uid)
     if mongo_inv is _NOT_FOUND:
         raise HTTPException(404, "Invoice not found")
-    if mongo_inv is not None:
-        inv = mongo_inv
-    else:
-        use_mongo = False
-        repo = InvoiceRepository(session)
-        inv = repo.get_by_id(uid)
-        if not inv:
-            raise HTTPException(404, "Invoice not found")
+    if mongo_inv is None:
+        # Invoices are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("get_pipeline_status: MongoDB indisponible — %s introuvable.", invoice_id)
+        raise HTTPException(404, "Invoice not found")
+    inv = mongo_inv
 
     status = inv.status.value
 
@@ -400,7 +398,7 @@ async def get_pipeline_status(
     if status in ("JOURNALED", "EXPORTED", "PAID"):
         from src.storage.documents.service_bridge import get_journal_entry_for_invoice_mongo
 
-        mongo_je = await get_journal_entry_for_invoice_mongo(invoice_id) if use_mongo else None
+        mongo_je = await get_journal_entry_for_invoice_mongo(invoice_id)
         # mongo_je == {} (trouvé mais vide) est traité comme un échec, pas comme
         # "pas d'écriture" : un statut JOURNALED/EXPORTED/PAID implique toujours
         # une écriture existante, donc un résultat vide est suspect — on retombe
@@ -471,7 +469,6 @@ async def get_pipeline_status(
 )
 async def get_invoice_pdf(
     invoice_id: UUID,
-    session: Session = Depends(get_session),
     current_user: dict = Depends(get_current_user),
 ):
     from src.storage.documents.service_bridge import _NOT_FOUND, get_invoice_mongo
@@ -479,13 +476,12 @@ async def get_invoice_pdf(
     mongo_inv = await get_invoice_mongo(invoice_id)
     if mongo_inv is _NOT_FOUND:
         raise HTTPException(404, "Facture introuvable")
-    if mongo_inv is not None:
-        inv = mongo_inv
-    else:
-        repo = InvoiceRepository(session)
-        inv = repo.get_by_id(invoice_id)
-        if not inv:
-            raise HTTPException(404, "Facture introuvable")
+    if mongo_inv is None:
+        # Invoices are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("get_invoice_pdf: MongoDB indisponible — %s introuvable.", invoice_id)
+        raise HTTPException(404, "Facture introuvable")
+    inv = mongo_inv
     path = Path(inv.raw_file_path) if inv.raw_file_path else None
     if not path or not path.exists():
         raise HTTPException(404, "Fichier PDF non disponible")

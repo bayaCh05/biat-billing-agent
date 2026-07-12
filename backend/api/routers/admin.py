@@ -1,18 +1,19 @@
 """Admin user management endpoints — ADMIN role only."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from api.auth import generate_temp_password, get_current_user, hash_password, require_role
-from api.deps import get_session
 from api.limiter import limiter, limit
 from src.models.audit import AuditLogCreate
 from src.services.audit_service import _ip, _ua
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+_log = logging.getLogger(__name__)
 
 _ADMIN = Depends(require_role("Admin"))
 
@@ -112,17 +113,18 @@ async def create_user(
 )
 async def list_users(
     _: dict = _ADMIN,
-    session: Session = Depends(get_session),
 ):
     from api.auth import USERS
     from src.storage.documents.service_bridge import list_users_mongo
 
     mongo_users = await list_users_mongo()
-    if mongo_users is not None:
-        db_users = mongo_users
+    if mongo_users is None:
+        # Users are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("list_users: MongoDB indisponible — retour d'une liste vide.")
+        db_users = []
     else:
-        from src.storage.orm_models_users import UserORM
-        db_users = session.execute(select(UserORM).order_by(UserORM.created_at.desc())).scalars().all()
+        db_users = mongo_users
     db_emails = {u.email for u in db_users}
 
     result = [

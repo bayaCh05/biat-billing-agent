@@ -6,15 +6,14 @@ from datetime import date
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 
 from api.auth import require_role
-from api.deps import get_session, get_budget_plan
+from api.deps import get_budget_plan
 from api.schemas import (
     BudgetSummaryOut, BudgetLineOut,
     BudgetPlanEntryOut, BudgetPlanEntryIn, BudgetPlanUpdateIn,
 )
-from src.budget.budget_tracker import BudgetPlan, BudgetTracker
+from src.budget.budget_tracker import BudgetPlan
 
 router = APIRouter(prefix="/budget", tags=["budget"])
 
@@ -39,19 +38,24 @@ _COMPTABLE_OR_ADMIN = Depends(require_role("Comptable", "Admin"))
 async def budget_summary(
     year: int = date.today().year,
     month: int = date.today().month,
-    session: Session = Depends(get_session),
     plan: BudgetPlan = Depends(get_budget_plan),
 ):
     from src.storage.documents.service_bridge import budget_summary_mongo
 
     mongo_result = await budget_summary_mongo(plan, year, month)
-    if mongo_result is not None:
+    if mongo_result is None:
+        # Budget actuals are computed from Mongo-only invoice data (see
+        # CLAUDE.md) — the old SQLite fallback here could only ever serve
+        # permanently stale data.
+        _log.warning("budget_summary: MongoDB indisponible — retour d'une synthèse vide.")
+        summary = {
+            "total_budget_ytd": 0.0, "total_actual_ytd": 0.0,
+            "variance_pct": 0.0, "lines_over_budget": 0,
+        }
+        variances = []
+    else:
         summary = mongo_result["summary"]
         variances = mongo_result["variances"]
-    else:
-        tracker = BudgetTracker(plan=plan, session=session)
-        summary = tracker.summary(year=year, through_month=month)
-        variances = tracker.ytd_variance(year=year, through_month=month)
 
     lines = []
     for v in variances:

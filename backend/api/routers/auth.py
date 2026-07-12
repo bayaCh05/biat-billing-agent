@@ -8,10 +8,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
 from api.auth import DEMO_AUTH_STATE, USERS, get_current_user, hash_password, needs_rehash, verify_password
-from api.deps import get_session
 from api.limiter import limiter, limit
 from api.security import jwt_handler, account_lockout
 from src.models.audit import AuditLogCreate
@@ -469,7 +467,6 @@ async def logout(
 )
 async def list_sessions(
     current_user: dict = Depends(get_current_user),
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import list_active_sessions_mongo
 
@@ -477,20 +474,13 @@ async def list_sessions(
     current_jti = current_user.get("jti", "")
 
     mongo_rows = await list_active_sessions_mongo(user_id)
-    if mongo_rows is not None:
-        rows = mongo_rows
+    if mongo_rows is None:
+        # Sessions are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("list_sessions: MongoDB indisponible — retour d'une liste vide.")
+        rows = []
     else:
-        from src.storage.orm_models_auth import ActiveTokenORM
-        from sqlalchemy import select as sa_select
-
-        now = datetime.now(timezone.utc)
-        rows = session.execute(
-            sa_select(ActiveTokenORM).where(
-                ActiveTokenORM.user_id == user_id,
-                ActiveTokenORM.revoked == False,  # noqa: E712
-                ActiveTokenORM.expires_at > now,
-            ).order_by(ActiveTokenORM.created_at.desc())
-        ).scalars().all()
+        rows = mongo_rows
 
     def _jti(r) -> str:
         # ActiveTokenORM.jti (SQLAlchemy) vs ActiveTokenDocument.id (Beanie).

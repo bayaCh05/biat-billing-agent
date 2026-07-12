@@ -1,20 +1,19 @@
 """KPI and analytics endpoints for Direction / Comptable dashboards."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import case, func, select, text
-from sqlalchemy.orm import Session
 
 from api.auth import require_role
-from api.deps import get_session
 from api.schemas import KpiOut
-from src.storage.repository import InvoiceRepository
 
 router = APIRouter(prefix="/kpi", tags=["analytics"])
 analytics_router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-_TERMINAL_STR = {"EXPORTED", "JOURNALED", "PAID", "COLLECTED"}
+_log = logging.getLogger(__name__)
+
 _DIRECTION_COMPTABLE = Depends(require_role("Admin", "Direction", "Comptable"))
 
 
@@ -31,78 +30,19 @@ _DIRECTION_COMPTABLE = Depends(require_role("Admin", "Direction", "Comptable"))
     ),
     response_description="Compteurs et taux agrégés sur l'ensemble des factures",
 )
-async def get_kpi(session: Session = Depends(get_session)):
+async def get_kpi():
     from src.storage.documents.service_bridge import get_kpi_mongo
 
     mongo_result = await get_kpi_mongo()
-    if mongo_result is not None:
-        return KpiOut(**mongo_result)
-
-    from src.storage.orm_models import InvoiceORM
-
-    # Single aggregation query: totals + FLAGGED + pending review counts + montants exposés
-    agg = session.execute(
-        select(
-            func.count(InvoiceORM.id).label("total"),
-            func.sum(
-                case((InvoiceORM.status.in_(_TERMINAL_STR), InvoiceORM.amount_ttc), else_=0)
-            ).label("total_ttc"),
-            func.sum(
-                case((InvoiceORM.status == "FLAGGED", 1), else_=0)
-            ).label("flagged"),
-            func.sum(
-                case(
-                    (
-                        (InvoiceORM.human_review_required == True)  # noqa: E712
-                        & (InvoiceORM.status != "FLAGGED"),
-                        1,
-                    ),
-                    else_=0,
-                )
-            ).label("pending"),
-            func.sum(
-                case((InvoiceORM.status == "FLAGGED", InvoiceORM.amount_ttc), else_=0)
-            ).label("exposed_ttc"),
+    if mongo_result is None:
+        # Invoices are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("get_kpi: MongoDB indisponible — retour de KPIs vides.")
+        return KpiOut(
+            total_invoices=0, total_amount_ttc=0.0, auto_approved=0,
+            auto_approval_rate=0.0, flagged=0, pending_review=0, by_status={},
         )
-    ).first()
-
-    # Count breakdown by status
-    status_rows = session.execute(
-        select(InvoiceORM.status, func.count(InvoiceORM.id).label("cnt"))
-        .group_by(InvoiceORM.status)
-    ).all()
-    by_status: dict[str, int] = {row.status: row.cnt for row in status_rows}
-
-    # Auto-approved count: processed invoices that never required human review
-    repo = InvoiceRepository(session)
-    from src.models.enums import InvoiceStatus
-    _TERMINAL = [InvoiceStatus.EXPORTED, InvoiceStatus.JOURNALED, InvoiceStatus.PAID, InvoiceStatus.COLLECTED]
-    total_processed, auto_approved = repo.count_auto_approved(statuses=_TERMINAL)
-
-    # Montant bloqué : factures avec un flag DUPLICATE/SUSPECTED_DUPLICATE non résolu
-    from src.storage.orm_models import ValidationFlagORM
-    blocked_row = session.execute(
-        select(func.sum(InvoiceORM.amount_ttc))
-        .join(ValidationFlagORM, ValidationFlagORM.invoice_id == InvoiceORM.id)
-        .where(
-            ValidationFlagORM.flag_type.in_(["DUPLICATE", "SUSPECTED_DUPLICATE"]),
-            ValidationFlagORM.resolved == False,  # noqa: E712
-        )
-        .group_by()
-    ).scalar_one_or_none()
-
-    total = int(agg.total or 0)
-    return KpiOut(
-        total_invoices=total,
-        total_amount_ttc=round(float(agg.total_ttc or 0), 3),
-        auto_approved=auto_approved,
-        auto_approval_rate=round(auto_approved / max(total_processed, 1) * 100, 1),
-        flagged=int(agg.flagged or 0),
-        pending_review=int(agg.pending or 0),
-        by_status=by_status,
-        exposed_amount_ttc=round(float(agg.exposed_ttc or 0), 3),
-        blocked_amount_ttc=round(float(blocked_row or 0), 3),
-    )
+    return KpiOut(**mongo_result)
 
 
 # ── Analytics schemas ──────────────────────────────────────────────────────────
@@ -154,57 +94,18 @@ class AnalyticsKPIs(BaseModel):
 async def monthly_spend(
     year: int = Query(2026, description="Année fiscale"),
     _: dict = _DIRECTION_COMPTABLE,
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import monthly_spend_mongo
 
-    mongo_result = await monthly_spend_mongo(year)
-    if mongo_result is not None:
-        by_month_m: dict[str, MonthlySpendItem] = {
-            r["month"]: MonthlySpendItem(**r) for r in mongo_result
-        }
-        months_m = [f"{year}-{m:02d}" for m in range(1, 13)]
-        return [
-            by_month_m.get(m, MonthlySpendItem(month=m, total_ht=0, total_ttc=0, invoice_count=0, opex=0, capex=0))
-            for m in months_m
-        ]
-
-    from src.storage.orm_models import InvoiceORM
-
-    rows = session.execute(
-        select(
-            func.strftime("%Y-%m", InvoiceORM.invoice_date).label("ym"),
-            func.sum(InvoiceORM.amount_ht).label("total_ht"),
-            func.sum(InvoiceORM.amount_ttc).label("total_ttc"),
-            func.count(InvoiceORM.id).label("cnt"),
-            func.sum(
-                case((InvoiceORM.charge_type == "OPEX", InvoiceORM.amount_ht), else_=0)
-            ).label("opex"),
-            func.sum(
-                case((InvoiceORM.charge_type == "CAPEX", InvoiceORM.amount_ht), else_=0)
-            ).label("capex"),
-        )
-        .where(
-            func.strftime("%Y", InvoiceORM.invoice_date) == str(year),
-            InvoiceORM.status.in_(_TERMINAL_STR),
-            InvoiceORM.direction == "SUPPLIER",
-        )
-        .group_by(func.strftime("%Y-%m", InvoiceORM.invoice_date))
-        .order_by(func.strftime("%Y-%m", InvoiceORM.invoice_date))
-    ).all()
-
-    by_month: dict[str, MonthlySpendItem] = {}
-    for row in rows:
-        by_month[row.ym] = MonthlySpendItem(
-            month=row.ym,
-            total_ht=round(float(row.total_ht or 0), 3),
-            total_ttc=round(float(row.total_ttc or 0), 3),
-            invoice_count=int(row.cnt),
-            opex=round(float(row.opex or 0), 3),
-            capex=round(float(row.capex or 0), 3),
-        )
-
     months = [f"{year}-{m:02d}" for m in range(1, 13)]
+    mongo_result = await monthly_spend_mongo(year)
+    if mongo_result is None:
+        # Invoices are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("monthly_spend: MongoDB indisponible — retour de valeurs vides.")
+        by_month: dict[str, MonthlySpendItem] = {}
+    else:
+        by_month = {r["month"]: MonthlySpendItem(**r) for r in mongo_result}
     return [
         by_month.get(m, MonthlySpendItem(month=m, total_ht=0, total_ttc=0, invoice_count=0, opex=0, capex=0))
         for m in months
@@ -225,45 +126,16 @@ async def monthly_spend(
 async def by_supplier(
     year: int | None = Query(None, description="Filtrer par année (optionnel)"),
     _: dict = _DIRECTION_COMPTABLE,
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import by_supplier_mongo
 
     mongo_result = await by_supplier_mongo(year)
-    if mongo_result is not None:
-        return [SupplierSpendItem(**r) for r in mongo_result]
-
-    from src.storage.orm_models import InvoiceORM
-
-    stmt = (
-        select(
-            InvoiceORM.issuer_name.label("supplier"),
-            func.sum(InvoiceORM.amount_ttc).label("total_ttc"),
-            func.sum(InvoiceORM.amount_ht).label("total_ht"),
-            func.count(InvoiceORM.id).label("cnt"),
-        )
-        .where(
-            InvoiceORM.status.in_(_TERMINAL_STR),
-            InvoiceORM.direction == "SUPPLIER",
-            InvoiceORM.issuer_name.isnot(None),
-        )
-        .group_by(InvoiceORM.issuer_name)
-        .order_by(func.sum(InvoiceORM.amount_ttc).desc())
-        .limit(10)
-    )
-    if year:
-        stmt = stmt.where(func.strftime("%Y", InvoiceORM.invoice_date) == str(year))
-
-    rows = session.execute(stmt).all()
-    return [
-        SupplierSpendItem(
-            supplier=row.supplier or "Inconnu",
-            total_ttc=round(float(row.total_ttc or 0), 3),
-            total_ht=round(float(row.total_ht or 0), 3),
-            count=int(row.cnt),
-        )
-        for row in rows
-    ]
+    if mongo_result is None:
+        # Invoices are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("by_supplier: MongoDB indisponible — retour d'une liste vide.")
+        return []
+    return [SupplierSpendItem(**r) for r in mongo_result]
 
 
 # ── 3. Spending by PCE account ────────────────────────────────────────────────
@@ -280,45 +152,16 @@ async def by_supplier(
 async def by_account(
     year: int | None = Query(None, description="Filtrer par année (optionnel)"),
     _: dict = _DIRECTION_COMPTABLE,
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import by_account_mongo
 
     mongo_result = await by_account_mongo(year)
-    if mongo_result is not None:
-        return [AccountSpendItem(**r) for r in mongo_result]
-
-    from src.storage.orm_models import InvoiceORM
-
-    stmt = (
-        select(
-            InvoiceORM.accounting_compte.label("compte"),
-            InvoiceORM.accounting_label.label("label"),
-            func.sum(InvoiceORM.amount_ht).label("total_ht"),
-        )
-        .where(
-            InvoiceORM.status.in_(_TERMINAL_STR),
-            InvoiceORM.direction == "SUPPLIER",
-            InvoiceORM.accounting_compte.isnot(None),
-        )
-        .group_by(InvoiceORM.accounting_compte, InvoiceORM.accounting_label)
-        .order_by(func.sum(InvoiceORM.amount_ht).desc())
-    )
-    if year:
-        stmt = stmt.where(func.strftime("%Y", InvoiceORM.invoice_date) == str(year))
-
-    rows = session.execute(stmt).all()
-    grand_total = sum(float(r.total_ht or 0) for r in rows) or 1.0
-
-    return [
-        AccountSpendItem(
-            compte=row.compte or "",
-            label=row.label or row.compte or "",
-            total_ht=round(float(row.total_ht or 0), 3),
-            pct=round(float(row.total_ht or 0) / grand_total * 100, 1),
-        )
-        for row in rows
-    ]
+    if mongo_result is None:
+        # Invoices are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("by_account: MongoDB indisponible — retour d'une liste vide.")
+        return []
+    return [AccountSpendItem(**r) for r in mongo_result]
 
 
 # ── 4. Operational KPIs ───────────────────────────────────────────────────────
@@ -335,81 +178,16 @@ async def by_account(
 async def analytics_kpis(
     year: int = Query(2026, description="Année fiscale"),
     _: dict = _DIRECTION_COMPTABLE,
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import analytics_kpis_mongo
 
     mongo_result = await analytics_kpis_mongo(year)
-    if mongo_result is not None:
-        return AnalyticsKPIs(**mongo_result)
-
-    from src.storage.orm_models import InvoiceORM
-
-    year_filter = func.strftime("%Y", InvoiceORM.invoice_date) == str(year)
-
-    # Average processing time (received → exported) in days using SQLite julianday
-    proc_row = session.execute(
-        select(
-            func.avg(
-                func.julianday(InvoiceORM.exported_at) - func.julianday(InvoiceORM.received_at)
-            ).label("avg_days")
+    if mongo_result is None:
+        # Invoices are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("analytics_kpis: MongoDB indisponible — retour de KPIs vides.")
+        return AnalyticsKPIs(
+            avg_processing_days=0.0, rejection_rate=0.0, human_review_rate=0.0,
+            total_capex_ytd=0.0, total_opex_ytd=0.0, pending_count=0,
         )
-        .where(
-            InvoiceORM.exported_at.isnot(None),
-            InvoiceORM.received_at.isnot(None),
-            InvoiceORM.direction == "SUPPLIER",
-        )
-    ).first()
-    avg_days = round(float(proc_row.avg_days or 0), 1)
-
-    # Total & rejection rate
-    count_row = session.execute(
-        select(
-            func.count(InvoiceORM.id).label("total"),
-            func.sum(case((InvoiceORM.status == "REJECTED", 1), else_=0)).label("rejected"),
-            func.sum(case((InvoiceORM.human_review_required == True, 1), else_=0)).label("reviewed"),  # noqa: E712
-        )
-        .where(year_filter, InvoiceORM.direction == "SUPPLIER")
-    ).first()
-    total = int(count_row.total or 1)
-    rejection_rate = round(int(count_row.rejected or 0) / total * 100, 1)
-    human_review_rate = round(int(count_row.reviewed or 0) / total * 100, 1)
-
-    # CAPEX / OPEX YTD
-    capex_opex_row = session.execute(
-        select(
-            func.sum(
-                case((InvoiceORM.charge_type == "CAPEX", InvoiceORM.amount_ht), else_=0)
-            ).label("capex"),
-            func.sum(
-                case((InvoiceORM.charge_type == "OPEX", InvoiceORM.amount_ht), else_=0)
-            ).label("opex"),
-        )
-        .where(
-            year_filter,
-            InvoiceORM.status.in_(_TERMINAL_STR),
-            InvoiceORM.direction == "SUPPLIER",
-        )
-    ).first()
-    total_capex = round(float(capex_opex_row.capex or 0), 3)
-    total_opex = round(float(capex_opex_row.opex or 0), 3)
-
-    # Pending (not yet journaled)
-    pending_row = session.execute(
-        select(func.count(InvoiceORM.id))
-        .where(
-            InvoiceORM.status.not_in(_TERMINAL_STR),
-            InvoiceORM.status.not_in({"REJECTED", "ERROR", "EXTRACTION_FAILED", "ESCALATED"}),
-            InvoiceORM.direction == "SUPPLIER",
-        )
-    ).scalar()
-    pending_count = int(pending_row or 0)
-
-    return AnalyticsKPIs(
-        avg_processing_days=avg_days,
-        rejection_rate=rejection_rate,
-        human_review_rate=human_review_rate,
-        total_capex_ytd=total_capex,
-        total_opex_ytd=total_opex,
-        pending_count=pending_count,
-    )
+    return AnalyticsKPIs(**mongo_result)

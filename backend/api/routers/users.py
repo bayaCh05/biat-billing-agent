@@ -6,11 +6,8 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
-from api.deps import get_session
 from api.limiter import limiter, limit
 
 _log = logging.getLogger(__name__)
@@ -77,7 +74,6 @@ def _demo_me(role: str, email: str) -> UserMeOut:
 )
 async def get_me(
     current_user: dict = Depends(get_current_user),
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import _NOT_FOUND, get_user_by_email_mongo
 
@@ -88,15 +84,12 @@ async def get_me(
     mongo_user = await get_user_by_email_mongo(email)
     if mongo_user is _NOT_FOUND:
         return _demo_me(current_user.get("role", ""), email)
-    if mongo_user is not None:
-        return _build_me(mongo_user)
-
-    from src.storage.orm_models_users import UserORM
-
-    user = session.execute(select(UserORM).where(UserORM.email == email)).scalar_one_or_none()
-    if not user:
+    if mongo_user is None:
+        # Users are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("get_me: MongoDB indisponible — %s introuvable.", email)
         return _demo_me(current_user.get("role", ""), email)
-    return _build_me(user)
+    return _build_me(mongo_user)
 
 
 @router.patch(

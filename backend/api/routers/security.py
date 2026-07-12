@@ -1,19 +1,18 @@
 """Security dashboard endpoints — Admin only."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import logging
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from api.auth import require_role
 from api.deps import get_session
 from api.routers.audit import compute_integrity_summary
-from src.storage.orm_models_audit import AuditLogORM
-from src.storage.orm_models_users import UserORM
 
 router = APIRouter(prefix="/security", tags=["admin"])
+
+_log = logging.getLogger(__name__)
 
 _ADMIN = Depends(require_role("Admin"))
 
@@ -36,126 +35,29 @@ async def security_summary(
     integrity = await compute_integrity_summary(session)
 
     mongo_result = await security_summary_mongo()
-    if mongo_result is not None:
-        mongo_result["tampered_entries_count"] = integrity["tampered_count"]
-        return mongo_result
+    if mongo_result is None:
+        # Login/lockout stats are written Mongo-only (see CLAUDE.md) — the
+        # old SQLite fallback here could only ever serve permanently stale
+        # data. `integrity` above is unaffected — it's a genuine dual-source
+        # merge (SQLite HMAC chain + Mongo), not a fallback.
+        _log.warning("security_summary: MongoDB indisponible — retour de statistiques vides.")
+        return {
+            "total_logins_today": 0,
+            "failed_logins_today": 0,
+            "locked_accounts_count": 0,
+            "uploads_today": 0,
+            "rejected_files_today": 0,
+            "last_integrity_check": None,
+            "last_integrity_score": None,
+            "tampered_entries_count": integrity["tampered_count"],
+            "active_sessions_count": 0,
+            "unauthorized_access_attempts_today": 0,
+            "accounts_with_recent_failures": [],
+            "locked_accounts": [],
+        }
 
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-
-    # Auth stats from audit log
-    total_logins_today = session.scalar(
-        select(func.count()).select_from(AuditLogORM).where(
-            AuditLogORM.action == "LOGIN_SUCCESS",
-            AuditLogORM.created_at >= today_start,
-        )
-    ) or 0
-
-    failed_logins_today = session.scalar(
-        select(func.count()).select_from(AuditLogORM).where(
-            AuditLogORM.action == "LOGIN_FAILURE",
-            AuditLogORM.created_at >= today_start,
-        )
-    ) or 0
-
-    unauthorized_today = session.scalar(
-        select(func.count()).select_from(AuditLogORM).where(
-            AuditLogORM.action == "UNAUTHORIZED_ACCESS",
-            AuditLogORM.created_at >= today_start,
-        )
-    ) or 0
-
-    uploads_today = session.scalar(
-        select(func.count()).select_from(AuditLogORM).where(
-            AuditLogORM.action.in_(["FILE_UPLOADED", "INVOICE_UPLOADED"]),
-            AuditLogORM.created_at >= today_start,
-        )
-    ) or 0
-
-    rejected_files_today = session.scalar(
-        select(func.count()).select_from(AuditLogORM).where(
-            AuditLogORM.action == "FILE_REJECTED",
-            AuditLogORM.created_at >= today_start,
-        )
-    ) or 0
-
-    # Locked accounts
-    now = datetime.now(timezone.utc)
-    locked_users = session.execute(
-        select(UserORM).where(
-            UserORM.locked_until > now,
-            UserORM.is_active == True,  # noqa: E712
-        )
-    ).scalars().all()
-
-    # Accounts with recent failures (last 24h)
-    suspicious = session.execute(
-        select(UserORM).where(
-            UserORM.failed_login_attempts > 0,
-            UserORM.last_failed_login >= now - timedelta(hours=24),
-        ).order_by(UserORM.failed_login_attempts.desc()).limit(10)
-    ).scalars().all()
-
-    # Last integrity check from audit log
-    last_check = session.execute(
-        select(AuditLogORM).where(
-            AuditLogORM.action == "AUDIT_INTEGRITY_CHECK",
-        ).order_by(AuditLogORM.created_at.desc()).limit(1)
-    ).scalar_one_or_none()
-
-    last_integrity_score: float | None = None
-    last_integrity_check: str | None = None
-    if last_check:
-        last_integrity_check = last_check.created_at.isoformat()
-        detail = last_check.detail or ""
-        try:
-            # Extract score from "Score: XX.X%, ..."
-            score_part = detail.split("Score:")[1].split("%")[0].strip()
-            last_integrity_score = float(score_part)
-        except Exception:
-            pass
-
-    # Active sessions count
-    active_sessions = 0
-    try:
-        from src.storage.orm_models_auth import ActiveTokenORM
-        active_sessions = session.scalar(
-            select(func.count()).select_from(ActiveTokenORM).where(
-                ActiveTokenORM.revoked == False,  # noqa: E712
-                ActiveTokenORM.expires_at > now,
-            )
-        ) or 0
-    except Exception:
-        pass
-
-    return {
-        "total_logins_today": total_logins_today,
-        "failed_logins_today": failed_logins_today,
-        "locked_accounts_count": len(locked_users),
-        "uploads_today": uploads_today,
-        "rejected_files_today": rejected_files_today,
-        "last_integrity_check": last_integrity_check,
-        "last_integrity_score": last_integrity_score,
-        "tampered_entries_count": integrity["tampered_count"],
-        "active_sessions_count": active_sessions,
-        "unauthorized_access_attempts_today": unauthorized_today,
-        "accounts_with_recent_failures": [
-            {
-                "email": u.email,
-                "failed_attempts": u.failed_login_attempts,
-                "last_attempt": u.last_failed_login.isoformat() if u.last_failed_login else None,
-            }
-            for u in suspicious
-        ],
-        "locked_accounts": [
-            {
-                "id": str(u.id),
-                "email": u.email,
-                "locked_until": u.locked_until.isoformat() if u.locked_until else None,
-                "failed_attempts": u.failed_login_attempts,
-            }
-            for u in locked_users
-        ],
-    }
+    mongo_result["tampered_entries_count"] = integrity["tampered_count"]
+    return mongo_result
 
 
 @router.post(

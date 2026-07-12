@@ -1,17 +1,17 @@
 """Suivi (lifecycle tracking) endpoints — ageing, pending payments, overdue."""
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
-from api.deps import get_session
 from api.schemas import InvoiceSummary
-from src.storage.repository import InvoiceRepository
 
 router = APIRouter(prefix="/suivi", tags=["analytics"])
+
+_log = logging.getLogger(__name__)
 
 
 class AgeingBucketOut(BaseModel):
@@ -78,21 +78,21 @@ def _build_ageing(invoices, today: date) -> AgeingBucketOut:
     ),
     response_description="Snapshot complet avec buckets d'ageing et listes de factures",
 )
-async def get_snapshot(session: Session = Depends(get_session)):
+async def get_snapshot():
     from src.storage.documents.service_bridge import get_suivi_invoices_mongo
 
     today = datetime.now(tz=timezone.utc).date()
 
     mongo_result = await get_suivi_invoices_mongo()
-    if mongo_result is not None:
+    if mongo_result is None:
+        # Invoices are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("get_snapshot: MongoDB indisponible — retour d'un snapshot vide.")
+        pending_payment, pending_collection, overdue = [], [], []
+    else:
         pending_payment = mongo_result["pending_payment"]
         pending_collection = mongo_result["pending_collection"]
         overdue = mongo_result["overdue"]
-    else:
-        repo = InvoiceRepository(session)
-        pending_payment = repo.get_pending_payment()
-        pending_collection = repo.get_pending_collection()
-        overdue = repo.get_overdue()
 
     total_payables = sum(inv.amount_ttc.value or 0 for inv in pending_payment)
     total_receivables = sum(inv.amount_ttc.value or 0 for inv in pending_collection)

@@ -1,15 +1,16 @@
 """Project budget line endpoints."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from api.auth import require_role
-from api.deps import get_session
 
 router = APIRouter(tags=["budget"])
+
+_log = logging.getLogger(__name__)
 
 _EDIT = Depends(require_role("Comptable", "Chef de Projet", "Admin"))
 
@@ -63,20 +64,16 @@ def _to_out(lb) -> LigneBudgetOut:
     ),
     response_description="Liste des lignes avec indicateurs d'avancement budgétaire",
 )
-async def list_budget(projet_id: str, session: Session = Depends(get_session)):
+async def list_budget(projet_id: str):
     from src.storage.documents.service_bridge import list_budget_lines_mongo
 
     mongo_lignes = await list_budget_lines_mongo(projet_id)
-    if mongo_lignes is not None:
-        return [_to_out(l) for l in mongo_lignes]
-
-    from src.storage.orm_models_roadmap import LigneBudgetORM
-
-    lignes = session.execute(
-        select(LigneBudgetORM).where(LigneBudgetORM.projet_id == projet_id)
-        .order_by(LigneBudgetORM.created_at)
-    ).scalars().all()
-    return [_to_out(l) for l in lignes]
+    if mongo_lignes is None:
+        # Budget lines are written Mongo-only (see CLAUDE.md) — the old
+        # SQLite fallback here could only ever serve permanently stale data.
+        _log.warning("list_budget: MongoDB indisponible — retour d'une liste vide.")
+        return []
+    return [_to_out(l) for l in mongo_lignes]
 
 
 @router.post(
@@ -157,23 +154,13 @@ async def delete_budget_line(
     ),
     response_description="Synthèse avec totaux et taux de consommation",
 )
-async def budget_synthese(projet_id: str, session: Session = Depends(get_session)):
+async def budget_synthese(projet_id: str):
     from src.storage.documents.service_bridge import budget_synthese_mongo
 
     mongo_result = await budget_synthese_mongo(projet_id)
-    if mongo_result is not None:
-        return BudgetSyntheseOut(**mongo_result)
-
-    from src.storage.orm_models_roadmap import LigneBudgetORM
-
-    lignes = session.execute(
-        select(LigneBudgetORM).where(LigneBudgetORM.projet_id == projet_id)
-    ).scalars().all()
-    total_prevu = sum(l.montant_prevu for l in lignes)
-    total_consomme = sum(l.montant_consomme for l in lignes)
-    ecart = total_prevu - total_consomme
-    taux = round(total_consomme / total_prevu * 100, 1) if total_prevu > 0 else 0.0
-    return BudgetSyntheseOut(
-        total_prevu=total_prevu, total_consomme=total_consomme,
-        ecart=ecart, taux_consommation=taux,
-    )
+    if mongo_result is None:
+        # Budget lines are written Mongo-only (see CLAUDE.md) — the old
+        # SQLite fallback here could only ever serve permanently stale data.
+        _log.warning("budget_synthese: MongoDB indisponible — retour d'une synthèse vide.")
+        return BudgetSyntheseOut(total_prevu=0.0, total_consomme=0.0, ecart=0.0, taux_consommation=0.0)
+    return BudgetSyntheseOut(**mongo_result)

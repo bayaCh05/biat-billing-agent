@@ -3,18 +3,18 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
 
 from api.auth import require_role
-from api.deps import get_session
 from api.schemas import JournalEntryOut, JournalLineOut
-from src.accounting.journal_store import JournalRepository
 
 router = APIRouter(prefix="/journal", tags=["journal"])
+
+_log = logging.getLogger(__name__)
 
 _COMPTABLE = Depends(require_role("Comptable"))
 
@@ -36,17 +36,15 @@ async def list_entries(
     end: date | None = None,
     limit: int = 200,
     _: dict = _COMPTABLE,
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import list_journal_entries_mongo
 
     entries = await list_journal_entries_mongo(start, end, limit)
     if entries is None:
-        repo = JournalRepository(session)
-        if start and end:
-            entries = repo.get_by_date_range(start, end)
-        else:
-            entries = repo.list_entries(limit=limit)
+        # Journal entries are written Mongo-only (see CLAUDE.md) — the old
+        # SQLite fallback here could only ever serve permanently stale data.
+        _log.warning("list_entries: MongoDB indisponible — retour d'une liste vide.")
+        entries = []
 
     result = []
     for entry in entries:
@@ -81,17 +79,15 @@ async def export_journal_csv(
     end: date | None = Query(None),
     limit: int = Query(5000),
     _: dict = _COMPTABLE,
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import list_journal_entries_mongo
 
     entries = await list_journal_entries_mongo(start, end, limit)
     if entries is None:
-        repo = JournalRepository(session)
-        if start and end:
-            entries = repo.get_by_date_range(start, end)
-        else:
-            entries = repo.list_entries(limit=limit)
+        # Journal entries are written Mongo-only (see CLAUDE.md) — the old
+        # SQLite fallback here could only ever serve permanently stale data.
+        _log.warning("export_journal_csv: MongoDB indisponible — export vide.")
+        entries = []
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)

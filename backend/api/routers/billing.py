@@ -1,20 +1,21 @@
 """Client invoice (facturation) endpoints."""
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 
 from api.auth import require_role
-from api.deps import get_session, get_config
+from api.deps import get_config
 from api.schemas import ClientTemplateOut, ClientInvoiceOut, GenerateInvoiceRequest, GeneratedInvoiceOut
 from src.billing.template_loader import TemplateLoader
 from src.billing.invoice_builder import InvoiceBuilder
 from src.billing.invoice_numbering import InvoiceNumberer
-from src.billing.client_invoice_store import ClientInvoiceRepository
 
 router = APIRouter(prefix="/billing", tags=["client-invoices"])
+
+_log = logging.getLogger(__name__)
 
 _COMPTABLE_CHEF = Depends(require_role("Comptable", "Chef de Projet"))
 
@@ -61,15 +62,17 @@ def list_templates(_: dict = _COMPTABLE_CHEF, cfg: dict = Depends(get_config)):
     ),
     response_description="Liste des factures client avec montants HT, TVA, TTC et dates",
 )
-async def list_client_invoices(_: dict = _COMPTABLE_CHEF, session: Session = Depends(get_session)):
+async def list_client_invoices(_: dict = _COMPTABLE_CHEF):
     from src.storage.documents.service_bridge import list_client_invoices_mongo
 
     mongo_invoices = await list_client_invoices_mongo()
-    if mongo_invoices is not None:
-        invoices = mongo_invoices
+    if mongo_invoices is None:
+        # Client invoices are written Mongo-only (see CLAUDE.md) — the old
+        # SQLite fallback here could only ever serve permanently stale data.
+        _log.warning("list_client_invoices: MongoDB indisponible — retour d'une liste vide.")
+        invoices = []
     else:
-        repo = ClientInvoiceRepository(session)
-        invoices = repo.list_all()
+        invoices = mongo_invoices
     return [
         ClientInvoiceOut(
             invoice_number=inv.invoice_number,

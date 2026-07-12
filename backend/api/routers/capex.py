@@ -1,17 +1,17 @@
 """CAPEX / asset endpoints."""
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Depends, status
-from sqlalchemy.orm import Session
 
 from api.auth import require_role
-from api.deps import get_session
 from api.schemas import AssetOut, AssetCreateRequest
-from src.capex.asset_repository import AssetRepository
 
 router = APIRouter(prefix="/assets", tags=["assets"])
+
+_log = logging.getLogger(__name__)
 
 _COMPTABLE_DIRECTION = Depends(require_role("Comptable", "Direction"))
 
@@ -29,16 +29,17 @@ _COMPTABLE_DIRECTION = Depends(require_role("Comptable", "Direction"))
 )
 async def list_assets(
     include_fully_depreciated: bool = True,
-    session: Session = Depends(get_session),
 ):
     from src.storage.documents.service_bridge import list_assets_mongo
 
     mongo_assets = await list_assets_mongo(include_fully_depreciated)
-    if mongo_assets is not None:
-        assets = mongo_assets
+    if mongo_assets is None:
+        # Assets are written Mongo-only (see CLAUDE.md) — the old SQLite
+        # fallback here could only ever serve permanently stale data.
+        _log.warning("list_assets: MongoDB indisponible — retour d'une liste vide.")
+        assets = []
     else:
-        repo = AssetRepository(session)
-        assets = repo.list_all(include_fully_depreciated=include_fully_depreciated)
+        assets = mongo_assets
     today = date.today()
     return [
         AssetOut(
