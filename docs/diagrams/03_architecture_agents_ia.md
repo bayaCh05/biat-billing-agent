@@ -19,8 +19,8 @@ Agents [color: "#F0A500"] {
   A2 [label: "② ClassificationAgent\nPass A: Fuzzy CostCatalog\nPass B: TF-IDF / LogReg ML\nPass C: RAG + Ollama\nOutput: PCE compte + reason", icon: tag, color: "#F0A500"]
   A3 [label: "③ AnomalyAgent\nMath validation (TVA, TTC)\nDuplicate detection\nEmbbedding similarity\nOutput: ValidationFlag[]", icon: alert-triangle, color: "#F0A500"]
   A4 [label: "④ AccountingAgent\nJournal PCE (double entrée)\nCAPEX asset creation\nPayment schedule\nOllama: explanation + amort.\nOutput: JournalEntry + Asset", icon: book-open, color: "#F0A500"]
-  A5 [label: "⑤ RiskAgent\nScan roadmap overdue items\nDraft mitigation plan\nOutput: RisqueORM + plan", icon: shield-alert, color: "#F0A500"]
-  A6 [label: "⑥ InsightAgent\nNL → SQL → résultats\nKPI → résumé 3 phrases\nOutput: answer + table", icon: sparkles, color: "#F0A500"]
+  A5 [label: "⑤ RiskAgent\nScan roadmap overdue items\nDraft mitigation plan\nOutput: RisqueDocument (Mongo) + plan", icon: shield-alert, color: "#F0A500"]
+  A6 [label: "⑥ InsightAgent\nNL → pipeline Mongo → résultats\nKPI → résumé 3 phrases\nOutput: answer + table", icon: sparkles, color: "#F0A500"]
 }
 
 // ── RAG SYSTEM ────────────────────────────────────────
@@ -34,7 +34,7 @@ RAG [label: "RAG System (shared)", color: "#2E86C1"] {
 Ollama [label: "Ollama\nqwen2.5:3b\n100% LOCAL — no cloud", icon: cpu, color: "#F0A500", shape: rounded-rectangle]
 
 // ── OUTPUTS ───────────────────────────────────────────
-DB [label: "SQLite / PostgreSQL", icon: database, color: "#1A3A5C"]
+DB [label: "MongoDB\n(SQLite legacy, audit/review only)", icon: database, color: "#1A3A5C"]
 InvoiceResult [label: "InvoiceRecord\nstatut JOURNALED", icon: check-circle, color: "#1D9E76"]
 
 // ── CONNECTIONS ───────────────────────────────────────
@@ -52,7 +52,7 @@ A1 -> Ollama: "LLM extraction"
 A2 -> Ollama: "Pass C classify"
 A4 -> Ollama: "explanation + amort."
 A5 -> Ollama: "draft risk + mitigation"
-A6 -> Ollama: "NL → SQL + answer"
+A6 -> Ollama: "NL → Mongo pipeline + answer"
 ```
 
 > All Ollama calls use local model `qwen2.5:3b`. Temperature 0.0–0.3 depending on agent.

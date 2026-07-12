@@ -237,11 +237,11 @@ Cela force systématiquement une revue humaine (seuil à 0.80) pour toute classi
 
 ## 1.5 Où ailleurs dans le projet un RAG pourrait aider
 
-### NLQueryEngine / page Requêtes IA (texte → SQL)
+### NLQueryEngine / page Requêtes IA (texte → pipeline MongoDB)
 
 **Avis : NON — le prompt statique suffit et est supérieur.**
 
-L'approche actuelle (`src/query/nl_query_engine.py`) utilise un `_SYSTEM_PROMPT` de ~80 lignes décrivant les 8 tables, leurs colonnes exactes, les pièges SQLite et les règles COALESCE. Ce prompt fait ~1 200 tokens — bien dans la fenêtre. Un RAG sur des "exemples de requêtes passées" serait contre-productif ici : les questions NL sont trop variées (agrégats, jointures multi-tables, conditions temporelles) pour qu'un "exemple similaire" soit réutilisable.
+Depuis la migration Mongo (2026-07), l'approche actuelle (`src/query/nl_query_engine.py`) fait générer par le LLM un pipeline d'agrégation MongoDB (`{"collection": ..., "pipeline": [...]}`), plus une requête SQL brute. Le `_SYSTEM_PROMPT` (~80 lignes) décrit les collections autorisées, leurs champs exacts, et les stages interdits (`$out`, `$merge`, `$lookup`, `$where`, ...) — voir `NLQueryEngine._is_safe()`. Ce prompt fait ~1 200 tokens — bien dans la fenêtre. Un RAG sur des "exemples de requêtes passées" serait contre-productif ici : les questions NL sont trop variées (agrégats, conditions temporelles) pour qu'un "exemple similaire" soit réutilisable — d'autant que les jointures inter-collections (`$lookup`) sont interdites, donc peu de requêtes "types" à indexer.
 
 **Pertinence : Basse | Effort : Moyen | Verdict : À ne pas implémenter.**
 
@@ -249,9 +249,9 @@ L'approche actuelle (`src/query/nl_query_engine.py`) utilise un `_SYSTEM_PROMPT`
 
 **Avis : PEUT-ÊTRE — pertinent mais à faible retour sur investissement à ce stade.**
 
-L'`AnomalyAgent` utilise déjà des requêtes SQL sur l'historique (`_check_category_price`, `_check_payment_term`) qui comparent statistiquement les factures VALIDATED/EXPORTED précédentes. C'est une forme de RAG implicite via SQL, plus robuste et plus rapide qu'un vectorstore pour des données structurées.
+L'`AnomalyAgent` utilise déjà des requêtes sur l'historique (`_check_category_price`, `_check_payment_term`, désormais `historical_amounts_for_catalog_sync`/`historical_payment_terms_sync` sur MongoDB depuis la migration) qui comparent statistiquement les factures VALIDATED/EXPORTED précédentes. C'est une forme de RAG implicite via requêtes structurées, plus robuste et plus rapide qu'un vectorstore pour des données structurées.
 
-**Pertinence : Basse | Effort : Élevé | Verdict : SQL statistique déjà présent, ne pas dupliquer.**
+**Pertinence : Basse | Effort : Élevé | Verdict : requêtes statistiques déjà présentes, ne pas dupliquer.**
 
 ### RiskAgent — RAG sur les mitigations passées
 
@@ -259,7 +259,7 @@ L'`AnomalyAgent` utilise déjà des requêtes SQL sur l'historique (`_check_cate
 
 Le `RiskAgent._draft_mitigation()` génère 3 actions de mitigation à partir du titre du risque. Si l'application accumule des données sur 1–2 ans, une collection ChromaDB des mitigations *effectivement appliquées* (statut `MAITRISE`) permettrait au RAG de proposer des actions qui ont déjà fonctionné pour des risques similaires.
 
-**Implémentation** : ajouter une collection `risk_mitigations` dans `PCEVectorStore` ; indexer les `RisqueORM` dont `statut IN ('MAITRISE', 'CLOTURE')` avec leur `plan_mitigation` ; modifier `_draft_mitigation()` pour injecter les 2–3 mitigations similaires dans le prompt Ollama.
+**Implémentation** : ajouter une collection `risk_mitigations` dans `PCEVectorStore` ; indexer les `RisqueDocument` (collection Mongo `risques`) dont `statut IN ('MAITRISE', 'CLOTURE')` avec leur `plan_mitigation` ; modifier `_draft_mitigation()` pour injecter les 2–3 mitigations similaires dans le prompt Ollama.
 
 **Pertinence : Haute | Effort : Faible (3–4h) | Verdict : À implémenter dans une V2.**
 
