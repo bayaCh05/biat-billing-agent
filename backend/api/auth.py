@@ -7,6 +7,8 @@ import string
 from pathlib import Path
 
 import bcrypt
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from dotenv import load_dotenv
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -31,7 +33,6 @@ from api.security.jwt_handler import (
     decode_any,
     verify_access_token,
 )
-from api.deps import get_session
 
 # ── Demo fallback users ────────────────────────────────────────────────────────
 # Passwords MUST be set via env vars — no hardcoded defaults.
@@ -88,12 +89,37 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 # ── Password helpers ──────────────────────────────────────────────────────────
 
+_PH = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4)
+
+_BCRYPT_PREFIXES = ("$2b$", "$2a$", "$2y$")
+
+
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    """Hash with argon2id. All new hashes use this algorithm."""
+    return _PH.hash(password)
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
+    """Verify password against argon2id or legacy bcrypt hash."""
+    if hashed.startswith(_BCRYPT_PREFIXES):
+        try:
+            return bcrypt.checkpw(password.encode(), hashed.encode())
+        except Exception:
+            return False
+    try:
+        return _PH.verify(hashed, password)
+    except (VerifyMismatchError, VerificationError, InvalidHashError):
+        return False
+
+
+def needs_rehash(hashed: str) -> bool:
+    """True if the hash must be upgraded (bcrypt → argon2id, or outdated argon2id params)."""
+    if hashed.startswith(_BCRYPT_PREFIXES):
+        return True
+    try:
+        return _PH.check_needs_rehash(hashed)
+    except InvalidHashError:
+        return False
 
 
 def generate_temp_password(length: int = 12) -> str:
@@ -103,12 +129,11 @@ def generate_temp_password(length: int = 12) -> str:
 
 # ── FastAPI dependencies ───────────────────────────────────────────────────────
 
-def get_current_user(
+async def get_current_user(
     token: str = Depends(oauth2_scheme),
-    session: Session = Depends(get_session),
 ) -> dict:
     """FastAPI dependency — vérifie signature, expiration ET révocation (après logout)."""
-    payload = verify_access_token(token, db=session)
+    payload = await verify_access_token(token)
     if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

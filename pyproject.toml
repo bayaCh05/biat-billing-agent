@@ -67,6 +67,14 @@ dependencies = [
 
     # Authentification LDAP (serveur d'annuaire d'entreprise)
     "ldap3>=2.9",
+
+    # Password hashing — argon2id (primary) + bcrypt (legacy verification during migration)
+    "argon2-cffi>=23.1",
+    "bcrypt>=4.0",
+
+    # MongoDB — Phase 1 migration (coexiste avec SQLAlchemy durant la migration)
+    "motor>=3.4",      # driver asyncio officiel MongoDB (wraps pymongo)
+    "beanie>=2.0",     # ODM Pydantic v2 basé sur Motor (2.0 = API stable Pydantic v2)
 ]
 
 [project.optional-dependencies]
