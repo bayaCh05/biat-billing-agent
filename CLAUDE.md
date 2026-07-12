@@ -46,7 +46,7 @@ Violating this is a compliance failure for a banking subsidiary.
 source .venv/bin/activate
 
 # Run tests — MUST run from repo root, not backend/ (relative config paths break otherwise)
-.venv/bin/pytest backend/                 # all 1161 tests, 1 skipped (real-PDF fixture, env-dependent)
+.venv/bin/pytest backend/                 # all 1177 tests, 1 skipped (real-PDF fixture, env-dependent)
 .venv/bin/pytest backend/tests/unit/      # unit only
 .venv/bin/pytest backend/tests/integration/  # integration only (needs Tesseract)
 .venv/bin/pytest backend/ --tb=short -q   # compact output
@@ -81,6 +81,10 @@ docker compose up -d mongo                              # start local Mongo
 python backend/scripts/db_inspect.py list <collection>   # read-only inspection CLI
 python backend/scripts/verify_migration_integrity.py     # SQLite vs Mongo row-count/UUID-identity check
 ```
+
+CI (`.github/workflows/ci.yml`) runs its own `mongo:7` service container for the `test` job —
+deliberately **without** `--auth` (ephemeral, empty, torn down every run — no real data ever
+touches it, unlike the dev/prod volume above which requires auth by design).
 
 ---
 
@@ -283,6 +287,43 @@ are relative to `backend/`.
   callers (all plain `def`/APScheduler jobs, no event loop of their own) via
   `asyncio.run()` in `_scan_roadmap()` — see that method's docstring before
   reusing this bridge pattern elsewhere.
+- **AI health-summary** (`GET /ai/health-summary`, `InsightAgent._gather_kpis()`)
+  — reads via 4 sync helpers in `sync_mongo_repository.py`
+  (`invoice_pending_rejected_30d_sync`, `roadmap_kpis_sync`, `risks_kpis_sync`,
+  `budget_variance_kpis_sync`), added specifically for this (2026-07). `InsightAgent`
+  no longer takes an `engine` constructor arg — it's `InsightAgent()`.
+- **NL-query** (`POST /nl-query`, `src/query/nl_query_engine.py`) — the LLM now
+  generates a MongoDB aggregation pipeline (`{"collection": ..., "pipeline": [...]}`)
+  instead of raw SQL, executed via `sync_mongo_repository.py::_get_db()` (sync route,
+  no `await`). Collection allowlist + forbidden-stage list (`$out`, `$merge`,
+  `$lookup`, `$where`, ...) enforced in `NLQueryEngine._is_safe()`. Cross-collection
+  joins are NOT supported (`$lookup` is blocked) — journal lines are embedded in
+  `journal_entries.lines`, not a separate collection, precisely so most questions
+  don't need one. `NLQueryEngine()` no longer takes an `engine` constructor arg either.
+- **Notification sync** (`sync_flagged_invoices_mirrored()` in `service_bridge.py`,
+  called by `GET /notifications/count` and `/list`) — as of 2026-07 this reads
+  flagged invoices from `InvoiceDocument` directly and dedups against
+  `NotificationDocument`, no SQLite involved at all anymore. Before this fix it
+  silently scanned SQLite only, meaning invoices flagged through the real
+  Mongo-only upload path never generated a notification — a real bug, not just a
+  migration-status inaccuracy.
+- **Seed/demo scripts** (`scripts/seed_demo.py`, `seed_users.py`,
+  `seed_budget_actuals.py`) — write to MongoDB via `sync_mongo_repository.py`
+  (`SyncMongo*Repository.save()` plus new `create_user_sync`,
+  `save_charte_projet_sync`, `save_phase_sync`, `save_livrable_sync`,
+  `save_ligne_budget_sync`, `save_feuille_de_route_sync`). **Every write is
+  idempotent (upsert-by-id / skip-if-exists) — these scripts no longer wipe the
+  database by default.** That was safe when they targeted a disposable SQLite
+  file; it is not safe now that they write to the same shared MongoDB the app
+  reads from. `--append` is kept only for CLI compatibility and has no effect
+  on this idempotency.
+- **`PATCH /ai/invoices/{id}/classification`** (classification-feedback endpoint)
+  — reads/writes the invoice via `SyncMongoInvoiceRepository`, writes feedback via
+  `save_classification_feedback_sync()`/`count_classification_feedback_sync()`
+  into the `classification_feedback` Mongo collection
+  (`ClassificationFeedbackDocument` existed since Phase 2 but was never actually
+  written to before this — the endpoint previously only wrote to a SQLite-only
+  table, dormant at 0 rows since real uploads through the API never landed there).
 
 ### What's still SQLite-only (do not assume these are in Mongo)
 
@@ -293,12 +334,6 @@ are relative to `backend/`.
   by the project owner: both are superseded by the API+AIOrchestrator path in
   practice** — safe to disregard as a blocker for SQLite read-only/removal work,
   but the code itself hasn't been deleted.
-- **`PATCH /ai/invoices/{id}/classification`** (`ai.py::correct_classification`,
-  classification-feedback endpoint) — reads the invoice via SQLAlchemy
-  `InvoiceRepository` and writes to a SQLite-only `classification_feedback`
-  table with **no Mongo equivalent at all**. Currently dormant (0 rows as of
-  2026-07 — looks unused in practice) but not dead code; would likely fail to
-  find any invoice uploaded through the real API path if actually used.
 - **`main.py`'s demo-user reseeding** (`seed_demo_users`/`refresh_demo_passwords`,
   run on every startup) — writes SQLite `users`. Since login is Mongo-native now
   and daemon/Streamlit are confirmed superseded, this looks like dead weight
@@ -316,14 +351,19 @@ are relative to `backend/`.
   `compute_integrity_summary()` merges both into one score — see that function's
   docstring ("one compliance trail split across two stores, not two independent ones").
 
-**Consequence: SQLite cannot be removed yet, but the reason has changed.**
-The original blocker (`audit_logs` writes) is resolved, and so is the
-scheduled-jobs blocker (all 4 jobs are Mongo-native now) — see above. What's
-left blocking a full SQLite read-only/removal ("Lot 10"): the
-classification-feedback endpoint (real but dormant gap) and the one-time HMAC
-backfill. Do not set SQLite read-only or delete SQLAlchemy code paths without
-resolving these first — and note the daemon/Streamlit code paths above still
-exist even though they're confirmed unused in practice.
+**Consequence: SQLite cannot be removed yet, but the reason has changed again.**
+As of 2026-07, every live production gap that had **zero** Mongo equivalent
+(NL-query, AI health-summary, notification sync, seed scripts, health checks,
+classification-feedback, CI) has been closed — see the Mongo-primary bullets
+above. What's left blocking a full SQLite read-only/removal ("Lot 10") is now
+much narrower: the one-time HMAC backfill on `audit_logs`, plus the general
+fact that the SQLAlchemy fallback branches in most `api/routers/*.py` GET
+routes (the `if mongo_x is not None: ... else: <SQL>` pattern) haven't been
+removed yet — they're currently unreachable in practice (Mongo is always
+primary) but still live code. Do not set SQLite read-only or delete
+SQLAlchemy code paths without a deliberate, lot-by-lot removal pass — and
+note the daemon/Streamlit code paths above still exist even though they're
+confirmed unused in practice.
 
 ### Scheduled Jobs Status (`api/scheduler.py`)
 
@@ -530,13 +570,20 @@ except one. Don't re-scope or re-flag these — check here first.
   SQLAlchemy repository onto Mongo — see "Scheduled Jobs Status" above.
   `scan_roadmap_risks` was the largest item: it used to silently write
   AI-suggested risks into SQLite only, invisible to the real Mongo-backed UI
+- NL-query, AI health-summary, notification sync, seed/demo scripts, health
+  checks (`/api/health`, `/api/health/ready`), CI (Mongo service container
+  added), and the classification-feedback endpoint all migrated to Mongo —
+  these had **zero** Mongo equivalent before (not a fallback, an outright gap),
+  found during a fresh inventory that also flagged this doc as stale on
+  exactly these points. See "MongoDB Migration Status" above.
 
 **Still open:**
 - Refresh token rotation (jti reusable up to 7 days) — explicitly deprioritized
-- "Lot 10" (SQLite → read-only → removal) — blocked on the
-  classification-feedback endpoint + one-time HMAC backfill (see "What's still
-  SQLite-only" above); final removal step explicitly needs supervisor sign-off
-  regardless
+- "Lot 10" (SQLite → read-only → removal) — the functional gaps that used to
+  block this are closed now (see above); what remains is the one-time HMAC
+  backfill on `audit_logs` and a deliberate lot-by-lot removal of the
+  now-unreachable-in-practice SQLAlchemy fallback branches; final removal step
+  explicitly needs supervisor sign-off regardless
 
 ---
 
@@ -552,9 +599,11 @@ except one. Don't re-scope or re-flag these — check here first.
 - Do not call any cloud LLM with real invoice data — data residency violation
 - Do not import `EasyOCREngine` from `ocr_engine` — it moved to `extras_ocr.py`
 - Do not add `lifecycle_tracker` back to `PipelineComponents` — it belongs to `_backend.py` only
-- Do not set SQLite to read-only or remove SQLAlchemy code paths yet — the `audit_logs` blocker is resolved,
-  but `scheduler.py::_job_scan_roadmap_risks` and the classification-feedback endpoint are still real,
-  active SQLite dependencies (see "MongoDB Migration Status" / "Security Hardening Status")
+- Do not set SQLite to read-only or remove SQLAlchemy code paths yet — the functional gaps that used to
+  block this (`audit_logs`, `scheduler.py::_job_scan_roadmap_risks`, NL-query, AI health-summary,
+  notification sync, seed scripts, classification-feedback) are all resolved now, but the one-time
+  `audit_logs` HMAC backfill and a deliberate removal pass over the SQLAlchemy fallback branches still
+  need to happen first (see "MongoDB Migration Status" / "Security Hardening Status")
 - Do not use `Document.get(x)` or `Document.field == value` typed queries against string-stored UUID/reference
   fields (`_id`, `user_id`, etc.) — Beanie coerces to the declared Pydantic type and silently matches nothing.
   Use dict-filtered `.find_one({"_id": id_str})` or `_get_by_str_id()` in `service_bridge.py`
