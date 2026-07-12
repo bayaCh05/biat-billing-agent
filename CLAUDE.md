@@ -15,7 +15,8 @@ validation → accounting journal entries → budget tracking → CAPEX amortisa
 **DATA RESIDENCY: LOCAL ONLY.**
 No invoice data may be sent to cloud APIs (OpenAI, Anthropic, Groq, etc.).
 Ollama (local) is the only permitted LLM backend for production data.
-Mock backends are allowed in tests and Streamlit demo mode only.
+Mock backends are allowed in tests and the `live=false` demo-upload mode only
+(`POST /api/invoices/upload` with `live=false` — see `api/routers/invoices.py`).
 Violating this is a compliance failure for a banking subsidiary.
 
 ---
@@ -25,7 +26,7 @@ Violating this is a compliance failure for a banking subsidiary.
 | Item | Value |
 |------|-------|
 | Python | 3.14.2 (`.venv/bin/python3.14`) |
-| Streamlit | 1.58.0 |
+| Frontend | React 19 + Vite (`frontend/`) — calls the FastAPI backend over HTTP. There is no Streamlit app in this repo (removed before this doc was last synced — see "Project Structure") |
 | SQLAlchemy | 2.0.50 |
 | Pydantic | 2.13.4 |
 | Pandas | 3.0.3 |
@@ -46,28 +47,27 @@ Violating this is a compliance failure for a banking subsidiary.
 source .venv/bin/activate
 
 # Run tests — MUST run from repo root, not backend/ (relative config paths break otherwise)
-.venv/bin/pytest backend/                 # all 1177 tests, 1 skipped (real-PDF fixture, env-dependent)
+.venv/bin/pytest backend/                 # ~1020 tests, 0 skipped
 .venv/bin/pytest backend/tests/unit/      # unit only
 .venv/bin/pytest backend/tests/integration/  # integration only (needs Tesseract)
 .venv/bin/pytest backend/ --tb=short -q   # compact output
 
-# Run Streamlit app
-streamlit run app/Home.py                 # starts on :8502
-
-# Run FastAPI backend (the real production interface)
+# Run FastAPI backend (the production interface)
 python scripts/run_api.py                 # port 8000, --reload for hot-reload
 
-# Run headless daemon (watches ./inbox folder)
-python scripts/run_agent.py
+# Run the frontend (separate terminal)
+cd frontend && npm run dev                # Vite dev server, or `npm run dev:full` to also start the API
 
-# Human review queue (terminal UI)
+# Human review queue (terminal UI) — reads SQLite; see "MongoDB Migration
+# Status" below, this shows only invoices written via the (now-deleted)
+# daemon path, so it will be empty/stale against a Mongo-only environment
 python scripts/review_queue.py
 
 # Generate demo invoice PDF
 python scripts/make_realistic_invoice.py
 
 # Lint
-.venv/bin/ruff check src/ app/ tests/
+.venv/bin/ruff check backend/src backend/api backend/tests
 
 # Init / migrate DB
 python -c "from src.storage.db import build_engine, init_db; init_db(build_engine('sqlite:///./data/invoices.db'))"
@@ -92,18 +92,22 @@ touches it, unlike the dev/prod volume above which requires auth by design).
 
 > **Path note:** the module paths below (`src/...`) predate the FastAPI backend and
 > predate this doc being kept in sync with it. The actual current repo root for all
-> of these is `backend/` (i.e. `backend/src/agent/pipeline.py`, not `src/agent/pipeline.py`).
-> There is also a full FastAPI REST API at `backend/api/` (routers under
-> `backend/api/routers/`: `invoices.py`, `auth.py`, `admin.py`, `users.py`, `security.py`,
-> `billing.py`, `payments.py`, `budget.py`, `capex.py`, `projet_budget.py`, `roadmap.py`,
-> `risks.py`, `livrables.py`, `notifications.py`, `review.py`, `journal.py`, `suivi.py`,
-> `ai.py`, plus `backend/api/scheduler.py` for nightly jobs) — this is the actual
-> production interface, not just Streamlit. `POST /api/invoices/upload` runs invoices
-> through `backend/src/ai_agents/orchestrator.py::AIOrchestrator` (see below), **not**
-> `pipeline.py::process_invoice()`. The daemon (`scripts/run_agent.py`) and Streamlit's
-> direct pipeline calls are the only things still using `pipeline.py::process_invoice()`.
-> Below this note, "Orchestrator... deleted in v3" refers to a different, older class —
-> `AIOrchestrator` is current and heavily used; do not read that note as discouraging it.
+> of these is `backend/` (i.e. `backend/src/ai_agents/orchestrator.py`, not
+> `src/ai_agents/orchestrator.py`). There is also a full FastAPI REST API at
+> `backend/api/` (routers under `backend/api/routers/`: `invoices.py`, `auth.py`,
+> `admin.py`, `users.py`, `security.py`, `billing.py`, `payments.py`, `budget.py`,
+> `capex.py`, `projet_budget.py`, `roadmap.py`, `risks.py`, `livrables.py`,
+> `notifications.py`, `review.py`, `journal.py`, `suivi.py`, `ai.py`, plus
+> `backend/api/scheduler.py` for nightly jobs). `POST /api/invoices/upload` runs
+> invoices through `backend/src/ai_agents/orchestrator.py::AIOrchestrator` (see
+> below) — this is the **only** invoice-processing entry point left. The old
+> headless daemon (`scripts/run_agent.py`, `agent/pipeline.py::process_invoice()`,
+> `agent/agent.py::InvoiceAgent`) and the Streamlit app that used to call it
+> directly were both deleted (2026-07, "Lot B" SQLAlchemy cleanup) — they were
+> confirmed superseded by the API+AIOrchestrator path in practice before removal.
+> Below this note, "Orchestrator... deleted in v3" refers to a different, older,
+> unrelated class — `AIOrchestrator` is current and heavily used; do not read
+> that note as discouraging it.
 
 ### Module dependency order (no cycles)
 ```
@@ -116,47 +120,56 @@ models → storage → cost_catalog
        → budget
        → capex
        → suivi
-       → agent/pipeline.py   ← pure functions
-       → agent/agent.py      ← thin event loop
-       → app/                ← Streamlit UI
+       → ai_agents/          ← AIOrchestrator + its 4 sync agents
+       → api/                ← FastAPI routers
+frontend/                    ← separate React/Vite app, calls api/ over HTTP
 ```
 
-### Key design: `pipeline.py` is pure functions
+### Key design: `AIOrchestrator` coordinates synchronous agents
 
-The core processing is **not a class**. It is a set of free functions:
+Invoice processing is **not** a set of free pipeline functions anymore (that
+was `agent/pipeline.py::process_invoice()`, deleted along with the daemon —
+see the path note above). `backend/src/ai_agents/orchestrator.py::AIOrchestrator`
+is a class whose `process_invoice(invoice)` method runs an invoice through 4
+agents in sequence, each doing one stage:
 
 ```python
-from src.agent.pipeline import (
-    PipelineComponents,   # dataclass holding all deps
-    process_invoice,      # runs all 4 stages
-    extract,              # Stage 1: PDF/OCR/LLM
-    classify,             # Stage 2: direction + accounting code
-    validate,             # Stage 3: field checks, duplicates, math
-    export_invoice,       # Stage 4: JSON export + journal entry
-    recover_interrupted,  # call on startup to reset mid-flight invoices
-    re_enqueue_received,  # call on startup to requeue RECEIVED invoices
-)
+from src.ai_agents.orchestrator import AIOrchestrator
+
+orchestrator = AIOrchestrator(components, session)  # components: AIComponents, session: SQLAlchemy Session (see below)
+result = orchestrator.process_invoice(invoice)       # extraction → classification → anomaly → accounting/journal
 ```
 
-`InvoiceAgent` (in `agent.py`) is just a thin `threading.Event` loop that calls
-`process_invoice()`. The Streamlit app calls stage functions directly.
+`AIOrchestrator` is deliberately **synchronous** ("Built as synchronous to
+match the existing FastAPI + SQLAlchemy patterns" — see its docstring) even
+though it reads/writes almost everything via Mongo — it uses the sync
+`pymongo`-based repositories in `src/storage/sync_mongo_repository.py`
+(`SyncMongoInvoiceRepository`, `SyncMongoJournalRepository`), never Beanie's
+async API. The `session: Session` (SQLAlchemy) constructor arg is a real,
+still-used parameter — passed through to some agents' `.run()` calls — not a
+fallback pattern; do not try to remove it.
 
-### Build the pipeline
+### Build the components
 
 ```python
-from src.agent.config_loader import build_pipeline_components, build_agent
+from src.agent.config_loader import build_ai_components
 
-# For Streamlit (no daemon loop)
-components, engine = build_pipeline_components()
-
-# For headless daemon
-agent = build_agent()
-agent.start()  # blocks; call agent.stop() from signal handler
+components = build_ai_components()   # AIComponents — extractor, coder, classifier,
+                                      # field_validator, coherence_checker,
+                                      # duplicate_detector, anomaly_detector,
+                                      # entry_generator, cost_catalog
+try:
+    orchestrator = AIOrchestrator(components, session)
+    ...
+finally:
+    components.close()   # no-op today — kept so call sites don't need to change
+                          # if a future component ever needs cleanup again
 ```
 
-`build_pipeline_components()` returns `(PipelineComponents, engine)` — the engine
-is returned so callers can share it for FolderWatcher sessions without a second
-connection pool.
+`AIComponents` (in `agent/config_loader.py`, replacing the old
+`PipelineComponents`) holds only stateless business-logic objects — nothing
+SQLAlchemy-bound. `api/deps.py::get_components()` is the real call site
+(`POST /api/invoices/upload`, `ai.py`, `scheduler.py`'s two AI jobs all use it).
 
 ---
 
@@ -165,10 +178,11 @@ connection pool.
 ```
 src/
   agent/
-    pipeline.py          # ← core: pure functions + PipelineComponents dataclass
-    agent.py             # ← thin daemon loop (InvoiceAgent)
-    config_loader.py     # ← wires all components from settings.yaml
-    auto_corrector.py    # ← math-only correction (no cloud)
+    config_loader.py     # ← wires AIComponents from settings.yaml (build_ai_components())
+  ai_agents/
+    orchestrator.py      # ← AIOrchestrator — the real invoice-processing entry point
+    extraction_agent.py, classification_agent.py, anomaly_agent.py, accounting_agent.py
+    risk_agent.py, insight_agent.py  # secondary flows (roadmap risk scan, health-summary)
   models/
     invoice.py           # InvoiceRecord with ConfidenceField[T] generics
     enums.py             # InvoiceStatus, FlagType, etc.
@@ -193,10 +207,8 @@ src/
   billing/               # client invoice generation + PDF (fpdf2)
   budget/                # BudgetTracker (planned vs actual), CostAnalyzer
   capex/                 # DepreciationCalculator (linear/degressive), AssetRepository
-  suivi/                 # aggregator, lifecycle_tracker, reconciler
-  ingestion/
-    folder_watcher.py    # watchdog-based file watcher
-    null_ingestor.py     # no-op for Streamlit/script contexts
+  suivi/                 # aggregator, lifecycle_tracker (orphaned since the daemon/Streamlit
+                          # removal — zero live callers, kept only for its own tests), reconciler
   utils/
     date_utils.py        # last_day_of_month(), last_day_int()
     logging.py           # structlog setup
@@ -209,28 +221,22 @@ config/
   rules/
     classification_rules.yaml   # direction rules (SUPPLIER/CLIENT/UNKNOWN)
 
-app/
-  Home.py                # invoice upload + pipeline execution
-  _backend.py            # shared Streamlit helpers + get_pipeline_components()
-  pages/
-    1_📊_Dashboard.py    # invoice KPIs + ageing
-    2_🔍_Review_Queue.py # human review of flagged invoices
-    3_📋_Invoices.py     # full invoice list
-    4_💳_Suivi.py        # lifecycle tracking + payment reconciliation
-    5_📒_Journal.py      # accounting journal viewer
-    6_📤_Facturation.py  # client invoice creation
-    7_📊_Budget.py       # budget vs actual (4 tabs)
-    8_🏗️_Immobilisations.py  # CAPEX asset register + depreciation
-    9_🎯_Direction.py    # executive dashboard (all modules combined)
+frontend/                # separate top-level dir, NOT under backend/ — React 19 + Vite
+  src/
+    pages/, components/, api/, context/  # calls backend/api/ over HTTP, no direct Python coupling
+  package.json            # npm run dev (Vite only) / npm run dev:full (Vite + uvicorn)
 
 scripts/
-  run_agent.py           # headless daemon entry point
-  review_queue.py        # terminal review UI
+  review_queue.py         # terminal review UI (reads SQLite — see "MongoDB Migration Status")
   make_realistic_invoice.py  # demo PDF generator
+  seed_demo.py, seed_users.py, seed_budget_actuals.py, seed_projects.py,
+  seed_risks.py, seed_roadmap.py  # Mongo-native, idempotent (see "MongoDB Migration Status")
+  # run_agent.py (headless daemon) deleted 2026-07 — see Architecture path note above
 
-tests/
-  unit/                  # 15 files, mocked dependencies
-  integration/           # test_pipeline_e2e.py — real DB, mocked LLM
+tests/                    # ~1020 tests total, 0 skipped
+  unit/                   # 42 files, mocked dependencies
+  integration/            # test_api_e2e.py (real Mongo test DB + SQLite for get_session
+                           # plumbing), test_orchestrator_audit_trail.py, test_avatar_rate_limit.py
   fixtures/make_invoice_pdf.py
 ```
 
@@ -327,22 +333,31 @@ are relative to `backend/`.
 
 ### What's still SQLite-only (do not assume these are in Mongo)
 
-- **The daemon** (`scripts/run_agent.py` → `InvoiceAgent` → `agent/pipeline.py::process_invoice()`)
-  and **Streamlit's direct pipeline calls** — both still use the shared SQLAlchemy
-  `PipelineComponents` from `agent/config_loader.py`, untouched by the migration.
-  Do not assume invoices created this way land in Mongo. **Confirmed (2026-07)
-  by the project owner: both are superseded by the API+AIOrchestrator path in
-  practice** — safe to disregard as a blocker for SQLite read-only/removal work,
-  but the code itself hasn't been deleted.
 - **`main.py`'s demo-user reseeding** (`seed_demo_users`/`refresh_demo_passwords`,
   run on every startup) — writes SQLite `users`. Since login is Mongo-native now
-  and daemon/Streamlit are confirmed superseded, this looks like dead weight
-  rather than something to preserve — a deletion candidate, not a migration target.
+  and the daemon/Streamlit are gone (deleted, see Architecture path note), this
+  looks like dead weight rather than something to preserve — a deletion
+  candidate, not a migration target, still not removed.
 - **`api/routers/audit.py::compute_integrity_summary`**'s one-time HMAC backfill
   (`session.commit()` after backfilling `row_hash` on any pre-HMAC-era SQLite row
-  still `NULL`) — as of 2026-07, 5 rows out of 708 in `audit_logs` still need
-  this. One-time; becomes permanently dormant once those 5 are backfilled (no
-  code path creates new `NULL`-hash rows anymore, per `log_action()` above).
+  still `NULL`) — as of 2026-07, 0 rows have `NULL` `row_hash` anymore (the
+  backfill already ran, as a side effect of `/audit/verify-integrity` or
+  `/security/summary` being hit normally) — this is done. **Separate, more
+  serious finding from the same check (2026-07)**: verifying all 708 rows'
+  HMAC against the current `.env` `JWT_SECRET` shows 569 rows fail
+  `verify_row_hash()` — not `NULL`, but hash-mismatched — in one contiguous
+  block, `2026-06-28 17:25:38` to `2026-07-08 16:34:28`; everything before
+  and after verifies fine. Consistent with `JWT_SECRET`/`AUDIT_HMAC_SECRET`
+  having been temporarily different during that window (the project owner
+  confirmed this is plausible, likely tied to the 2026-07 security-audit
+  JWT_SECRET hardening below) rather than genuine tampering — but this is
+  **not confirmed with certainty**, and `data/invoices.db` has deliberately
+  **not** been touched to "fix" it. If asked to fix the audit integrity
+  score, do not silently recompute `row_hash` over these rows — that defeats
+  the point of an HMAC tamper check. `/audit/verify-integrity` and
+  `/security/summary` currently report ~569 "tampered" entries on the real
+  environment as a result; treat this as a known, documented, unresolved
+  finding, not a bug to patch reflexively.
 - **The audit-log HMAC hash chain** (`row_hash` column, `api/security/audit_integrity.py`,
   `AUDIT_INTEGRITY_CHECK` endpoint) — this is structurally SQLite-specific (tamper-evidence
   chain over that table's own rows). No Mongo equivalent exists yet; this is an open
@@ -351,19 +366,24 @@ are relative to `backend/`.
   `compute_integrity_summary()` merges both into one score — see that function's
   docstring ("one compliance trail split across two stores, not two independent ones").
 
-**Consequence: SQLite cannot be removed yet, but the reason has changed again.**
-As of 2026-07, every live production gap that had **zero** Mongo equivalent
-(NL-query, AI health-summary, notification sync, seed scripts, health checks,
-classification-feedback, CI) has been closed — see the Mongo-primary bullets
-above. What's left blocking a full SQLite read-only/removal ("Lot 10") is now
-much narrower: the one-time HMAC backfill on `audit_logs`, plus the general
-fact that the SQLAlchemy fallback branches in most `api/routers/*.py` GET
-routes (the `if mongo_x is not None: ... else: <SQL>` pattern) haven't been
-removed yet — they're currently unreachable in practice (Mongo is always
-primary) but still live code. Do not set SQLite read-only or delete
-SQLAlchemy code paths without a deliberate, lot-by-lot removal pass — and
-note the daemon/Streamlit code paths above still exist even though they're
-confirmed unused in practice.
+**Consequence: SQLite cannot be removed yet, but the reason has narrowed further.**
+Every live production gap that had **zero** Mongo equivalent (NL-query, AI
+health-summary, notification sync, seed scripts, health checks,
+classification-feedback, CI) was closed in Lot A. The daemon and its
+SQLAlchemy-only dependents (`agent/pipeline.py`, `agent/agent.py`,
+`ProjectRepository`, `MonthlyInvoiceBuilder`, `AutoCorrector`, `CostAllocator`,
+`FlagEscalator`, the JSON/CSV exporters, `FolderWatcher`, the SQLAlchemy
+`JournalRepository`) were deleted in Lot B (2026-07). What's left blocking a
+full SQLite read-only/removal ("Lot 10") now: the HMAC-mismatch finding above
+(needs a decision, not just code), and the SQLAlchemy fallback branches that
+still exist in `api/deps.py`/`storage/db.py`/`storage/repository.py` and a
+handful of routers with **deliberately-kept** SQL paths independent of the
+daemon question — `audit.py` (this HMAC chain), `review.py::get_review_queue`
+(a facture flagged before the daemon's deletion could still only exist in
+SQLite), `invoices.py::get_pipeline_status`'s journal-entry completeness
+guard, `budget.py`/`security.py`/others' `get_session` dependency. Do not set
+SQLite read-only or delete these remaining SQLAlchemy code paths without a
+deliberate, per-router removal pass and explicit confirmation each time.
 
 ### Scheduled Jobs Status (`api/scheduler.py`)
 
@@ -418,7 +438,7 @@ inv.amount_ttc.value      # float | None
 inv.amount_ttc.confidence # float 0.0–1.0
 inv.has_errors            # True if any unresolved ERROR-severity flag
 inv.add_flag(flag)        # also sets human_review_required=True for ERRORs
-inv.status                # InvoiceStatus enum (RECEIVED → ... → EXPORTED/PAID)
+inv.status                # InvoiceStatus enum (RECEIVED → ... → JOURNALED/PAID)
 ```
 
 ### CostCatalog
@@ -449,13 +469,6 @@ summary = tracker.summary(year=2026, through_month=6)
 # summary keys: total_budget_ytd, total_actual_ytd, variance_pct, lines_over_budget
 ```
 
-### Streamlit conventions
-- Use `width="stretch"` (NOT `use_container_width=True` — deprecated in 1.58)
-- Use `df.style.map()` (NOT `df.style.applymap()` — removed in pandas 3.x)
-- Only `app/Home.py` may call `st.set_page_config()`
-- Cached resources: `@st.cache_resource` for engines, catalogs, budget plans
-- After calling `get_pipeline_components()`, call `components.close()` in `finally`
-
 ---
 
 ## Accounting (PCE Tunisien)
@@ -472,15 +485,23 @@ Plan Comptable des Entreprises tunisien. Key accounts:
 ## Enums Reference
 
 ### InvoiceStatus (state machine)
-`RECEIVED → EXTRACTING → EXTRACTED → CLASSIFYING → CLASSIFIED → VALIDATING → VALIDATED/FLAGGED → EXPORTING → EXPORTED → JOURNALING → JOURNALED → PAID/COLLECTED`
+Enum definition (`models/enums.py`) still lists the full historical set:
+`RECEIVED → EXTRACTING → EXTRACTED → CLASSIFYING → CLASSIFIED → VALIDATING → VALIDATED/FLAGGED → EXPORTING → EXPORTED → JOURNALING → JOURNALED → PAID/COLLECTED`.
 
-`JOURNALING`/`JOURNALED` is `pipeline.py`'s `post_journal()` stage (5th stage,
-after export) — on success `EXPORTED → JOURNALING → JOURNALED`; on failure
-reverts to `EXPORTED` + a `JOURNAL_FAILED` ERROR flag. This is the real
-happy-path terminal status for a successfully processed invoice, not `EXPORTED`
-— a test (`test_mark_paid_advances_supplier_invoice`) used to assume `EXPORTED`
-was terminal and silently skipped on every run once this stage started firing;
-fixed 2026-07 (see "Security Hardening Status" above).
+**What `AIOrchestrator.process_invoice()` (the only live writer) actually
+transitions through today** is a subset — it does NOT set the `-ING`
+in-progress statuses at all (those were `agent/pipeline.py`'s stage-start
+markers, deleted with the daemon), and it skips `EXPORTING`/`EXPORTED`
+entirely (no JSON/CSV export step anymore — `pipeline.py::export_file()` and
+the exporters that backed it were also deleted):
+`RECEIVED → EXTRACTED → CLASSIFIED → VALIDATED (or FLAGGED) → JOURNALED`.
+`JOURNALED` is the real happy-path terminal status for a successfully
+processed invoice — set directly by `AIOrchestrator`'s accounting step, no
+intermediate `JOURNALING`. `EXPORTED` still appears in code that reads
+historical/legacy data (`ml_classifier.py`'s training-label set,
+`suivi/reconciler.py`, `suivi/aggregator.py`, `scheduler.py`'s retrain job
+all still treat it as "successfully processed" alongside `VALIDATED`/
+`JOURNALED`/`PAID`) but nothing in the live path produces it anymore.
 
 Terminal statuses (pipeline stops): `FLAGGED, ESCALATED, ERROR, REJECTED, EXTRACTION_FAILED`
 
@@ -516,10 +537,18 @@ storage:
 ## Test Conventions
 
 - Unit tests: mock the repository and all external deps with `MagicMock`
-- Integration tests: use `sqlite:///:memory:`, mock only the LLM backend
-- `_build_components()` in `test_pipeline_e2e.py` is the integration test helper
+- Integration tests (`backend/tests/integration/`): `test_api_e2e.py` and
+  `test_orchestrator_audit_trail.py` run against a real, disposable Mongo test
+  database (`MONGODB_DB=biat_billing_test*`, dropped in a session-scoped
+  fixture teardown) plus `sqlite:///:memory:` only for the `Depends(get_session)`
+  plumbing still wired into a few routers (`audit.py`, `review.py`,
+  `security.py`, ...) — not for the invoice-processing path itself, which is
+  Mongo-only. Only the LLM backend is mocked.
 - 5 PyMuPDF C-library `DeprecationWarning`s in test output are harmless — ignore
-- `InvoiceRepository` mock must include `count_by_status` and `count_auto_approved`
+- The SQLAlchemy `InvoiceRepository` (`storage/repository.py`) is only
+  imported by `api/routers/review.py` now (a deliberately-kept exception —
+  see "MongoDB Migration Status") — its test mock must include
+  `count_by_status` and `count_auto_approved`
 - No `pytest-asyncio`/`pytest-anyio` plugin actually installed despite being a
   listed dependency — drive async code via `asyncio.run(coro)` in plain sync
   test functions, not `async def test_...`.
@@ -558,9 +587,12 @@ except one. Don't re-scope or re-flag these — check here first.
   imported lazily, on first LDAP login attempt, not at app boot)
 - MongoDB authentication enabled (`mongod --auth`; see Runtime table above)
 - Rate limit added to `PATCH /users/me/avatar` (10/minute, matches invoice upload)
-- Obsolete test skip fixed in `test_pipeline_e2e.py` (`test_mark_paid_advances_supplier_invoice`
+- Obsolete test skip fixed in the old `test_pipeline_e2e.py` (`test_mark_paid_advances_supplier_invoice`
   was silently skipping every run once `pipeline.py` added the `post_journal()`
-  stage — see JOURNALED in "InvoiceStatus" below)
+  stage — see JOURNALED in "InvoiceStatus" below). That whole file was later
+  deleted (2026-07, Lot B) — it tested `agent/pipeline.py::process_invoice()`,
+  confirmed to have zero live callers once the daemon was removed. The fix
+  itself was real at the time; noted here only for history.
 - `service_bridge.py` test coverage: 127 functions audited, 30 confirmed dead
   and removed, all 97 remaining now have direct unit tests
 - Debug-log leak fixed (raw invoice text no longer dumped at DEBUG level)
@@ -576,34 +608,54 @@ except one. Don't re-scope or re-flag these — check here first.
   these had **zero** Mongo equivalent before (not a fallback, an outright gap),
   found during a fresh inventory that also flagged this doc as stale on
   exactly these points. See "MongoDB Migration Status" above.
+- Lot B (2026-07): SQL fallback branches removed from 14 routers; the daemon
+  (`scripts/run_agent.py`, `agent/pipeline.py`, `agent/agent.py`) and its
+  SQLAlchemy-only dependents (`ProjectRepository`, `MonthlyInvoiceBuilder`,
+  `AutoCorrector`, `CostAllocator`, `FlagEscalator`, the JSON/CSV exporters,
+  `FolderWatcher`, the SQLAlchemy `JournalRepository`) deleted outright —
+  `AIOrchestrator` was first decoupled onto a new SQLAlchemy-free
+  `AIComponents` (see Architecture above) so the real upload path kept
+  working throughout. `ingestion/` is now fully dead too (only `base.py`
+  remains, zero implementers) — not yet deleted, flagged as a small
+  follow-up.
 
 **Still open:**
 - Refresh token rotation (jti reusable up to 7 days) — explicitly deprioritized
 - "Lot 10" (SQLite → read-only → removal) — the functional gaps that used to
-  block this are closed now (see above); what remains is the one-time HMAC
-  backfill on `audit_logs` and a deliberate lot-by-lot removal of the
-  now-unreachable-in-practice SQLAlchemy fallback branches; final removal step
-  explicitly needs supervisor sign-off regardless
+  block this are closed, and the daemon-specific SQLAlchemy code is gone
+  (Lot B above), but SQLite/SQLAlchemy itself is still load-bearing for
+  `audit.py`, `review.py`, `security.py` and a few other routers with
+  deliberately-kept SQL paths unrelated to the daemon — see "MongoDB
+  Migration Status" for the current, narrower list. Final removal step
+  explicitly needs supervisor sign-off regardless.
+- **Audit-log HMAC mismatch (2026-07, unresolved)**: 569 of 708 `audit_logs`
+  rows fail HMAC verification against the current `JWT_SECRET`, in one
+  contiguous window (2026-06-28 to 2026-07-08) — plausibly a temporary
+  secret rotation during this same security-audit work, not tampering, but
+  not confirmed. See "MongoDB Migration Status" for detail. Do not silently
+  "fix" this by recomputing `row_hash`.
 
 ---
 
 ## What NOT to Do
 
-- Do not add `@st.cache_resource` to `get_pipeline_components()` — it creates per-mode sessions that must be closed
-- Do not use the old `Orchestrator` class from pre-v3 (deleted) — use `process_invoice()` + `PipelineComponents`
-  for the daemon/Streamlit path. This is unrelated to `AIOrchestrator` (`ai_agents/orchestrator.py`), which is
-  current and is what `POST /api/invoices/upload` actually runs — do not delete or avoid that one.
+- Do not use the old `Orchestrator` class from pre-v3 (deleted) or reference
+  `process_invoice()`/`PipelineComponents`/`agent/pipeline.py` — all deleted
+  2026-07 along with the daemon (see Architecture above). Use `AIOrchestrator`
+  (`ai_agents/orchestrator.py`) with `AIComponents`
+  (`agent/config_loader.py::build_ai_components()`) instead — that's what
+  `POST /api/invoices/upload` actually runs.
 - Do not use `AccountingCoder(rules=...)` — v1 API, removed; use `AccountingCoder(catalog=CostCatalog)`
 - Do not use `CostCatalog.load()` — the correct classmethod is `CostCatalog.from_yaml()`
-- Do not call `use_container_width=True` in Streamlit — use `width="stretch"`
 - Do not call any cloud LLM with real invoice data — data residency violation
 - Do not import `EasyOCREngine` from `ocr_engine` — it moved to `extras_ocr.py`
-- Do not add `lifecycle_tracker` back to `PipelineComponents` — it belongs to `_backend.py` only
-- Do not set SQLite to read-only or remove SQLAlchemy code paths yet — the functional gaps that used to
-  block this (`audit_logs`, `scheduler.py::_job_scan_roadmap_risks`, NL-query, AI health-summary,
-  notification sync, seed scripts, classification-feedback) are all resolved now, but the one-time
-  `audit_logs` HMAC backfill and a deliberate removal pass over the SQLAlchemy fallback branches still
-  need to happen first (see "MongoDB Migration Status" / "Security Hardening Status")
+- Do not set SQLite to read-only or remove the *remaining* SQLAlchemy code paths
+  (`storage/db.py`, `storage/repository.py`, `orm_models*.py`, `alembic/`, or
+  the deliberately-kept SQL paths in `audit.py`/`review.py`/`security.py`/etc.)
+  without a deliberate, per-router removal pass and explicit confirmation each
+  time — the daemon-specific SQLAlchemy code is already gone (Lot B, 2026-07),
+  but these remaining ones serve live, unrelated purposes (see "MongoDB
+  Migration Status")
 - Do not use `Document.get(x)` or `Document.field == value` typed queries against string-stored UUID/reference
   fields (`_id`, `user_id`, etc.) — Beanie coerces to the declared Pydantic type and silently matches nothing.
   Use dict-filtered `.find_one({"_id": id_str})` or `_get_by_str_id()` in `service_bridge.py`
