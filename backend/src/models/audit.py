@@ -1,4 +1,4 @@
-"""Audit trail Pydantic models — BCT compliance (Circulaire 2025-13)."""
+"""Audit trail Pydantic models — BCT compliance."""
 from __future__ import annotations
 
 from typing import Any

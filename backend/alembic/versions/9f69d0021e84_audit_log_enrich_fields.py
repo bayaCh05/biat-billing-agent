@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Add banking-compliance fields to audit_logs (BCT Circulaire 2025-13)."""
+    """Add banking-compliance fields to audit_logs."""
     with op.batch_alter_table('audit_logs', schema=None) as batch_op:
         batch_op.add_column(sa.Column('user_id',       sa.String(length=64),  nullable=True))
         batch_op.add_column(sa.Column('user_email',    sa.String(length=128), nullable=True))

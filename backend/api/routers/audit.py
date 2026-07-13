@@ -1,4 +1,4 @@
-"""Audit log endpoints — append-only compliance trail (BCT Circulaire 2025-13)."""
+"""Audit log endpoints — append-only compliance trail."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
