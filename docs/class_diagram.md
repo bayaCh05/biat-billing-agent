@@ -363,6 +363,88 @@ class FeuilleDeRoute {
 }
 
 %% ══════════════════════════════════════════════
+%%  PAIEMENTS & ÉCHÉANCIER (Beanie — Module 5)
+%% ══════════════════════════════════════════════
+
+class PaymentDocument {
+    +UUID id
+    +UUID invoice_id
+    +float amount
+    +date payment_date
+    +str payment_reference
+    +str payment_method
+    +datetime created_at
+}
+
+class PaymentInstallmentDocument {
+    +UUID id
+    +str invoice_id
+    +int installment_number
+    +int total_installments
+    +float base_amount
+    +float current_amount
+    +date due_date
+    +date paid_date
+    +float paid_amount
+    +str status
+    +int late_periods
+    +datetime created_at
+    +datetime updated_at
+}
+
+%% ══════════════════════════════════════════════
+%%  RISQUES (Beanie — Module 7)
+%% ══════════════════════════════════════════════
+
+class RisqueDocument {
+    +UUID id
+    +str titre
+    +str description
+    +str type_risque
+    +str probabilite
+    +str impact
+    +str niveau_criticite
+    +str statut
+    +str plan_mitigation
+    +str responsable_id
+    +date date_identification
+    +date date_echeance_mitigation
+    +date date_cloture
+    +UUID feuille_route_id
+    +str projet_id
+}
+
+%% ══════════════════════════════════════════════
+%%  BUDGET ANNUEL (Beanie — Module 8)
+%% ══════════════════════════════════════════════
+
+class BudgetPlanDocument {
+    +UUID id
+    +str catalog_id
+    +int year
+    +str label
+    +list~float~ monthly
+    +str note
+    +datetime updated_at
+}
+
+%% ══════════════════════════════════════════════
+%%  FEEDBACK DE CLASSIFICATION (Beanie — Module 1, boucle ML)
+%% ══════════════════════════════════════════════
+
+class ClassificationFeedbackDocument {
+    +UUID id
+    +str invoice_id
+    +str original_compte
+    +str corrected_compte
+    +str original_catalog_id
+    +str corrected_catalog_id
+    +str invoice_text
+    +str corrected_by
+    +datetime corrected_at
+}
+
+%% ══════════════════════════════════════════════
 %%  RELATIONS
 %% ══════════════════════════════════════════════
 
@@ -405,6 +487,20 @@ CharteProjet "1" o-- "0..*" LigneBudget : budget par catégorie
 %% Sécurité & audit
 AuditLog --> User : tracé par
 Notification --> InvoiceRecord : déclenché par
+
+%% Paiements & échéancier
+PaymentDocument --> InvoiceRecord : invoice_id
+InvoiceRecord "1" *-- "0..*" PaymentInstallmentDocument : échéances
+
+%% Risques
+RisqueDocument --> FeuilleDeRoute : feuille_route_id
+RisqueDocument --> CharteProjet : projet_id
+
+%% Budget annuel
+BudgetPlanDocument --> CostCatalogEntry : catalog_id
+
+%% Feedback de classification
+ClassificationFeedbackDocument --> InvoiceRecord : invoice_id
 ```
 
 ## Légende
@@ -427,9 +523,13 @@ Notification --> InvoiceRecord : déclenché par
 | **Comptabilité** | `JournalEntry`, `JournalLine` | Génère les écritures en partie double (PCE Tunisien) |
 | **CAPEX** | `Asset`, `AssetProjectLink` | Registre des immobilisations et plan d'amortissement |
 | **Facturation** | `ClientInvoice`, `ClientLineItem` | Factures émises aux entités du groupe BIAT |
+| **Échéancier & Paiements** | `PaymentDocument`, `PaymentInstallmentDocument` | Paiements reçus et plan de paiement échelonné avec pénalités de retard |
 | **Projets** | `CharteProjet`, `Phase`, `Livrable`, `LigneBudget` | Suivi des projets IT : phases, livrables, budget par catégorie |
 | **Feuille de route** | `FeuilleDeRoute` | Jalons stratégiques 2026 avec statut et priorité |
+| **Risques** | `RisqueDocument` | Risques projet : probabilité, impact, criticité, plan de mitigation |
+| **Budget annuel** | `BudgetPlanDocument` | Plan budgétaire par entrée catalogue et année (12 valeurs mensuelles) |
 | **Utilisateurs** | `User` | Comptes avec rôles, profil modifiable, premier login |
 | **Audit** | `AuditLog` | Piste d'audit BCT : chaque action enregistrée avec before/after |
 | **Notifications** | `Notification` | Alertes automatiques sur factures bloquées ou budgets dépassés |
+| **Feedback classification** | `ClassificationFeedbackDocument` | Corrections humaines de compte comptable, utilisées pour le réentraînement ML |
 | **BCT Compliance** | `ClientInvoice` | Champs export : devise, domiciliation, délai de rapatriement |

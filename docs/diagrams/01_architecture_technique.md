@@ -6,7 +6,7 @@ direction: right
 
 // ── FRONTEND ──────────────────────────────────────────
 Frontend [icon: monitor, color: "#1A3A5C"] {
-  React18 [label: "React 18 + TypeScript", icon: react, color: "#2E86C1"]
+  React19 [label: "React 19 + TypeScript", icon: react, color: "#2E86C1"]
   Vite [label: "Vite (bundler)", icon: zap, color: "#2E86C1"]
   TailwindCSS [label: "Tailwind CSS", icon: wind, color: "#2E86C1"]
   Recharts [label: "Recharts (charts)", icon: bar-chart, color: "#2E86C1"]
@@ -57,7 +57,7 @@ Infra [icon: cloud, color: "#1A3A5C"] {
 }
 
 // ── CONNECTIONS ───────────────────────────────────────
-React18 -> FastAPI: "HTTP/JSON REST API\nport 8000"
+React19 -> FastAPI: "HTTP/JSON REST API\nport 8000"
 FastAPI -> SQLAlchemy: ORM
 FastAPI -> Orchestrator: "process_invoice()"
 FastAPI -> APScheduler: "nightly jobs"
