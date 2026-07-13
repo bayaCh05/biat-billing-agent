@@ -45,10 +45,11 @@ class LivrableORM(Base):
     __tablename__ = "livrables"
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
-    phase_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("phases.id", ondelete="CASCADE"),
-        nullable=False, index=True,
-    )
+    # Plain column, no FK constraint: the "phases" table (PhaseORM) was removed
+    # as dead SQLAlchemy code in Lot C (2026-07) — the live equivalent is
+    # PhaseDocument (Beanie). LivrableORM itself has no live callers either
+    # (superseded by LivrableDocument) but is out of this pass's approved scope.
+    phase_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     titre: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     date_livraison_prevue: Mapped[date] = mapped_column(Date, nullable=False)
