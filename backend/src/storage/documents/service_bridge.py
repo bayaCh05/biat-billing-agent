@@ -1076,9 +1076,9 @@ async def budget_summary_mongo(plan, year: int, through_month: int) -> dict | No
 
         summary = {
             "year": year, "through_month": through_month,
-            "total_budget_ytd": round(total_budget, 2),
-            "total_actual_ytd": round(total_actual, 2),
-            "total_variance_ytd": round(total_actual - total_budget, 2),
+            "total_budget_ytd": round(total_budget, 3),
+            "total_actual_ytd": round(total_actual, 3),
+            "total_variance_ytd": round(total_actual - total_budget, 3),
             "variance_pct": round(((total_actual - total_budget) / total_budget * 100) if total_budget else 0, 2),
             "lines_over_budget": len(over_lines),
             "lines_warning": len(warning_lines),
