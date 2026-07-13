@@ -671,9 +671,10 @@ except one. Don't re-scope or re-flag these — check here first.
   `FolderWatcher`, the SQLAlchemy `JournalRepository`) deleted outright —
   `AIOrchestrator` was first decoupled onto a new SQLAlchemy-free
   `AIComponents` (see Architecture above) so the real upload path kept
-  working throughout. `ingestion/` is now fully dead too (only `base.py`
-  remains, zero implementers) — not yet deleted, flagged as a small
-  follow-up.
+  working throughout. `ingestion/` (including `base.py`, its last
+  remaining file with zero implementers) was deleted in this same commit
+  alongside `FolderWatcher` — there is no `backend/src/ingestion/`
+  directory left at all as of Lot B.
 
 **Still open:**
 - Refresh token rotation (jti reusable up to 7 days) — explicitly deprioritized
