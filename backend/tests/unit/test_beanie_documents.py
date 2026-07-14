@@ -614,13 +614,13 @@ class TestPaymentDocument:
 # ── Cohérence globale -------------------------------------------------------
 
 class TestGlobalCohérence:
-    def test_all_21_documents_importable(self):
-        """Tous les 21 documents Beanie s'importent sans erreur."""
+    def test_all_22_documents_importable(self):
+        """Tous les 22 documents Beanie s'importent sans erreur."""
         import sys
         sys.path.insert(0, "backend")
         from src.storage.mongodb import _all_document_models
         models = _all_document_models()
-        assert len(models) == 21
+        assert len(models) == 22
 
     def test_no_duplicate_collection_names(self):
         """Chaque document utilise un nom de collection unique."""

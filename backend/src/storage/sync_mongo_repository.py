@@ -744,6 +744,72 @@ def budget_variance_kpis_sync() -> dict:
     }
 
 
+def echeancier_kpis_sync() -> dict:
+    """Échéances de paiement en retard et pénalités cumulées — collection payment_installments.
+
+    Utilisé par AuditAgent (domaine "echeancier") — voir ai_agents/audit_agent.py.
+    """
+    coll = _get_db()["payment_installments"]
+    n_total = coll.count_documents({})
+    n_late = coll.count_documents({"status": "LATE"})
+    n_pending = coll.count_documents({"status": "PENDING"})
+
+    late_rows = list(coll.find({"status": "LATE"}, {"base_amount": 1, "current_amount": 1}))
+    total_penalty = sum(
+        (r.get("current_amount", 0) or 0) - (r.get("base_amount", 0) or 0)
+        for r in late_rows
+    )
+
+    return {
+        "n_total": n_total,
+        "n_late": n_late,
+        "n_pending": n_pending,
+        "total_penalty_amount": round(total_penalty, 3),
+    }
+
+
+# ── Audit Agent (rapport transversal périodique) ─────────────────────────────
+# Voir ai_agents/audit_agent.py — l'Audit Agent ne lit QUE ce que les autres
+# agents ont déjà écrit ; il ne les appelle jamais directement.
+
+def save_audit_snapshot_sync(snapshot: dict) -> str:
+    """Insère un AuditSnapshotDocument — écriture brute pymongo (jamais
+    Document(...).insert()), cohérent avec le reste du pipeline synchrone.
+
+    snapshot attend : granularity, period_start, period_end, status, metrics,
+    trend, alerts. reconciliation/similar_incidents/narrative_summary
+    (Lots 2/3) valent leur défaut si absents.
+    """
+    coll = _get_db()["audit_snapshots"]
+    doc_id = str(uuid4())
+    coll.insert_one({
+        "_id": doc_id,
+        "granularity": snapshot["granularity"],
+        "period_start": snapshot["period_start"],
+        "period_end": snapshot["period_end"],
+        "generated_at": datetime.now(timezone.utc),
+        "status": snapshot.get("status", "OK"),
+        "metrics": snapshot.get("metrics", {}),
+        "trend": snapshot.get("trend", {}),
+        "alerts": snapshot.get("alerts", []),
+        "reconciliation": snapshot.get("reconciliation", {}),
+        "similar_incidents": snapshot.get("similar_incidents", []),
+        "narrative_summary": snapshot.get("narrative_summary"),
+    })
+    return doc_id
+
+
+def get_latest_snapshot_sync(granularity: str) -> dict | None:
+    """Dernier AuditSnapshotDocument pour une granularité donnée (period_start décroissant)."""
+    coll = _get_db()["audit_snapshots"]
+    rows = list(
+        coll.find({"granularity": granularity})
+        .sort("period_start", pymongo.DESCENDING)
+        .limit(1)
+    )
+    return rows[0] if rows else None
+
+
 # ── Seed helpers (scripts/seed_demo.py, seed_users.py) ──────────────────────
 # Domaines sans écrivain Mongo dédié avant Lot A5 — les Documents Beanie
 # existent déjà (mongodb.py::_all_document_models()), il ne manquait qu'un

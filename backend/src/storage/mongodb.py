@@ -109,6 +109,7 @@ def _all_document_models() -> list:
     from src.storage.documents.risque                  import RisqueDocument
     from src.storage.documents.notification            import NotificationDocument
     from src.storage.documents.password_verification   import PasswordVerificationDocument
+    from src.storage.documents.audit_snapshot           import AuditSnapshotDocument
 
     return [
         UserDocument,
@@ -132,4 +133,5 @@ def _all_document_models() -> list:
         RisqueDocument,
         NotificationDocument,
         PasswordVerificationDocument,
+        AuditSnapshotDocument,
     ]

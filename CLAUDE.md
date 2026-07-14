@@ -452,7 +452,7 @@ deliberate, per-router removal pass and explicit confirmation each time.
 
 ### Scheduled Jobs Status (`api/scheduler.py`)
 
-All 4 jobs are Mongo-native as of 2026-07.
+All 5 jobs are Mongo-native as of 2026-07.
 
 | Job | Cadence | Data source |
 |-----|---------|--------------|
@@ -460,6 +460,26 @@ All 4 jobs are Mongo-native as of 2026-07.
 | `_job_retrain_classifier` | weekly | Mongo (`SyncMongoInvoiceRepository`) |
 | `_job_recalculate_installments` | nightly | Mongo (`recalculate_late_installments_sync`) |
 | `_job_scan_roadmap_risks` | nightly (8am) | Mongo (`RiskAgent._scan_roadmap_async`, bridged via `asyncio.run()`) |
+| `_job_audit_daily` | nightly (2am) | Mongo (`AuditAgent.run({"granularity": "DAILY"})` — see "Audit Agent" below) |
+
+### Audit Agent (`src/ai_agents/audit_agent.py` — Lot 1, 2026-07, in progress)
+
+Separate, periodic, corpus-wide audit component — deliberately distinct from
+`InvoiceProcessingOrchestrator` (real-time, per-invoice). **Never calls any
+other agent** (not `AnomalyAgent`, not `RiskAgent`, not `InsightAgent`) —
+reads only what they've already written to Mongo, via
+`sync_mongo_repository.py`. Produces an immutable `AuditSnapshotDocument`
+(collection `audit_snapshots`) per `(granularity, period_start)`, one of
+`"DAILY" | "WEEKLY" | "MONTHLY"`.
+
+**Lot 1 (this state)**: per-domain metrics (invoices, journal, budget,
+échéancier via the new `echeancier_kpis_sync()`, risks, roadmap) + trend
+vs. the previous snapshot of the same granularity + deterministic
+threshold-based alerts. `reconciliation` (cross-entity checks — Lot 2),
+`similar_incidents` (ChromaDB RAG — Lot 3), and `narrative_summary` (LLM —
+Lot 3) are reserved fields, always empty/`None` at this stage. Only
+`_job_audit_daily` is wired into `scheduler.py`; `WEEKLY`/`MONTHLY` jobs and
+the `/audit-reports` API router are not yet implemented (Lots 4+).
 
 ### Conventions — read before writing any Mongo code
 

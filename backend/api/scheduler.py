@@ -86,6 +86,15 @@ def _job_retrain_classifier() -> None:
         logger.error("ml_weekly_retrain_error: %s", exc)
 
 
+def _job_audit_daily() -> None:
+    try:
+        from src.ai_agents.audit_agent import AuditAgent
+        result = AuditAgent().run({"granularity": "DAILY"})
+        logger.info("audit_daily: %s", result.output)
+    except Exception as exc:
+        logger.error("audit_daily_error: %s", exc)
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler and _scheduler.running:
@@ -126,6 +135,14 @@ def start_scheduler() -> BackgroundScheduler:
         id="weekly_ml_retrain",
         replace_existing=True,
         misfire_grace_time=7200,
+    )
+
+    _scheduler.add_job(
+        _job_audit_daily,
+        "cron", hour=2, minute=0,
+        id="audit_daily",
+        replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     _scheduler.start()

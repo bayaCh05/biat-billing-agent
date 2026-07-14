@@ -9,6 +9,7 @@ from src.ai_agents.anomaly_agent import AnomalyAgent
 from src.ai_agents.accounting_agent import AccountingAgent
 from src.ai_agents.risk_agent import RiskAgent
 from src.ai_agents.insight_agent import InsightAgent
+from src.ai_agents.audit_agent import AuditAgent
 from src.ai_agents.invoice_processing_orchestrator import InvoiceProcessingOrchestrator
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "AccountingAgent",
     "RiskAgent",
     "InsightAgent",
+    "AuditAgent",
     "InvoiceProcessingOrchestrator",
 ]
