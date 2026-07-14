@@ -391,21 +391,28 @@ are relative to `backend/`.
   still `NULL`) — as of 2026-07, 0 rows have `NULL` `row_hash` anymore (the
   backfill already ran, as a side effect of `/audit/verify-integrity` or
   `/security/summary` being hit normally) — this is done. **Separate, more
-  serious finding from the same check (2026-07)**: verifying all 708 rows'
-  HMAC against the current `.env` `JWT_SECRET` shows 569 rows fail
-  `verify_row_hash()` — not `NULL`, but hash-mismatched — in one contiguous
-  block, `2026-06-28 17:25:38` to `2026-07-08 16:34:28`; everything before
-  and after verifies fine. Consistent with `JWT_SECRET`/`AUDIT_HMAC_SECRET`
-  having been temporarily different during that window (the project owner
-  confirmed this is plausible, likely tied to the 2026-07 security-audit
-  JWT_SECRET hardening below) rather than genuine tampering — but this is
-  **not confirmed with certainty**, and `data/invoices.db` has deliberately
-  **not** been touched to "fix" it. If asked to fix the audit integrity
-  score, do not silently recompute `row_hash` over these rows — that defeats
-  the point of an HMAC tamper check. `/audit/verify-integrity` and
-  `/security/summary` currently report ~569 "tampered" entries on the real
-  environment as a result; treat this as a known, documented, unresolved
-  finding, not a bug to patch reflexively.
+  serious finding from the same check, updated 2026-07-13**: verifying all 708
+  rows' HMAC against the current `.env` `JWT_SECRET`/`AUDIT_HMAC_SECRET` now
+  shows **708/708 rows fail** `verify_row_hash()` (re-verified live against
+  `data/invoices.db` on 2026-07-13 — this is worse than the 569/708 figure
+  first recorded here). Root cause, confirmed via commit history rather than
+  guessed: commit `c1dfaf0` (2026-07-02) fixed a real HMAC bug where an inline
+  `.env` comment on the `AUDIT_HMAC_SECRET` line was being parsed as part of
+  the secret value itself; commit `2775772` (2026-07-10, "remove hardcoded
+  JWT_SECRET fallback, enforce validation at startup") then replaced the
+  previous default/fallback secret with a newly-validated one. Every row
+  written before the 07-10 rotation was hashed under a secret that no longer
+  exists anywhere, so **all** of them now fail against today's secret — this
+  is a full one-time key rotation, not a mysterious partial-window anomaly,
+  and not tampering. Full writeup: `docs/audit_hmac_incident.md`.
+  `data/invoices.db` has deliberately **not** been touched to "fix" this. If
+  asked to fix the audit integrity score, do not silently recompute
+  `row_hash` over these rows — that defeats the point of an HMAC tamper
+  check (see `docs/audit_hmac_incident.md` for why this is documented as a
+  known limitation rather than resolved by re-signing). `/audit/verify-integrity`
+  and `/security/summary` currently report 708 "tampered" entries (100%) on
+  the real environment as a result; treat this as a known, documented,
+  unresolved finding, not a bug to patch reflexively.
 - **The audit-log HMAC hash chain** (`row_hash` column, `api/security/audit_integrity.py`,
   `AUDIT_INTEGRITY_CHECK` endpoint) — this is structurally SQLite-specific (tamper-evidence
   chain over that table's own rows). No Mongo equivalent exists yet; this is an open
@@ -685,12 +692,17 @@ except one. Don't re-scope or re-flag these — check here first.
   deliberately-kept SQL paths unrelated to the daemon — see "MongoDB
   Migration Status" for the current, narrower list. Final removal step
   explicitly needs supervisor sign-off regardless.
-- **Audit-log HMAC mismatch (2026-07, unresolved)**: 569 of 708 `audit_logs`
-  rows fail HMAC verification against the current `JWT_SECRET`, in one
-  contiguous window (2026-06-28 to 2026-07-08) — plausibly a temporary
-  secret rotation during this same security-audit work, not tampering, but
-  not confirmed. See "MongoDB Migration Status" for detail. Do not silently
-  "fix" this by recomputing `row_hash`.
+- **Audit-log HMAC mismatch (2026-07, unresolved, documented as known
+  limitation)**: 708 of 708 `audit_logs` rows (100%) fail HMAC verification
+  against the current `JWT_SECRET`, as of a live re-check on 2026-07-13.
+  Confirmed root cause via commit history: the `JWT_SECRET` hardening on
+  2026-07-10 (`2775772`) rotated the effective secret away from the old
+  default/fallback value, and every row written before that rotation was
+  hashed under a secret that no longer exists — a genuine one-time key
+  rotation, not tampering. Full incident note:
+  `docs/audit_hmac_incident.md`. Do not silently "fix" this by recomputing
+  `row_hash` — see that doc for why re-signing would defeat the purpose of
+  the tamper check instead of resolving the incident.
 
 ---
 
