@@ -71,7 +71,7 @@ Violating this is a compliance failure for a banking subsidiary.
 source .venv/bin/activate
 
 # Run tests — MUST run from repo root, not backend/ (relative config paths break otherwise)
-.venv/bin/pytest backend/                 # ~1020 tests, 0 skipped
+.venv/bin/pytest backend/                 # ~1132 tests, 0 skipped
 .venv/bin/pytest backend/tests/unit/      # unit only
 .venv/bin/pytest backend/tests/integration/  # integration only (needs Tesseract)
 .venv/bin/pytest backend/ --tb=short -q   # compact output
@@ -235,19 +235,29 @@ src/
     catalog.py           # CostCatalog.from_yaml() — fuzzy keyword matching (NOT under classification/)
   validation/            # field_validator, coherence_checker, duplicate_detector, anomaly_detector
   accounting/            # entry_generator.py — journal entry patterns
-  billing/               # client invoice generation + PDF (fpdf2)
-  budget/                # BudgetTracker (planned vs actual), CostAnalyzer
-  capex/                 # DepreciationCalculator (linear/degressive), AssetRepository
+  billing/               # client invoice generation + PDF (fpdf2); client_invoice_store.py's
+                          # ClientInvoiceRepository (SQLAlchemy) has zero callers anywhere,
+                          # including tests — dead code, superseded by SyncMongoClientInvoiceRepository
+  budget/                # BudgetTracker, CostAnalyzer — both SQLAlchemy, zero live callers,
+                          # kept only for their own tests (same pattern as suivi/ below) —
+                          # superseded by the Mongo KPI/variance helpers in sync_mongo_repository.py
+  capex/                 # DepreciationCalculator (linear/degressive), AssetRepository —
+                          # AssetRepository (SQLAlchemy) has zero live callers, kept only for
+                          # its own tests — superseded by SyncMongoAssetRepository
   suivi/                 # aggregator, lifecycle_tracker (orphaned since the daemon/Streamlit
                           # removal — zero live callers, kept only for its own tests), reconciler
   notifications/
-    notification_service.py  # flagged-invoice notifications (GET /notifications/*)
+    notification_service.py  # NotificationService (SQLAlchemy) — dead code, zero callers
+                              # anywhere including tests. GET /notifications/* is actually served
+                              # by sync_flagged_invoices_mirrored() in service_bridge.py (see
+                              # "MongoDB Migration Status")
   query/
     nl_query_engine.py   # NLQueryEngine — NL → MongoDB aggregation pipeline (POST /nl-query)
-  services/              # risk_service.py (calculate_criticite), ldap_service.py, ldif_parser.py,
+  services/              # risk_service.py (calculate_criticite), ldap_service.py,
                           # email_service.py, audit_service.py (IP/UA helpers only — see
-                          # "MongoDB Migration Status" re: log_action()), mock_ldap_auth.py,
-                          # password_verification_service.py
+                          # "MongoDB Migration Status" re: log_action()),
+                          # password_verification_service.py — ldif_parser.py and
+                          # mock_ldap_auth.py deleted (Lot C, 2026-07, zero live callers)
   utils/
     date_utils.py        # last_day_of_month(), last_day_int()
     logging.py           # structlog setup
@@ -272,8 +282,8 @@ scripts/
   seed_risks.py, seed_roadmap.py  # Mongo-native, idempotent (see "MongoDB Migration Status")
   # run_agent.py (headless daemon) deleted 2026-07 — see Architecture path note above
 
-tests/                    # ~1020 tests total, 0 skipped
-  unit/                   # 42 files, mocked dependencies
+tests/                    # ~1132 tests total, 0 skipped
+  unit/                   # 44 files, mocked dependencies
   integration/            # test_api_e2e.py (real Mongo test DB + SQLite for get_session
                            # plumbing), test_orchestrator_audit_trail.py, test_avatar_rate_limit.py
   fixtures/make_invoice_pdf.py
@@ -608,10 +618,12 @@ storage:
   `security.py`, ...) — not for the invoice-processing path itself, which is
   Mongo-only. Only the LLM backend is mocked.
 - 5 PyMuPDF C-library `DeprecationWarning`s in test output are harmless — ignore
-- The SQLAlchemy `InvoiceRepository` (`storage/repository.py`) is only
-  imported by `api/routers/review.py` now (a deliberately-kept exception —
-  see "MongoDB Migration Status") — its test mock must include
-  `count_by_status` and `count_auto_approved`
+- The SQLAlchemy `InvoiceRepository` (`storage/repository.py`) is imported
+  by `api/routers/review.py` (a deliberately-kept, live exception — see
+  "MongoDB Migration Status") — its test mock must include
+  `count_by_status` and `count_auto_approved`. It's also imported locally
+  by `notifications/notification_service.py`, but that module itself has
+  zero live callers (see Project Structure) — not a second live call site.
 - No `pytest-asyncio`/`pytest-anyio` plugin actually installed despite being a
   listed dependency — drive async code via `asyncio.run(coro)` in plain sync
   test functions, not `async def test_...`.
@@ -682,6 +694,27 @@ except one. Don't re-scope or re-flag these — check here first.
   remaining file with zero implementers) was deleted in this same commit
   alongside `FolderWatcher` — there is no `backend/src/ingestion/`
   directory left at all as of Lot B.
+- Lot C (2026-07): 3 more confirmed-dead pieces removed. (A) 5 of 6
+  SQLAlchemy ORM classes in `orm_models_projects.py` (`CharteProjetORM`,
+  `PhaseORM`, `FicheMensuelleORM`, `FichePhaseORM`, `AvanceProgrammeeORM`)
+  — zero live callers, superseded by their Beanie `*Document` equivalents;
+  `AssetProjectLinkORM` kept (still used by `capex/asset_repository.py`).
+  Removing `PhaseORM` broke a dangling `ForeignKey("phases.id")` on
+  `LivrableORM` (`orm_models_roadmap.py`) — caught by the full test suite,
+  fixed by dropping the constraint (that class is itself dead code too,
+  same pattern, out of scope for this lot). (B) The orphaned mock-LDAP
+  path — `services/mock_ldap_auth.py`, `services/ldif_parser.py`,
+  `mock_ldap_data/`, `tests/unit/test_ldif_mock.py` — zero live callers;
+  the real LDAP path (`ldap_service.py`) was unaffected. (C) The stale
+  `ingestion/`-not-yet-deleted claim in this file (see Architecture note
+  above). Also this pass: the unverified "BCT Circulaire 2025-13" citation
+  removed from 3 docstrings in the audit module (`api/routers/audit.py`,
+  `src/models/audit.py`, the `9f69d0021e84` Alembic migration) — it
+  justified the audit log's append-only behavior and enriched schema, but
+  couldn't be verified against a real BCT text; removed without a
+  substitute citation per project owner's decision. Generic "BCT" mentions
+  (the institution name) are unaffected and remain throughout the audit
+  code.
 
 **Still open:**
 - Refresh token rotation (jti reusable up to 7 days) — explicitly deprioritized
