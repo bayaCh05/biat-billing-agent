@@ -12,6 +12,7 @@ comme test_ai_agents.py le fait déjà pour AnomalyAgent.
 """
 from __future__ import annotations
 
+from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
@@ -611,6 +612,63 @@ class TestRagIndexingAndRetrieval:
         alert_codes = [a["code"] for a in result.output["alerts"]]
         assert alert_codes == ["HIGH_REJECTION_RATE"]
         assert saved["snapshot"]["similar_incidents"] == []
+
+    def test_indexing_exception_is_caught_and_does_not_break_run(self, monkeypatch):
+        """Une panne ChromaDB pendant l'indexation ne doit jamais faire
+        échouer tout le run — même garantie que pour la collecte des
+        métriques/rapprochement (dégradation partielle, jamais un crash)."""
+        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+
+        _patch_kpis(monkeypatch)
+        _patch_save_snapshot(monkeypatch)
+        monkeypatch.setattr(
+            sync_mongo_repository, "get_latest_snapshot_sync",
+            lambda granularity: {"granularity": granularity, "metrics": {}, "generated_at": "T0"},
+        )
+        monkeypatch.setattr(
+            sync_mongo_repository, "risques_created_since_sync",
+            lambda since: (_ for _ in ()).throw(RuntimeError("chromadb write failed")),
+        )
+        fake_store = MagicMock()
+        fake_store.available = True
+        monkeypatch.setattr(PCEVectorStore, "get", staticmethod(lambda: fake_store))
+
+        result = AuditAgent().run({"granularity": "DAILY"})
+
+        assert result.success is True
+
+
+class TestResolvePeriod:
+    """_resolve_period() n'était exercé que pour DAILY via run() — WEEKLY et
+    MONTHLY (y compris le rollover décembre → janvier) n'avaient aucun test."""
+
+    def test_daily_period_is_a_single_day(self):
+        start, end = AuditAgent()._resolve_period("DAILY")
+        assert start.date() == end.date()
+        assert start.tzinfo is not None
+
+    def test_weekly_period_spans_monday_to_sunday(self):
+        start, end = AuditAgent()._resolve_period("WEEKLY")
+        assert start.weekday() == 0  # lundi
+        assert (end - start).days == 6
+
+    def test_monthly_period_spans_full_calendar_month(self, monkeypatch):
+        import src.ai_agents.audit_agent as module
+
+        monkeypatch.setattr(module, "date", MagicMock(today=lambda: date(2026, 3, 15)))
+        start, end = AuditAgent()._resolve_period("MONTHLY")
+
+        assert (start.year, start.month, start.day) == (2026, 3, 1)
+        assert (end.year, end.month, end.day) == (2026, 3, 31)
+
+    def test_monthly_period_handles_december_year_rollover(self, monkeypatch):
+        import src.ai_agents.audit_agent as module
+
+        monkeypatch.setattr(module, "date", MagicMock(today=lambda: date(2026, 12, 10)))
+        start, end = AuditAgent()._resolve_period("MONTHLY")
+
+        assert (start.year, start.month, start.day) == (2026, 12, 1)
+        assert (end.year, end.month, end.day) == (2026, 12, 31)
 
 
 class TestAgentNeverCallsOtherAgents:
