@@ -11,19 +11,31 @@ comptable qui l'écrit.
 Lot 1 : métriques par domaine + tendance vs snapshot précédent de même
 granularité + alertes à seuils déterministes.
 
-Lot 2 (ce fichier, 2026-07) : rapprochement transversal facture ↔ échéancier
-↔ budget ↔ journal (_cross_check()) — comble des trous que les métriques
-Lot 1 ne couvraient pas (ex: journal_consistency_check_sync vérifie
-débit=crédit par écriture, jamais qu'une facture JOURNALED a une écriture du
-tout). Toujours 100% déterministe. AUCUN RAG (Lot 3), AUCUNE synthèse LLM
-(Lot 3) — narrative_summary/similar_incidents restent vides à ce stade.
+Lot 2 : rapprochement transversal facture ↔ échéancier ↔ budget ↔ journal
+(_cross_check()) — comble des trous que les métriques Lot 1 ne couvraient
+pas (ex: journal_consistency_check_sync vérifie débit=crédit par écriture,
+jamais qu'une facture JOURNALED a une écriture du tout). Toujours 100%
+déterministe.
+
+Lot 3 (ce fichier, 2026-07) : enrichissement narratif par RAG. L'agent
+indexe lui-même (jamais RiskAgent/AnomalyAgent) les risques et anomalies
+créés depuis le dernier snapshot dans une collection ChromaDB dédiée
+(audit_incidents, voir rag/pce_vectorstore.py), retrouve les incidents
+passés similaires aux alertes du jour, et ne demande au LLM QU'UNE
+synthèse en langage naturel à partir de métriques déjà calculées et
+d'incidents déjà retrouvés — jamais un calcul ou une estimation de chiffre
+(voir _build_narrative_prompt()). Le RAG est un outil de récupération : il
+n'influence aucune alerte, toutes déjà décidées avant qu'il n'intervienne.
 
 Perception/Décision/Action (Russell-Norvig, voir design validé) :
-  - Perception  : _collect_metrics(), _cross_check(), _get_previous_snapshot()
-    — lecture seule via sync_mongo_repository.py, jamais d'appel à un autre agent.
+  - Perception  : _collect_metrics(), _cross_check(), _get_previous_snapshot(),
+    _retrieve_similar_incidents() — lecture seule via sync_mongo_repository.py
+    et ChromaDB, jamais d'appel à un autre agent.
   - Décision    : _compute_trend(), _evaluate_alerts(), _evaluate_reconciliation_alerts()
     — règles à seuils déterministes, zéro LLM.
-  - Action      : persistance du AuditSnapshotDocument (save_audit_snapshot_sync).
+  - Action      : _index_new_incidents() (écriture ChromaDB), _generate_narrative()
+    (texte, jamais de chiffre), persistance du AuditSnapshotDocument
+    (save_audit_snapshot_sync).
 """
 from __future__ import annotations
 
@@ -61,7 +73,13 @@ class AuditAgent(BaseAgent):
             trend = self._compute_trend(metrics, previous)
             alerts = self._evaluate_alerts(metrics)
             alerts += self._evaluate_reconciliation_alerts(reconciliation)
-            degraded = metrics_degraded or reconciliation_degraded
+
+            self._index_new_incidents(previous)
+            similar_incidents = self._retrieve_similar_incidents(alerts)
+            narrative_summary, narrative_degraded = self._generate_narrative(
+                metrics, trend, alerts, similar_incidents
+            )
+            degraded = metrics_degraded or reconciliation_degraded or narrative_degraded
 
             from src.storage.sync_mongo_repository import save_audit_snapshot_sync
             snapshot_id = save_audit_snapshot_sync({
@@ -73,6 +91,8 @@ class AuditAgent(BaseAgent):
                 "trend": trend,
                 "alerts": alerts,
                 "reconciliation": reconciliation,
+                "similar_incidents": similar_incidents,
+                "narrative_summary": narrative_summary,
             })
 
             logger.info(
@@ -167,6 +187,67 @@ class AuditAgent(BaseAgent):
                 reconciliation[check] = None
                 degraded = True
         return reconciliation, degraded
+
+    def _index_new_incidents(self, previous: dict | None) -> None:
+        """Indexe dans ChromaDB (audit_incidents) les risques/anomalies créés
+        depuis le dernier snapshot de même granularité. Rien à indexer au tout
+        premier run (previous is None) — l'historique complet se peuple une
+        fois via scripts/backfill_audit_incidents.py, jamais dans ce job
+        périodique (coût d'indexation potentiellement important sur un
+        historique jamais indexé — voir ce script pour le détail)."""
+        if previous is None:
+            return
+
+        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+        store = PCEVectorStore.get()
+        if not store.available:
+            return
+
+        since = previous.get("generated_at")
+        from src.storage.sync_mongo_repository import (
+            invoice_flags_created_since_sync, risques_created_since_sync,
+        )
+
+        try:
+            for r in risques_created_since_sync(since):
+                store.index_incident(
+                    "risque", r["_id"],
+                    f"{r.get('titre', '')} {r.get('description', '')}".strip(),
+                    {"date": str(r.get("created_at", "")), "severity": r.get("niveau_criticite", "")},
+                )
+            for f in invoice_flags_created_since_sync(since):
+                store.index_incident(
+                    "anomaly", f.get("flag_id") or f"{f['invoice_id']}:{f.get('flag_type', '')}",
+                    f"{f.get('flag_type', '')} {f.get('message', '')}".strip(),
+                    {"date": str(f.get("created_at", "")), "severity": f.get("severity", "")},
+                )
+        except Exception:
+            logger.warning("audit_agent_indexing_error", exc_info=True)
+
+    def _retrieve_similar_incidents(self, alerts: list[dict]) -> list[dict]:
+        """RAG : jusqu'à 3 incidents passés similaires par alerte CRITICAL/
+        WARNING. Retrieval seul — n'influence aucune alerte, toutes déjà
+        décidées avant cet appel (voir docstring de module)."""
+        if not alerts:
+            return []
+        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+        store = PCEVectorStore.get()
+        if not store.available:
+            return []
+
+        similar: list[dict] = []
+        for alert in alerts:
+            try:
+                found = store.search_similar_incidents(
+                    alert["message"], n_results=3, min_similarity=0.75
+                )
+            except Exception:
+                logger.warning(
+                    "audit_agent_retrieval_error alert_code=%s", alert.get("code"), exc_info=True
+                )
+                continue
+            similar.extend({**item, "related_alert_code": alert["code"]} for item in found)
+        return similar
 
     # ── Décision ──────────────────────────────────────────────────────────────
 
@@ -310,3 +391,57 @@ class AuditAgent(BaseAgent):
             })
 
         return alerts
+
+    # ── Action (RAG déjà récupéré ci-dessus, texte à produire ici) ─────────────
+
+    def _generate_narrative(
+        self, metrics: dict, trend: dict, alerts: list[dict], similar_incidents: list[dict],
+    ) -> tuple[str | None, bool]:
+        """Synthèse en langage naturel — le LLM ne reçoit QUE des métriques déjà
+        calculées et des incidents déjà retrouvés par le RAG ; il ne recalcule
+        ni n'invente aucun chiffre (voir _build_narrative_prompt()).
+        Retourne (résumé | None, narrative_degraded: bool)."""
+        from src.ai_agents.ollama_client import OllamaClient
+        if not OllamaClient.get().is_available():
+            return None, True
+
+        prompt = self._build_narrative_prompt(metrics, trend, alerts, similar_incidents)
+        raw = self._call_ollama(prompt, temperature=0.3, max_tokens=250)
+        if not raw:
+            return None, True
+        return raw.strip(), False
+
+    def _build_narrative_prompt(
+        self, metrics: dict, trend: dict, alerts: list[dict], similar_incidents: list[dict],
+    ) -> str:
+        lines = [
+            "Voici les métriques d'audit de la période (ne les recalcule pas, "
+            "utilise-les telles quelles) :"
+        ]
+        for domain, values in metrics.items():
+            if values:
+                lines.append(f"- {domain}: {values}")
+
+        if trend:
+            lines.append("\nTendance vs la période précédente de même granularité :")
+            for domain, deltas in trend.items():
+                lines.append(f"- {domain}: {deltas}")
+
+        if alerts:
+            lines.append("\nAlertes détectées :")
+            for a in alerts:
+                lines.append(f"- [{a['severity']}] {a['message']}")
+        else:
+            lines.append("\nAucune alerte détectée sur cette période.")
+
+        if similar_incidents:
+            lines.append("\nIncidents similaires trouvés dans l'historique :")
+            for inc in similar_incidents[:5]:
+                lines.append(f"- ({inc.get('date', '?')}) {inc.get('excerpt', '')}")
+
+        lines.append(
+            "\nRédige une synthèse de 5 phrases maximum en français, factuelle et directe, "
+            "à destination de la direction. N'invente et ne recalcule aucun chiffre — "
+            "utilise exactement les valeurs données ci-dessus."
+        )
+        return "\n".join(lines)

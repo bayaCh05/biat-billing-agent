@@ -210,7 +210,9 @@ src/
     risk_agent.py, insight_agent.py  # secondary flows (roadmap risk scan, health-summary)
     rag/
       embedder.py         # PCEEmbedder (sentence-transformers)
-      pce_vectorstore.py  # PCEVectorStore (ChromaDB) — used by Classification Pass C
+      pce_vectorstore.py  # PCEVectorStore (ChromaDB, 3 collections) — Classification Pass C
+                          # (pce_catalog), AnomalyAgent semantic dedup (invoice_embeddings),
+                          # AuditAgent narrative RAG (audit_incidents, see "Audit Agent" below)
       rag_classifier.py   # RAGClassifier — top-K similarity lookup
   models/
     invoice.py           # InvoiceRecord with ConfidenceField[T] generics
@@ -280,6 +282,9 @@ scripts/
   make_realistic_invoice.py  # demo PDF generator
   seed_demo.py, seed_users.py, seed_budget_actuals.py, seed_projects.py,
   seed_risks.py, seed_roadmap.py  # Mongo-native, idempotent (see "MongoDB Migration Status")
+  backfill_audit_incidents.py  # one-off: indexes ALL past risks/anomalies into ChromaDB's
+                                # audit_incidents collection — see "Audit Agent" below for why
+                                # this is separate from the nightly audit_daily job
   # run_agent.py (headless daemon) deleted 2026-07 — see Architecture path note above
 
 tests/                    # ~1132 tests total, 0 skipped
@@ -462,7 +467,7 @@ All 5 jobs are Mongo-native as of 2026-07.
 | `_job_scan_roadmap_risks` | nightly (8am) | Mongo (`RiskAgent._scan_roadmap_async`, bridged via `asyncio.run()`) |
 | `_job_audit_daily` | nightly (2am) | Mongo (`AuditAgent.run({"granularity": "DAILY"})` — see "Audit Agent" below) |
 
-### Audit Agent (`src/ai_agents/audit_agent.py` — Lot 2, 2026-07, in progress)
+### Audit Agent (`src/ai_agents/audit_agent.py` — Lot 3, 2026-07, in progress)
 
 Separate, periodic, corpus-wide audit component — deliberately distinct from
 `InvoiceProcessingOrchestrator` (real-time, per-invoice). **Never calls any
@@ -491,10 +496,29 @@ current state, not filtered to the snapshot's period (same as
 `MISSING_INSTALLMENT_PLAN`, `LATE_INSTALLMENT_NOT_FLAGGED`,
 `JOURNALED_WITHOUT_ENTRY`, `DUPLICATE_JOURNAL_ENTRY`, `AMOUNT_MISMATCH_JOURNAL`.
 
-`similar_incidents` (ChromaDB RAG — Lot 3) and `narrative_summary` (LLM —
-Lot 3) remain reserved fields, always empty/`None` at this stage. Only
-`_job_audit_daily` is wired into `scheduler.py`; `WEEKLY`/`MONTHLY` jobs and
-the `/audit-reports` API router are not yet implemented (Lots 4+).
+**Lot 3 (this state)**: RAG narrative enrichment. `PCEVectorStore`
+(`rag/pce_vectorstore.py`) gained a 3rd ChromaDB collection, `audit_incidents`
+— `index_incident()`/`search_similar_incidents()`. `AuditAgent` indexes it
+itself (`_index_new_incidents()`, never `RiskAgent`/`AnomalyAgent` writing to
+it directly): risks (`risques_created_since_sync`) and anomaly flags
+(`invoice_flags_created_since_sync`, `$unwind` on the embedded
+`invoices.flags` array — not a `$lookup`) created since the previous
+snapshot of the same granularity. Nothing is indexed on the very first run
+(no previous snapshot) — historical backfill is a separate, one-off script,
+`scripts/backfill_audit_incidents.py`, deliberately kept out of the nightly
+job (unpredictable one-time indexing cost). `_retrieve_similar_incidents()`
+looks up up to 3 similar past incidents per alert (similarity > 0.75) —
+pure retrieval, it does not add/suppress any alert (all already decided
+beforehand). `_generate_narrative()` is the only LLM call: the prompt
+(`_build_narrative_prompt()`) contains only already-computed metrics/trend/
+alerts/incidents and explicitly forbids the model from computing or
+inventing any number — same pattern as `InsightAgent._health_summary`.
+`narrative_summary`/`similar_incidents` are `None`/`[]` when Ollama or
+ChromaDB is unavailable, and this now also sets `status = "DEGRADED"` (by
+design — a missing narrative is a real degradation, not a silent no-op).
+
+Only `_job_audit_daily` is wired into `scheduler.py`; `WEEKLY`/`MONTHLY`
+jobs and the `/audit-reports` API router are not yet implemented (Lot 4+).
 
 ### Conventions — read before writing any Mongo code
 

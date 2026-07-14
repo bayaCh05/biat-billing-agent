@@ -942,6 +942,40 @@ def invoices_journal_mismatch_sync() -> dict:
     }
 
 
+# ── Incidents pour le RAG narratif (Audit Agent, Lot 3) ──────────────────────
+# Lecture seule — l'Audit Agent indexe ensuite lui-même dans ChromaDB
+# (PCEVectorStore.index_incident), jamais RiskAgent/AnomalyAgent directement.
+
+def risques_created_since_sync(since: datetime | None) -> list[dict]:
+    """Risques créés depuis `since` (tous si None) — indexation RAG incrémentale."""
+    coll = _get_db()["risques"]
+    query = {"created_at": {"$gte": since}} if since else {}
+    return list(coll.find(
+        query, {"titre": 1, "description": 1, "niveau_criticite": 1, "created_at": 1}
+    ))
+
+
+def invoice_flags_created_since_sync(since: datetime | None) -> list[dict]:
+    """Anomalies (ValidationFlagEmbed, embarquées dans invoices.flags) créées
+    depuis `since` (toutes si None) — indexation RAG incrémentale.
+
+    $unwind sur un sous-document embarqué d'UNE collection, pas un $lookup
+    inter-collections (toujours interdit, cf. NLQueryEngine._is_safe())."""
+    coll = _get_db()["invoices"]
+    pipeline: list[dict] = [{"$unwind": "$flags"}]
+    if since:
+        pipeline.append({"$match": {"flags.created_at": {"$gte": since}}})
+    pipeline.append({"$project": {
+        "flag_id": "$flags.id",
+        "invoice_id": "$_id",
+        "flag_type": "$flags.flag_type",
+        "message": "$flags.message",
+        "severity": "$flags.severity",
+        "created_at": "$flags.created_at",
+    }})
+    return list(coll.aggregate(pipeline))
+
+
 # ── Audit Agent (rapport transversal périodique) ─────────────────────────────
 # Voir ai_agents/audit_agent.py — l'Audit Agent ne lit QUE ce que les autres
 # agents ont déjà écrit ; il ne les appelle jamais directement.

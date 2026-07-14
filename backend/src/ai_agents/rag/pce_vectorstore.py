@@ -1,7 +1,10 @@
 """ChromaDB persistent vectorstore for PCE catalog entries.
 
-Also holds a separate collection for invoice embeddings used in
-semantic duplicate detection.
+Also holds two more collections: invoice embeddings (semantic duplicate
+detection) and audit incidents (RisqueDocument descriptions + past anomaly
+flag messages, indexed by AuditAgent for its narrative RAG — never written
+to by AnomalyAgent/RiskAgent directly, see audit_agent.py's module docstring
+on why the Audit Agent owns its own indexing).
 """
 from __future__ import annotations
 
@@ -18,10 +21,12 @@ logger = logging.getLogger(__name__)
 _CHROMADB_PATH = os.getenv("CHROMADB_PATH", "./data/chromadb")
 _PCE_COLLECTION = "pce_catalog"
 _INVOICE_COLLECTION = "invoice_embeddings"
+_INCIDENT_COLLECTION = "audit_incidents"
 
 
 class PCEVectorStore:
-    """Manages two ChromaDB collections: PCE catalog + invoice embeddings."""
+    """Manages three ChromaDB collections: PCE catalog, invoice embeddings,
+    audit incidents (past risks/anomalies, for AuditAgent's narrative RAG)."""
 
     _instance: "PCEVectorStore | None" = None
     _lock = threading.Lock()
@@ -30,6 +35,7 @@ class PCEVectorStore:
         self._client = None
         self._pce_col = None
         self._inv_col = None
+        self._incident_col = None
         self._available = False
         self._init_client()
 
@@ -52,6 +58,10 @@ class PCEVectorStore:
             )
             self._inv_col = self._client.get_or_create_collection(
                 name=_INVOICE_COLLECTION,
+                metadata={"hnsw:space": "cosine"},
+            )
+            self._incident_col = self._client.get_or_create_collection(
+                name=_INCIDENT_COLLECTION,
                 metadata={"hnsw:space": "cosine"},
             )
             self._available = True
@@ -189,4 +199,66 @@ class PCEVectorStore:
             return results[:n_results]
         except Exception as exc:
             logger.warning("invoice_search_error: %s", exc)
+            return []
+
+    # ── Audit incidents (AuditAgent narrative RAG) ────────────────────────────
+
+    def index_incident(self, source_type: str, source_id: str, text: str,
+                        metadata: dict) -> None:
+        """Upsert un incident passé (risque ou anomalie) — appelé uniquement
+        par AuditAgent._index_new_incidents(), jamais par RiskAgent/AnomalyAgent
+        directement (voir audit_agent.py)."""
+        if not self._available:
+            return
+        from src.ai_agents.rag.embedder import PCEEmbedder
+        vec = PCEEmbedder.get().embed(text)
+        if vec is None:
+            return
+        doc_id = f"{source_type}:{source_id}"
+        try:
+            existing = self._incident_col.get(ids=[doc_id])
+            if existing["ids"]:
+                self._incident_col.delete(ids=[doc_id])
+            self._incident_col.add(
+                ids=[doc_id], embeddings=[vec], documents=[text],
+                metadatas=[{"source_type": source_type, "source_id": source_id, **metadata}],
+            )
+        except Exception as exc:
+            logger.warning("incident_index_error: %s", exc)
+
+    def search_similar_incidents(self, query_text: str, n_results: int = 3,
+                                  min_similarity: float = 0.75) -> list[dict]:
+        """Incidents passés similaires (risques/anomalies) pour enrichir la
+        synthèse narrative d'un rapport d'audit. Retrieval seul — n'influence
+        aucune alerte déterministe déjà décidée (voir audit_agent.py)."""
+        if not self._available or self._incident_col.count() == 0:
+            return []
+        from src.ai_agents.rag.embedder import PCEEmbedder
+        vec = PCEEmbedder.get().embed(query_text)
+        if vec is None:
+            return []
+        try:
+            count = self._incident_col.count()
+            res = self._incident_col.query(
+                query_embeddings=[vec],
+                n_results=min(n_results, count),
+                include=["documents", "metadatas", "distances"],
+            )
+            results = []
+            for doc, meta, dist in zip(
+                res["documents"][0], res["metadatas"][0], res["distances"][0]
+            ):
+                similarity = round(1 - dist, 4)
+                if similarity < min_similarity:
+                    continue
+                results.append({
+                    "source_type": meta.get("source_type"),
+                    "source_id": meta.get("source_id"),
+                    "date": meta.get("date"),
+                    "similarity": similarity,
+                    "excerpt": doc[:200],
+                })
+            return results
+        except Exception as exc:
+            logger.warning("incident_search_error: %s", exc)
             return []

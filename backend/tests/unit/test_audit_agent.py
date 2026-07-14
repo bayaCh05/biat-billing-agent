@@ -1,14 +1,18 @@
 """Unit tests — AuditAgent : métriques par domaine (Lot 1), rapprochement
-transversal facture ↔ échéancier ↔ budget ↔ journal (Lot 2), tendance vs
-snapshot précédent, alertes déterministes. Aucun RAG, aucune synthèse LLM à
-ce stade (Lot 3) — narrative_summary/similar_incidents ne sont pas exercés ici.
+transversal facture ↔ échéancier ↔ budget ↔ journal (Lot 2), enrichissement
+RAG + synthèse LLM (Lot 3), tendance vs snapshot précédent, alertes
+déterministes.
 
 Toutes les dépendances Mongo sont monkeypatchées au niveau du module
 src.storage.sync_mongo_repository — AuditAgent les importe localement à
 chaque appel, donc patcher l'attribut du module suffit (même pattern que
-test_orchestrator_audit_trail.py pour les agents du pipeline).
+test_orchestrator_audit_trail.py pour les agents du pipeline). ChromaDB et
+Ollama sont mockés à la frontière (PCEVectorStore.get()/OllamaClient.get()),
+comme test_ai_agents.py le fait déjà pour AnomalyAgent.
 """
 from __future__ import annotations
+
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -40,6 +44,25 @@ def _default_reconciliation(monkeypatch):
             "amount_mismatch_count": 0, "amount_mismatch": [],
         },
     )
+
+
+@pytest.fixture(autouse=True)
+def _default_rag_and_llm(monkeypatch):
+    """Par défaut : ChromaDB indisponible (RAG désactivé, comme le reste du
+    projet en dégradé) et Ollama disponible avec une synthèse bidon — le
+    "happy path" reste status=OK. Les tests Lot 3 dédiés surchargent l'un ou
+    l'autre explicitement."""
+    from src.ai_agents.ollama_client import OllamaClient
+    from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+
+    fake_store = MagicMock()
+    fake_store.available = False
+    monkeypatch.setattr(PCEVectorStore, "get", staticmethod(lambda: fake_store))
+
+    fake_ollama = MagicMock()
+    fake_ollama.is_available.return_value = True
+    fake_ollama.complete.return_value = "Synthèse de test."
+    monkeypatch.setattr(OllamaClient, "get", staticmethod(lambda: fake_ollama))
 
 
 def _patch_kpis(monkeypatch, *, invoices=None, journal=None, budget=None,
@@ -390,6 +413,204 @@ class TestReconciliation:
         assert saved["snapshot"]["reconciliation"]["journal_mismatch"] is None
         # other reconciliation checks still ran despite the journal_mismatch failure
         assert saved["snapshot"]["reconciliation"]["overdue_without_installment_plan"] is not None
+
+
+class TestNarrativeGeneration:
+    def test_narrative_persisted_when_ollama_available(self, monkeypatch):
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        saved = _patch_save_snapshot(monkeypatch)
+
+        result = AuditAgent().run({"granularity": "DAILY"})
+
+        assert saved["snapshot"]["narrative_summary"] == "Synthèse de test."
+        assert result.output["degraded"] is False
+        assert saved["snapshot"]["status"] == "OK"
+
+    def test_narrative_none_and_degraded_when_ollama_unavailable(self, monkeypatch):
+        from src.ai_agents.ollama_client import OllamaClient
+
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        saved = _patch_save_snapshot(monkeypatch)
+
+        fake_ollama = MagicMock()
+        fake_ollama.is_available.return_value = False
+        monkeypatch.setattr(OllamaClient, "get", staticmethod(lambda: fake_ollama))
+
+        result = AuditAgent().run({"granularity": "DAILY"})
+
+        assert saved["snapshot"]["narrative_summary"] is None
+        assert result.output["degraded"] is True
+        assert saved["snapshot"]["status"] == "DEGRADED"
+
+    def test_narrative_none_and_degraded_when_llm_returns_empty(self, monkeypatch):
+        from src.ai_agents.ollama_client import OllamaClient
+
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        saved = _patch_save_snapshot(monkeypatch)
+
+        fake_ollama = MagicMock()
+        fake_ollama.is_available.return_value = True
+        fake_ollama.complete.return_value = None
+        monkeypatch.setattr(OllamaClient, "get", staticmethod(lambda: fake_ollama))
+
+        result = AuditAgent().run({"granularity": "DAILY"})
+
+        assert saved["snapshot"]["narrative_summary"] is None
+        assert result.output["degraded"] is True
+
+    def test_prompt_never_asks_llm_to_compute_only_to_synthesize(self, monkeypatch):
+        """Vérifie que le prompt contient bien les métriques déjà calculées et
+        l'instruction explicite de ne pas recalculer — pas une preuve totale
+        que le LLM obéira, mais une garantie que le prompt le lui interdit."""
+        from src.ai_agents.ollama_client import OllamaClient
+
+        _patch_kpis(monkeypatch, invoices={"pending_count": 7, "rejection_rate": 12.0})
+        _patch_no_previous_snapshot(monkeypatch)
+        _patch_save_snapshot(monkeypatch)
+
+        fake_ollama = MagicMock()
+        fake_ollama.is_available.return_value = True
+        fake_ollama.complete.return_value = "Synthèse."
+        monkeypatch.setattr(OllamaClient, "get", staticmethod(lambda: fake_ollama))
+
+        AuditAgent().run({"granularity": "DAILY"})
+
+        prompt = fake_ollama.complete.call_args.kwargs["prompt"]
+        assert "pending_count" in prompt or "7" in prompt
+        assert "ne recalcule aucun chiffre" in prompt.lower() or "n'invente" in prompt.lower()
+
+
+class TestRagIndexingAndRetrieval:
+    def test_no_indexing_on_first_run_without_previous_snapshot(self, monkeypatch):
+        """Pas de previous snapshot → rien à indexer (voir docstring
+        _index_new_incidents : l'historique se peuple via le script de
+        backfill, jamais dans ce job périodique)."""
+        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        _patch_save_snapshot(monkeypatch)
+
+        fake_store = MagicMock()
+        fake_store.available = True
+        monkeypatch.setattr(PCEVectorStore, "get", staticmethod(lambda: fake_store))
+
+        AuditAgent().run({"granularity": "DAILY"})
+
+        fake_store.index_incident.assert_not_called()
+
+    def test_indexes_risques_and_flags_created_since_previous_snapshot(self, monkeypatch):
+        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+
+        _patch_kpis(monkeypatch)
+        _patch_save_snapshot(monkeypatch)
+        monkeypatch.setattr(
+            sync_mongo_repository, "get_latest_snapshot_sync",
+            lambda granularity: {"granularity": granularity, "metrics": {}, "generated_at": "T0"},
+        )
+        monkeypatch.setattr(
+            sync_mongo_repository, "risques_created_since_sync",
+            lambda since: [{"_id": "r1", "titre": "Retard", "description": "desc",
+                             "niveau_criticite": "ELEVE", "created_at": "T1"}],
+        )
+        monkeypatch.setattr(
+            sync_mongo_repository, "invoice_flags_created_since_sync",
+            lambda since: [{"flag_id": "f1", "invoice_id": "inv-1", "flag_type": "SUSPICIOUS_AMOUNT",
+                             "message": "montant élevé", "severity": "WARNING", "created_at": "T2"}],
+        )
+
+        fake_store = MagicMock()
+        fake_store.available = True
+        monkeypatch.setattr(PCEVectorStore, "get", staticmethod(lambda: fake_store))
+
+        AuditAgent().run({"granularity": "DAILY"})
+
+        assert fake_store.index_incident.call_count == 2
+        calls = {c.args[0]: c for c in fake_store.index_incident.call_args_list}
+        assert "risque" in calls
+        assert "anomaly" in calls
+        assert calls["risque"].args[1] == "r1"
+        assert calls["anomaly"].args[1] == "f1"
+
+    def test_no_indexing_when_chromadb_unavailable(self, monkeypatch):
+        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+
+        _patch_kpis(monkeypatch)
+        _patch_save_snapshot(monkeypatch)
+        monkeypatch.setattr(
+            sync_mongo_repository, "get_latest_snapshot_sync",
+            lambda granularity: {"granularity": granularity, "metrics": {}, "generated_at": "T0"},
+        )
+
+        fake_store = MagicMock()
+        fake_store.available = False
+        monkeypatch.setattr(PCEVectorStore, "get", staticmethod(lambda: fake_store))
+
+        AuditAgent().run({"granularity": "DAILY"})
+
+        fake_store.index_incident.assert_not_called()
+
+    def test_retrieves_similar_incidents_per_alert_above_threshold(self, monkeypatch):
+        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+
+        _patch_kpis(monkeypatch, invoices={"pending_count": 10, "rejection_rate": 20.0})
+        _patch_no_previous_snapshot(monkeypatch)
+        saved = _patch_save_snapshot(monkeypatch)
+
+        fake_store = MagicMock()
+        fake_store.available = True
+        fake_store.search_similar_incidents.return_value = [
+            {"source_type": "anomaly", "source_id": "f9", "date": "2026-06-01",
+             "similarity": 0.88, "excerpt": "Taux de rejet déjà élevé le mois dernier."},
+        ]
+        monkeypatch.setattr(PCEVectorStore, "get", staticmethod(lambda: fake_store))
+
+        AuditAgent().run({"granularity": "DAILY"})
+
+        similar = saved["snapshot"]["similar_incidents"]
+        assert len(similar) == 1
+        assert similar[0]["related_alert_code"] == "HIGH_REJECTION_RATE"
+        assert similar[0]["source_id"] == "f9"
+
+    def test_no_retrieval_when_no_alerts(self, monkeypatch):
+        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        saved = _patch_save_snapshot(monkeypatch)
+
+        fake_store = MagicMock()
+        fake_store.available = True
+        monkeypatch.setattr(PCEVectorStore, "get", staticmethod(lambda: fake_store))
+
+        AuditAgent().run({"granularity": "DAILY"})
+
+        fake_store.search_similar_incidents.assert_not_called()
+        assert saved["snapshot"]["similar_incidents"] == []
+
+    def test_rag_never_suppresses_or_adds_alerts(self, monkeypatch):
+        """Le RAG est un outil de récupération, pas une boucle de décision —
+        peu importe ce que search_similar_incidents renvoie, les alertes
+        déterministes restent inchangées (voir docstring de module)."""
+        from src.ai_agents.rag.pce_vectorstore import PCEVectorStore
+
+        _patch_kpis(monkeypatch, invoices={"pending_count": 10, "rejection_rate": 20.0})
+        _patch_no_previous_snapshot(monkeypatch)
+        saved = _patch_save_snapshot(monkeypatch)
+
+        fake_store = MagicMock()
+        fake_store.available = True
+        fake_store.search_similar_incidents.side_effect = RuntimeError("chromadb query failed")
+        monkeypatch.setattr(PCEVectorStore, "get", staticmethod(lambda: fake_store))
+
+        result = AuditAgent().run({"granularity": "DAILY"})
+
+        alert_codes = [a["code"] for a in result.output["alerts"]]
+        assert alert_codes == ["HIGH_REJECTION_RATE"]
+        assert saved["snapshot"]["similar_incidents"] == []
 
 
 class TestAgentNeverCallsOtherAgents:
