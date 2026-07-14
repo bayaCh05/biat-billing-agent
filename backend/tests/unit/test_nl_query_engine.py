@@ -6,7 +6,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.query.nl_query_engine import NLQueryEngine
+from src.query.nl_query_engine import NLQueryEngine, _build_system_prompt
+
+
+# ── System prompt content ─────────────────────────────────────────────────────
+
+class TestBuildSystemPrompt:
+    def test_includes_year_filter_example_for_assets(self):
+        """Regression test — without a worked example for filtering by
+        acquisition year, qwen2.5:3b fell back to `new Date(...)` (invalid
+        JSON) for questions like "Actifs CAPEX acquis en 2026" (2026-07)."""
+        prompt = _build_system_prompt()
+        assert "acquisition_date" in prompt
+        assert "new Date(...)" in prompt  # named explicitly as forbidden
+        assert '"$gte": "2026-01-01"' in prompt
 
 
 # ── Static / pure methods (no mocking needed) ─────────────────────────────────
@@ -217,12 +230,35 @@ class TestNLQueryEngineQuery:
 
     def test_unparsable_llm_response_returns_error(self):
         nl = NLQueryEngine()
-        with patch.object(nl, "_ask_llm", return_value="not json at all"):
+        with patch.object(nl, "_ask_llm", return_value="not json at all") as mock_ask:
             result = nl.query("Question sans réponse")
 
         assert result["sql"] is None
         assert result["result"] is None
         assert "non parsable" in result["answer"]
+        # Retry attempted once (still invalid) before giving up — see
+        # test_parse_failure_retries_and_succeeds_below for the success case.
+        assert mock_ask.call_count == 2
+
+    def test_parse_failure_retries_and_succeeds_on_second_attempt(self):
+        """Invalid JSON on the first attempt (e.g. `new Date(...)` instead of
+        an ISO string) must trigger one retry, same safety net as exec_error —
+        regression test for the CAPEX assets query bug (2026-07)."""
+        nl = NLQueryEngine()
+        invalid_first = '{"collection": "assets", "pipeline": [{"$match": {"acquisition_date": new Date("2026-01-01")}}]}'
+        valid_second = json.dumps({
+            "collection": "assets",
+            "pipeline": [{"$count": "nb"}],
+            "explanation": "Actifs CAPEX acquis en 2026",
+        })
+        coll = _mock_collection([{"nb": 2}])
+        with patch.object(nl, "_ask_llm", side_effect=[invalid_first, valid_second]) as mock_ask, \
+             patch("src.storage.sync_mongo_repository._get_db", return_value={"assets": coll}):
+            result = nl.query("Actifs CAPEX acquis en 2026")
+
+        assert mock_ask.call_count == 2
+        assert result["result"] == [{"nb": 2}]
+        assert "non parsable" not in result["answer"]
 
     def test_ollama_connection_error_returns_graceful_response(self):
         nl = NLQueryEngine(ollama_url="http://localhost:99999")

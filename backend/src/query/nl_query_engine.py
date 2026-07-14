@@ -155,6 +155,13 @@ Pièges à éviter:
     {{"$group": {{"_id": null, "vnc": {{"$sum": "$vnc"}}}}}},
     {{"$project": {{"_id": 0, "vnc": 1}}}}
   ]
+- Pour filtrer une collection par ANNÉE d'une date (ex: actifs acquis en 2026), utilise
+  TOUJOURS une comparaison $gte/$lt en dates ISO string, jamais new Date(...) ni $eq sur
+  une année exacte. Exemple (actifs CAPEX acquis en 2026) : collection "assets", pipeline:
+  [
+    {{"$match": {{"acquisition_date": {{"$gte": "2026-01-01", "$lt": "2027-01-01"}}}}}},
+    {{"$count": "nb"}}
+  ]
 """
 
 
@@ -194,7 +201,23 @@ class NLQueryEngine:
         parsed = self._parse_llm_response(raw)
 
         if parsed is None:
-            return self._err(question, "Réponse LLM non parsable.", raw[:200])
+            # One automatic retry — JSON invalide dès le premier essai (souvent
+            # un cas non couvert par un exemple du prompt) est tout aussi
+            # corrigeable qu'une erreur d'exécution (voir le retry plus bas
+            # sur exec_error) ; jusqu'ici ce cas n'avait aucun filet de
+            # sécurité et échouait immédiatement.
+            retry_question = (
+                f"{question}\n\n"
+                f"[ERREUR: ta réponse précédente n'était pas un JSON valide]\n"
+                f"[Réponse invalide: {raw[:300]}]\n"
+                "Génère une nouvelle réponse en JSON STRICT uniquement, sans markdown "
+                "ni texte hors JSON. Rappel : les dates sont des chaînes ISO "
+                '"AAAA-MM-JJ", jamais new Date(...) ni ISODate(...).'
+            )
+            raw = self._ask_llm(retry_question)
+            parsed = self._parse_llm_response(raw)
+            if parsed is None:
+                return self._err(question, "Réponse LLM non parsable.", raw[:200])
 
         collection = parsed.get("collection")
         pipeline = parsed.get("pipeline")
