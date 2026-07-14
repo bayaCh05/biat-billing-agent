@@ -71,7 +71,7 @@ Violating this is a compliance failure for a banking subsidiary.
 source .venv/bin/activate
 
 # Run tests — MUST run from repo root, not backend/ (relative config paths break otherwise)
-.venv/bin/pytest backend/                 # ~1132 tests, 0 skipped
+.venv/bin/pytest backend/                 # ~1252 tests, 0 skipped
 .venv/bin/pytest backend/tests/unit/      # unit only
 .venv/bin/pytest backend/tests/integration/  # integration only (needs Tesseract)
 .venv/bin/pytest backend/ --tb=short -q   # compact output
@@ -207,7 +207,8 @@ src/
   ai_agents/
     invoice_processing_orchestrator.py  # ← InvoiceProcessingOrchestrator — the real invoice-processing entry point
     extraction_agent.py, classification_agent.py, anomaly_agent.py, accounting_agent.py
-    risk_agent.py, insight_agent.py  # secondary flows (roadmap risk scan, health-summary)
+    risk_agent.py, insight_agent.py, audit_agent.py  # secondary flows (roadmap risk scan,
+                                                      # health-summary, periodic cross-entity audit)
     rag/
       embedder.py         # PCEEmbedder (sentence-transformers)
       pce_vectorstore.py  # PCEVectorStore (ChromaDB, 3 collections) — Classification Pass C
@@ -287,8 +288,8 @@ scripts/
                                 # this is separate from the nightly audit_daily job
   # run_agent.py (headless daemon) deleted 2026-07 — see Architecture path note above
 
-tests/                    # ~1132 tests total, 0 skipped
-  unit/                   # 44 files, mocked dependencies
+tests/                    # ~1252 tests total, 0 skipped
+  unit/                   # 51 files, mocked dependencies
   integration/            # test_api_e2e.py (real Mongo test DB + SQLite for get_session
                            # plumbing), test_orchestrator_audit_trail.py, test_avatar_rate_limit.py
   fixtures/make_invoice_pdf.py
