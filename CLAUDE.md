@@ -122,7 +122,7 @@ touches it, unlike the dev/prod volume above which requires auth by design).
 > `admin.py`, `users.py`, `security.py`, `billing.py`, `payments.py`, `budget.py`,
 > `capex.py`, `projet_budget.py`, `roadmap.py`, `risks.py`, `livrables.py`,
 > `notifications.py`, `review.py`, `journal.py`, `suivi.py`, `ai.py`, `audit.py`,
-> `kpi.py`, `nl_query.py`, `projects.py`, plus
+> `audit_reports.py`, `kpi.py`, `nl_query.py`, `projects.py`, plus
 > `backend/api/scheduler.py` for nightly jobs). `POST /api/invoices/upload` runs
 > invoices through `backend/src/ai_agents/invoice_processing_orchestrator.py::InvoiceProcessingOrchestrator` (see
 > below) — this is the **only** invoice-processing entry point left. The old
@@ -467,7 +467,7 @@ All 5 jobs are Mongo-native as of 2026-07.
 | `_job_scan_roadmap_risks` | nightly (8am) | Mongo (`RiskAgent._scan_roadmap_async`, bridged via `asyncio.run()`) |
 | `_job_audit_daily` | nightly (2am) | Mongo (`AuditAgent.run({"granularity": "DAILY"})` — see "Audit Agent" below) |
 
-### Audit Agent (`src/ai_agents/audit_agent.py` — Lot 3, 2026-07, in progress)
+### Audit Agent (`src/ai_agents/audit_agent.py` — Lot 4, 2026-07, in progress)
 
 Separate, periodic, corpus-wide audit component — deliberately distinct from
 `InvoiceProcessingOrchestrator` (real-time, per-invoice). **Never calls any
@@ -517,8 +517,24 @@ inventing any number — same pattern as `InsightAgent._health_summary`.
 ChromaDB is unavailable, and this now also sets `status = "DEGRADED"` (by
 design — a missing narrative is a real degradation, not a silent no-op).
 
+**Lot 4 (this state)**: `api/routers/audit_reports.py`, prefix
+`/audit-reports` — deliberately distinct from `/audit`
+(`api/routers/audit.py`, HMAC log integrity) to avoid confusion between the
+two domains. `GET /audit-reports` (paginated list, filterable by
+granularity), `GET /audit-reports/{id}` (full report), `POST
+/audit-reports/run` (manual trigger, Admin-only — synchronous, meant for
+demos alongside the scheduled jobs). All 3 endpoints are plain `def` (not
+`async def`), reading via 3 new sync helpers
+(`list_audit_snapshots_sync`/`count_audit_snapshots_sync`/
+`get_audit_snapshot_by_id_sync`) — same reasoning as `ai.py`'s sync routes
+for sync-only agents (`RiskAgent`, `InsightAgent`): the whole
+`audit_snapshots` domain is written by a sync agent (`AuditAgent`) via raw
+pymongo, so it's read the same way, no Beanie/async involved anywhere in
+this router.
+
 Only `_job_audit_daily` is wired into `scheduler.py`; `WEEKLY`/`MONTHLY`
-jobs and the `/audit-reports` API router are not yet implemented (Lot 4+).
+scheduled jobs and PDF export are not yet implemented (Lot 5, scope to be
+confirmed separately).
 
 ### Conventions — read before writing any Mongo code
 

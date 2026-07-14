@@ -1018,6 +1018,32 @@ def get_latest_snapshot_sync(granularity: str) -> dict | None:
     return rows[0] if rows else None
 
 
+def list_audit_snapshots_sync(
+    granularity: str | None = None, limit: int = 20, skip: int = 0,
+) -> list[dict]:
+    """Liste des AuditSnapshotDocument, plus récents d'abord — pour
+    GET /audit-reports (api/routers/audit_reports.py)."""
+    coll = _get_db()["audit_snapshots"]
+    query = {"granularity": granularity} if granularity else {}
+    return list(
+        coll.find(query).sort("period_start", pymongo.DESCENDING).skip(skip).limit(limit)
+    )
+
+
+def count_audit_snapshots_sync(granularity: str | None = None) -> int:
+    """Total de AuditSnapshotDocument (filtré par granularité si fourni) —
+    pour la pagination de GET /audit-reports."""
+    coll = _get_db()["audit_snapshots"]
+    query = {"granularity": granularity} if granularity else {}
+    return coll.count_documents(query)
+
+
+def get_audit_snapshot_by_id_sync(snapshot_id: str) -> dict | None:
+    """Un AuditSnapshotDocument par id — pour GET /audit-reports/{id}."""
+    coll = _get_db()["audit_snapshots"]
+    return coll.find_one({"_id": snapshot_id})
+
+
 # ── Seed helpers (scripts/seed_demo.py, seed_users.py) ──────────────────────
 # Domaines sans écrivain Mongo dédié avant Lot A5 — les Documents Beanie
 # existent déjà (mongodb.py::_all_document_models()), il ne manquait qu'un
