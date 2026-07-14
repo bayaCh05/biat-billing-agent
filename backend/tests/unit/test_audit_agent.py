@@ -1,7 +1,7 @@
-"""Unit tests — AuditAgent (Lot 1): métriques par domaine, tendance vs
+"""Unit tests — AuditAgent : métriques par domaine (Lot 1), rapprochement
+transversal facture ↔ échéancier ↔ budget ↔ journal (Lot 2), tendance vs
 snapshot précédent, alertes déterministes. Aucun RAG, aucune synthèse LLM à
-ce stade (Lot 3) — narrative_summary/similar_incidents/reconciliation ne
-sont pas exercés ici.
+ce stade (Lot 3) — narrative_summary/similar_incidents ne sont pas exercés ici.
 
 Toutes les dépendances Mongo sont monkeypatchées au niveau du module
 src.storage.sync_mongo_repository — AuditAgent les importe localement à
@@ -10,8 +10,36 @@ test_orchestrator_audit_trail.py pour les agents du pipeline).
 """
 from __future__ import annotations
 
+import pytest
+
 from src.ai_agents.audit_agent import AuditAgent
 from src.storage import sync_mongo_repository
+
+
+@pytest.fixture(autouse=True)
+def _default_reconciliation(monkeypatch):
+    """Rapprochement transversal (Lot 2) sans aucune anomalie par défaut —
+    les tests qui veulent en exercer une la surchargent explicitement."""
+    monkeypatch.setattr(
+        sync_mongo_repository, "invoices_overdue_without_installment_plan_sync",
+        lambda: {"count": 0, "detail": []},
+    )
+    monkeypatch.setattr(
+        sync_mongo_repository, "late_installments_invoice_not_flagged_sync",
+        lambda: {"count": 0, "detail": []},
+    )
+    monkeypatch.setattr(
+        sync_mongo_repository, "budget_overrun_top_invoices_sync",
+        lambda top_n=3: [],
+    )
+    monkeypatch.setattr(
+        sync_mongo_repository, "invoices_journal_mismatch_sync",
+        lambda: {
+            "missing_entry_count": 0, "missing_entry": [],
+            "duplicate_entry_count": 0, "duplicate_entry": [],
+            "amount_mismatch_count": 0, "amount_mismatch": [],
+        },
+    )
 
 
 def _patch_kpis(monkeypatch, *, invoices=None, journal=None, budget=None,
@@ -224,6 +252,144 @@ class TestTrend:
         AuditAgent().run({"granularity": "DAILY"})
 
         assert "roadmap" not in saved["snapshot"]["trend"]
+
+
+class TestReconciliation:
+    def test_reconciliation_persisted_in_snapshot(self, monkeypatch):
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        saved = _patch_save_snapshot(monkeypatch)
+
+        AuditAgent().run({"granularity": "DAILY"})
+
+        assert "overdue_without_installment_plan" in saved["snapshot"]["reconciliation"]
+        assert "late_installment_not_flagged" in saved["snapshot"]["reconciliation"]
+        assert "budget_overrun_attribution" in saved["snapshot"]["reconciliation"]
+        assert "journal_mismatch" in saved["snapshot"]["reconciliation"]
+
+    def test_no_reconciliation_alerts_when_all_clear(self, monkeypatch):
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        _patch_save_snapshot(monkeypatch)
+
+        alerts = AuditAgent().run({"granularity": "DAILY"}).output["alerts"]
+
+        assert alerts == []
+
+    def test_missing_installment_plan_triggers_warning(self, monkeypatch):
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        _patch_save_snapshot(monkeypatch)
+        monkeypatch.setattr(
+            sync_mongo_repository, "invoices_overdue_without_installment_plan_sync",
+            lambda: {"count": 2, "detail": [{"invoice_id": "inv-1", "invoice_number": "F001"}]},
+        )
+
+        alerts = AuditAgent().run({"granularity": "DAILY"}).output["alerts"]
+
+        assert any(a["code"] == "MISSING_INSTALLMENT_PLAN" and a["severity"] == "WARNING" for a in alerts)
+
+    def test_late_installment_not_flagged_triggers_warning(self, monkeypatch):
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        _patch_save_snapshot(monkeypatch)
+        monkeypatch.setattr(
+            sync_mongo_repository, "late_installments_invoice_not_flagged_sync",
+            lambda: {"count": 1, "detail": [{"invoice_id": "inv-2"}]},
+        )
+
+        alerts = AuditAgent().run({"granularity": "DAILY"}).output["alerts"]
+
+        assert any(a["code"] == "LATE_INSTALLMENT_NOT_FLAGGED" for a in alerts)
+
+    def test_journaled_without_entry_triggers_critical(self, monkeypatch):
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        _patch_save_snapshot(monkeypatch)
+        monkeypatch.setattr(
+            sync_mongo_repository, "invoices_journal_mismatch_sync",
+            lambda: {
+                "missing_entry_count": 1, "missing_entry": [{"invoice_id": "inv-3"}],
+                "duplicate_entry_count": 0, "duplicate_entry": [],
+                "amount_mismatch_count": 0, "amount_mismatch": [],
+            },
+        )
+
+        alerts = AuditAgent().run({"granularity": "DAILY"}).output["alerts"]
+
+        assert any(a["code"] == "JOURNALED_WITHOUT_ENTRY" and a["severity"] == "CRITICAL" for a in alerts)
+
+    def test_duplicate_journal_entry_triggers_critical(self, monkeypatch):
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        _patch_save_snapshot(monkeypatch)
+        monkeypatch.setattr(
+            sync_mongo_repository, "invoices_journal_mismatch_sync",
+            lambda: {
+                "missing_entry_count": 0, "missing_entry": [],
+                "duplicate_entry_count": 1, "duplicate_entry": [{"invoice_id": "inv-4", "count": 2}],
+                "amount_mismatch_count": 0, "amount_mismatch": [],
+            },
+        )
+
+        alerts = AuditAgent().run({"granularity": "DAILY"}).output["alerts"]
+
+        assert any(a["code"] == "DUPLICATE_JOURNAL_ENTRY" and a["severity"] == "CRITICAL" for a in alerts)
+
+    def test_amount_mismatch_journal_triggers_critical(self, monkeypatch):
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        _patch_save_snapshot(monkeypatch)
+        monkeypatch.setattr(
+            sync_mongo_repository, "invoices_journal_mismatch_sync",
+            lambda: {
+                "missing_entry_count": 0, "missing_entry": [],
+                "duplicate_entry_count": 0, "duplicate_entry": [],
+                "amount_mismatch_count": 1,
+                "amount_mismatch": [{"invoice_id": "inv-5", "invoice_amount_ttc": 100.0, "journal_amount": 90.0}],
+            },
+        )
+
+        alerts = AuditAgent().run({"granularity": "DAILY"}).output["alerts"]
+
+        assert any(a["code"] == "AMOUNT_MISMATCH_JOURNAL" and a["severity"] == "CRITICAL" for a in alerts)
+
+    def test_budget_overrun_attribution_stored_but_no_dedicated_alert(self, monkeypatch):
+        """budget_overrun_attribution enrichit reconciliation avec le détail
+        par facture, mais l'alerte de dépassement budgétaire reste portée par
+        BUDGET_VARIANCE (Lot 1) — pas de doublon d'alerte pour le même fait."""
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        saved = _patch_save_snapshot(monkeypatch)
+        monkeypatch.setattr(
+            sync_mongo_repository, "budget_overrun_top_invoices_sync",
+            lambda top_n=3: [{
+                "catalog_id": "licences_ms365", "budget_ytd": 1000.0, "actual_ytd": 1500.0,
+                "top_invoices": [{"invoice_id": "inv-6", "invoice_number": "F010", "amount_ht": 800.0}],
+            }],
+        )
+
+        result = AuditAgent().run({"granularity": "DAILY"})
+
+        assert saved["snapshot"]["reconciliation"]["budget_overrun_attribution"][0]["catalog_id"] == "licences_ms365"
+        assert not any(a["code"] == "BUDGET_OVERRUN_ATTRIBUTED" for a in result.output["alerts"])
+
+    def test_reconciliation_failure_sets_degraded_true(self, monkeypatch):
+        _patch_kpis(monkeypatch)
+        _patch_no_previous_snapshot(monkeypatch)
+        saved = _patch_save_snapshot(monkeypatch)
+        monkeypatch.setattr(
+            sync_mongo_repository, "invoices_journal_mismatch_sync",
+            lambda: (_ for _ in ()).throw(ConnectionError("mongo unreachable")),
+        )
+
+        result = AuditAgent().run({"granularity": "DAILY"})
+
+        assert result.output["degraded"] is True
+        assert saved["snapshot"]["status"] == "DEGRADED"
+        assert saved["snapshot"]["reconciliation"]["journal_mismatch"] is None
+        # other reconciliation checks still ran despite the journal_mismatch failure
+        assert saved["snapshot"]["reconciliation"]["overdue_without_installment_plan"] is not None
 
 
 class TestAgentNeverCallsOtherAgents:

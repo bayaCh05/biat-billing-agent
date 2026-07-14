@@ -768,6 +768,180 @@ def echeancier_kpis_sync() -> dict:
     }
 
 
+# ── Rapprochement transversal (Audit Agent, Lot 2) ───────────────────────────
+# Croisements facture ↔ échéancier ↔ budget ↔ journal — aucune jointure Mongo
+# ($lookup, cohérent avec l'interdit déjà en place dans NLQueryEngine._is_safe()) :
+# les rapprochements se font en Python, sur des volumes qui restent petits
+# (factures d'une période). Purement déterministe, aucun LLM impliqué.
+
+def invoices_overdue_without_installment_plan_sync() -> dict:
+    """Factures en retard (due_date < aujourd'hui, statut non terminal) sans
+    aucune échéance dans payment_installments — devraient en avoir une.
+    Rapprochement facture ↔ échéancier (Lot 2a)."""
+    db = _get_db()
+    today_dt = _to_midnight_utc(date.today())
+    overdue = list(db["invoices"].find(
+        {"due_date": {"$lt": today_dt}, "status": {"$nin": ["PAID", "COLLECTED", "REJECTED"]}},
+        {"invoice_number": 1},
+    ))
+    if not overdue:
+        return {"count": 0, "detail": []}
+
+    with_plan = {
+        r["invoice_id"]
+        for r in db["payment_installments"].find(
+            {"invoice_id": {"$in": [inv["_id"] for inv in overdue]}}, {"invoice_id": 1}
+        )
+    }
+    missing = [inv for inv in overdue if inv["_id"] not in with_plan]
+    return {
+        "count": len(missing),
+        "detail": [
+            {"invoice_id": inv["_id"], "invoice_number": inv.get("invoice_number")}
+            for inv in missing[:5]
+        ],
+    }
+
+
+def late_installments_invoice_not_flagged_sync() -> dict:
+    """Échéances LATE dont la facture parente n'a pas human_review_required=True
+    — incohérence de statut entre payment_installments et invoices.
+    Rapprochement facture ↔ échéancier (Lot 2a)."""
+    db = _get_db()
+    late = list(db["payment_installments"].find({"status": "LATE"}, {"invoice_id": 1}))
+    if not late:
+        return {"count": 0, "detail": []}
+
+    invoice_ids = list({r["invoice_id"] for r in late})
+    flagged_by_id = {
+        inv["_id"]: bool(inv.get("human_review_required", False))
+        for inv in db["invoices"].find(
+            {"_id": {"$in": invoice_ids}}, {"human_review_required": 1}
+        )
+    }
+    not_flagged = [iid for iid in invoice_ids if not flagged_by_id.get(iid, False)]
+    return {
+        "count": len(not_flagged),
+        "detail": [{"invoice_id": iid} for iid in not_flagged[:5]],
+    }
+
+
+def budget_overrun_top_invoices_sync(top_n: int = 3) -> list[dict]:
+    """Pour chaque ligne budgétaire dépassée cette année (YTD), les factures
+    qui contribuent le plus au dépassement. Rapprochement budget ↔ facture
+    (Lot 2b) — complète budget_variance_kpis_sync (qui n'agrège que des
+    totaux) avec l'attribution ligne-par-ligne nécessaire à un audit.
+
+    Recalcule budget_ytd/actual_ytd par catalog_id (même logique que
+    budget_variance_kpis_sync) — duplication acceptée : les deux fonctions
+    répondent à des besoins différents (KPI agrégé vs détail auditable) et
+    coupler les deux ferait dépendre le Lot 1 déjà testé du Lot 2.
+    """
+    db = _get_db()
+    today = date.today()
+    year, month = today.year, today.month
+
+    entries = list(db["budget_plan_entries"].find({"year": year}))
+    budget_ytd = {
+        e["catalog_id"]: sum(float(m) for m in (e.get("monthly") or [])[:month])
+        for e in entries
+    }
+    if not budget_ytd:
+        return []
+
+    start = datetime(year, 1, 1, tzinfo=timezone.utc)
+    end = datetime.now(timezone.utc)
+    base_match = {
+        "status": {"$in": ["VALIDATED", "EXPORTED", "PAID", "JOURNALED"]},
+        "direction": "SUPPLIER",
+        "invoice_date": {"$gte": start, "$lte": end},
+        "amount_ht": {"$ne": None},
+    }
+
+    result = []
+    for catalog_id, budget in budget_ytd.items():
+        match = {**base_match, "cost_catalog_id": catalog_id}
+        invoices = list(db["invoices"].find(match, {"invoice_number": 1, "amount_ht": 1}))
+        actual = sum(inv.get("amount_ht", 0) or 0 for inv in invoices)
+        if actual <= budget:
+            continue
+        top = sorted(invoices, key=lambda i: i.get("amount_ht", 0) or 0, reverse=True)[:top_n]
+        result.append({
+            "catalog_id": catalog_id,
+            "budget_ytd": round(budget, 3),
+            "actual_ytd": round(actual, 3),
+            "top_invoices": [
+                {
+                    "invoice_id": inv["_id"],
+                    "invoice_number": inv.get("invoice_number"),
+                    "amount_ht": inv.get("amount_ht"),
+                }
+                for inv in top
+            ],
+        })
+    return result
+
+
+def invoices_journal_mismatch_sync() -> dict:
+    """Cohérence facture ↔ journal pour les factures JOURNALED : exactement
+    une écriture par facture, et son montant (Σ lignes 401/411) cohérent avec
+    invoice.amount_ttc (tolérance 0,005 TND — même convention PCE que le
+    reste du projet). Rapprochement facture ↔ journal (Lot 2c) — comble un
+    trou que journal_consistency_check_sync ne couvre pas (celui-ci vérifie
+    débit=crédit par écriture, jamais qu'une facture JOURNALED a une écriture
+    du tout).
+    """
+    db = _get_db()
+    journaled = list(db["invoices"].find({"status": "JOURNALED"}, {"amount_ttc": 1}))
+    if not journaled:
+        return {
+            "missing_entry_count": 0, "missing_entry": [],
+            "duplicate_entry_count": 0, "duplicate_entry": [],
+            "amount_mismatch_count": 0, "amount_mismatch": [],
+        }
+
+    invoice_ids = [inv["_id"] for inv in journaled]
+    entries = list(db["journal_entries"].find(
+        {"source_invoice_id": {"$in": invoice_ids}},
+        {"source_invoice_id": 1, "lines": 1, "reference": 1},
+    ))
+    by_invoice: dict[str, list[dict]] = {}
+    for e in entries:
+        by_invoice.setdefault(e.get("source_invoice_id"), []).append(e)
+
+    missing, duplicate, mismatch = [], [], []
+    for inv in journaled:
+        inv_id = inv["_id"]
+        matches = by_invoice.get(inv_id, [])
+        if len(matches) == 0:
+            missing.append({"invoice_id": inv_id})
+        elif len(matches) > 1:
+            duplicate.append({
+                "invoice_id": inv_id, "count": len(matches),
+                "references": [m.get("reference") for m in matches],
+            })
+        else:
+            lines = matches[0].get("lines", [])
+            journal_amount = sum(
+                (l.get("debit") or 0) + (l.get("credit") or 0)
+                for l in lines
+                if str(l.get("compte", "")).startswith(("401", "411"))
+            )
+            amount_ttc = inv.get("amount_ttc") or 0
+            if abs(journal_amount - amount_ttc) > 0.005:
+                mismatch.append({
+                    "invoice_id": inv_id,
+                    "invoice_amount_ttc": amount_ttc,
+                    "journal_amount": round(journal_amount, 3),
+                })
+
+    return {
+        "missing_entry_count": len(missing), "missing_entry": missing[:5],
+        "duplicate_entry_count": len(duplicate), "duplicate_entry": duplicate[:5],
+        "amount_mismatch_count": len(mismatch), "amount_mismatch": mismatch[:5],
+    }
+
+
 # ── Audit Agent (rapport transversal périodique) ─────────────────────────────
 # Voir ai_agents/audit_agent.py — l'Audit Agent ne lit QUE ce que les autres
 # agents ont déjà écrit ; il ne les appelle jamais directement.

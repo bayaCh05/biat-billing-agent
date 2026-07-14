@@ -8,16 +8,21 @@ agents ont déjà écrit en base — factures, journal, budget, échéancier,
 risques, roadmap — comme un auditeur qui lit le grand livre, jamais le
 comptable qui l'écrit.
 
-Lot 1 (ce fichier, 2026-07) : métriques par domaine + tendance vs snapshot
-précédent de même granularité + alertes à seuils déterministes. AUCUN
-rapprochement transversal (Lot 2), AUCUN RAG (Lot 3), AUCUNE synthèse LLM
-(Lot 3) — narrative_summary reste toujours None à ce stade.
+Lot 1 : métriques par domaine + tendance vs snapshot précédent de même
+granularité + alertes à seuils déterministes.
+
+Lot 2 (ce fichier, 2026-07) : rapprochement transversal facture ↔ échéancier
+↔ budget ↔ journal (_cross_check()) — comble des trous que les métriques
+Lot 1 ne couvraient pas (ex: journal_consistency_check_sync vérifie
+débit=crédit par écriture, jamais qu'une facture JOURNALED a une écriture du
+tout). Toujours 100% déterministe. AUCUN RAG (Lot 3), AUCUNE synthèse LLM
+(Lot 3) — narrative_summary/similar_incidents restent vides à ce stade.
 
 Perception/Décision/Action (Russell-Norvig, voir design validé) :
-  - Perception  : _collect_metrics(), _get_previous_snapshot() — lecture
-    seule via sync_mongo_repository.py, jamais d'appel à un autre agent.
-  - Décision    : _compute_trend(), _evaluate_alerts() — règles à seuils
-    déterministes, zéro LLM.
+  - Perception  : _collect_metrics(), _cross_check(), _get_previous_snapshot()
+    — lecture seule via sync_mongo_repository.py, jamais d'appel à un autre agent.
+  - Décision    : _compute_trend(), _evaluate_alerts(), _evaluate_reconciliation_alerts()
+    — règles à seuils déterministes, zéro LLM.
   - Action      : persistance du AuditSnapshotDocument (save_audit_snapshot_sync).
 """
 from __future__ import annotations
@@ -50,10 +55,13 @@ class AuditAgent(BaseAgent):
 
         def _do() -> dict:
             period_start, period_end = self._resolve_period(granularity)
-            metrics, degraded = self._collect_metrics()
+            metrics, metrics_degraded = self._collect_metrics()
+            reconciliation, reconciliation_degraded = self._cross_check()
             previous = self._get_previous_snapshot(granularity)
             trend = self._compute_trend(metrics, previous)
             alerts = self._evaluate_alerts(metrics)
+            alerts += self._evaluate_reconciliation_alerts(reconciliation)
+            degraded = metrics_degraded or reconciliation_degraded
 
             from src.storage.sync_mongo_repository import save_audit_snapshot_sync
             snapshot_id = save_audit_snapshot_sync({
@@ -64,6 +72,7 @@ class AuditAgent(BaseAgent):
                 "metrics": metrics,
                 "trend": trend,
                 "alerts": alerts,
+                "reconciliation": reconciliation,
             })
 
             logger.info(
@@ -130,6 +139,34 @@ class AuditAgent(BaseAgent):
     def _get_previous_snapshot(self, granularity: str) -> dict | None:
         from src.storage.sync_mongo_repository import get_latest_snapshot_sync
         return get_latest_snapshot_sync(granularity)
+
+    def _cross_check(self) -> tuple[dict, bool]:
+        """Rapprochement transversal facture ↔ échéancier ↔ budget ↔ journal
+        (Lot 2). Évalué sur l'état courant complet (comme
+        journal_consistency_check_sync), pas filtré à la période du snapshot —
+        "une facture en retard" ne dépend pas de la granularité DAILY/WEEKLY/
+        MONTHLY en cours."""
+        from src.storage.sync_mongo_repository import (
+            budget_overrun_top_invoices_sync, invoices_journal_mismatch_sync,
+            invoices_overdue_without_installment_plan_sync,
+            late_installments_invoice_not_flagged_sync,
+        )
+
+        reconciliation: dict = {}
+        degraded = False
+        for check, gather in (
+            ("overdue_without_installment_plan", invoices_overdue_without_installment_plan_sync),
+            ("late_installment_not_flagged", late_installments_invoice_not_flagged_sync),
+            ("budget_overrun_attribution", budget_overrun_top_invoices_sync),
+            ("journal_mismatch", invoices_journal_mismatch_sync),
+        ):
+            try:
+                reconciliation[check] = gather()
+            except Exception:
+                logger.warning("audit_agent_reconciliation_error check=%s", check, exc_info=True)
+                reconciliation[check] = None
+                degraded = True
+        return reconciliation, degraded
 
     # ── Décision ──────────────────────────────────────────────────────────────
 
@@ -217,6 +254,59 @@ class AuditAgent(BaseAgent):
             alerts.append({
                 "domain": "roadmap", "severity": "WARNING", "code": "OVERDUE_MILESTONES",
                 "message": f"{n_overdue} jalon(s) roadmap en retard.",
+            })
+
+        return alerts
+
+    def _evaluate_reconciliation_alerts(self, reconciliation: dict) -> list[dict]:
+        """Règles à seuils déterministes sur le rapprochement transversal (Lot 2)
+        — mêmes garanties que _evaluate_alerts() : aucun LLM impliqué."""
+        alerts: list[dict] = []
+
+        overdue_no_plan = reconciliation.get("overdue_without_installment_plan") or {}
+        if overdue_no_plan.get("count", 0) > 0:
+            alerts.append({
+                "domain": "echeancier", "severity": "WARNING", "code": "MISSING_INSTALLMENT_PLAN",
+                "message": (
+                    f"{overdue_no_plan['count']} facture(s) en retard sans échéancier "
+                    "(payment_installments)."
+                ),
+            })
+
+        late_not_flagged = reconciliation.get("late_installment_not_flagged") or {}
+        if late_not_flagged.get("count", 0) > 0:
+            alerts.append({
+                "domain": "echeancier", "severity": "WARNING", "code": "LATE_INSTALLMENT_NOT_FLAGGED",
+                "message": (
+                    f"{late_not_flagged['count']} échéance(s) en retard dont la facture "
+                    "parente n'est pas marquée pour révision humaine."
+                ),
+            })
+
+        journal_mismatch = reconciliation.get("journal_mismatch") or {}
+        if journal_mismatch.get("missing_entry_count", 0) > 0:
+            alerts.append({
+                "domain": "journal", "severity": "CRITICAL", "code": "JOURNALED_WITHOUT_ENTRY",
+                "message": (
+                    f"{journal_mismatch['missing_entry_count']} facture(s) JOURNALED "
+                    "sans écriture comptable correspondante."
+                ),
+            })
+        if journal_mismatch.get("duplicate_entry_count", 0) > 0:
+            alerts.append({
+                "domain": "journal", "severity": "CRITICAL", "code": "DUPLICATE_JOURNAL_ENTRY",
+                "message": (
+                    f"{journal_mismatch['duplicate_entry_count']} facture(s) JOURNALED "
+                    "avec plusieurs écritures comptables."
+                ),
+            })
+        if journal_mismatch.get("amount_mismatch_count", 0) > 0:
+            alerts.append({
+                "domain": "journal", "severity": "CRITICAL", "code": "AMOUNT_MISMATCH_JOURNAL",
+                "message": (
+                    f"{journal_mismatch['amount_mismatch_count']} facture(s) dont le montant "
+                    "ne correspond pas à l'écriture comptable (tolérance 0,005 TND)."
+                ),
             })
 
         return alerts

@@ -462,22 +462,37 @@ All 5 jobs are Mongo-native as of 2026-07.
 | `_job_scan_roadmap_risks` | nightly (8am) | Mongo (`RiskAgent._scan_roadmap_async`, bridged via `asyncio.run()`) |
 | `_job_audit_daily` | nightly (2am) | Mongo (`AuditAgent.run({"granularity": "DAILY"})` — see "Audit Agent" below) |
 
-### Audit Agent (`src/ai_agents/audit_agent.py` — Lot 1, 2026-07, in progress)
+### Audit Agent (`src/ai_agents/audit_agent.py` — Lot 2, 2026-07, in progress)
 
 Separate, periodic, corpus-wide audit component — deliberately distinct from
 `InvoiceProcessingOrchestrator` (real-time, per-invoice). **Never calls any
 other agent** (not `AnomalyAgent`, not `RiskAgent`, not `InsightAgent`) —
 reads only what they've already written to Mongo, via
-`sync_mongo_repository.py`. Produces an immutable `AuditSnapshotDocument`
-(collection `audit_snapshots`) per `(granularity, period_start)`, one of
-`"DAILY" | "WEEKLY" | "MONTHLY"`.
+`sync_mongo_repository.py` (enforced by a unit test that parses the module's
+AST for forbidden imports, not just code review). Produces an immutable
+`AuditSnapshotDocument` (collection `audit_snapshots`) per `(granularity,
+period_start)`, one of `"DAILY" | "WEEKLY" | "MONTHLY"`.
 
-**Lot 1 (this state)**: per-domain metrics (invoices, journal, budget,
-échéancier via the new `echeancier_kpis_sync()`, risks, roadmap) + trend
-vs. the previous snapshot of the same granularity + deterministic
-threshold-based alerts. `reconciliation` (cross-entity checks — Lot 2),
-`similar_incidents` (ChromaDB RAG — Lot 3), and `narrative_summary` (LLM —
-Lot 3) are reserved fields, always empty/`None` at this stage. Only
+**Lot 1**: per-domain metrics (invoices, journal, budget, échéancier via the
+new `echeancier_kpis_sync()`, risks, roadmap) + trend vs. the previous
+snapshot of the same granularity + deterministic threshold-based alerts.
+
+**Lot 2 (this state)**: deterministic cross-entity reconciliation
+(`_cross_check()`), stored in the `reconciliation` field — 4 new sync
+helpers in `sync_mongo_repository.py`: `invoices_overdue_without_installment_plan_sync`
+and `late_installments_invoice_not_flagged_sync` (facture ↔ échéancier),
+`budget_overrun_top_invoices_sync` (budget ↔ facture — per-line attribution,
+complements `budget_variance_kpis_sync`'s aggregate-only totals),
+`invoices_journal_mismatch_sync` (facture ↔ journal — fills a real gap:
+`journal_consistency_check_sync` only checks debit=credit per entry, never
+that a `JOURNALED` invoice has an entry at all). Evaluated against full
+current state, not filtered to the snapshot's period (same as
+`journal_consistency_check_sync`). 5 new deterministic alert codes:
+`MISSING_INSTALLMENT_PLAN`, `LATE_INSTALLMENT_NOT_FLAGGED`,
+`JOURNALED_WITHOUT_ENTRY`, `DUPLICATE_JOURNAL_ENTRY`, `AMOUNT_MISMATCH_JOURNAL`.
+
+`similar_incidents` (ChromaDB RAG — Lot 3) and `narrative_summary` (LLM —
+Lot 3) remain reserved fields, always empty/`None` at this stage. Only
 `_job_audit_daily` is wired into `scheduler.py`; `WEEKLY`/`MONTHLY` jobs and
 the `/audit-reports` API router are not yet implemented (Lots 4+).
 
