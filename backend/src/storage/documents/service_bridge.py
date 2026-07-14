@@ -2192,7 +2192,7 @@ async def seed_budget_plan_from_yaml_native(year: int, yaml_path) -> None:
 
 # ── Lot 5 (Mongo primaire) : invoices/status, billing, payments ──────────────
 # Ces fonctions couvrent les routes simples (PATCH status, generate, mark-paid).
-# Le pipeline IA complet (upload_invoice → AIOrchestrator) utilise un dépôt
+# Le pipeline IA complet (upload_invoice → InvoiceProcessingOrchestrator) utilise un dépôt
 # Mongo SYNCHRONE (src/storage/sync_mongo_repository.py) car ce pipeline est
 # délibérément synchrone — voir ce module pour le contexte complet.
 

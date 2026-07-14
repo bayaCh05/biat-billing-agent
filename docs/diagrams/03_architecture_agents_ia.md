@@ -11,7 +11,7 @@ RoadmapItems [label: "Jalons Roadmap\n(overdue)", icon: map, color: "#1A3A5C"]
 RiskForm [label: "Formulaire Risque\n(titre, type, impact)", icon: alert-triangle, color: "#1A3A5C"]
 
 // ── ORCHESTRATOR ──────────────────────────────────────
-Orchestrator [label: "AI Orchestrator\n(synchronous, 4 steps)", icon: layers, color: "#F0A500", shape: hexagon]
+Orchestrator [label: "Invoice Processing Orchestrator\n(synchronous, 4 steps)", icon: layers, color: "#F0A500", shape: hexagon]
 
 // ── 6 AGENTS ──────────────────────────────────────────
 Agents [color: "#F0A500"] {

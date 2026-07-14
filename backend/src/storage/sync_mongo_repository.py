@@ -1,8 +1,8 @@
-"""Dépôts MongoDB synchrones — pour le pipeline IA (AIOrchestrator + agents).
+"""Dépôts MongoDB synchrones — pour le pipeline IA (InvoiceProcessingOrchestrator + agents).
 
-Pourquoi synchrone : AIOrchestrator.process_invoice() et ses 4 agents sont
+Pourquoi synchrone : InvoiceProcessingOrchestrator.process_invoice() et ses 4 agents sont
 délibérément synchrones ("Built as synchronous to match the existing FastAPI +
-SQLAlchemy patterns" — voir ai_agents/orchestrator.py), alors que Beanie/Motor
+SQLAlchemy patterns" — voir ai_agents/invoice_processing_orchestrator.py), alors que Beanie/Motor
 est async-only. Plutôt que de faire remonter async/await dans toute la chaîne
 d'agents, on utilise ici un client pymongo classique (synchrone), avec les
 mêmes conventions que le reste de la migration : _id toujours une chaîne
@@ -15,12 +15,12 @@ depuis été supprimé, dead code après ce portage) afin que DuplicateDetector,
 AnomalyDetector, InvoiceNumberer, InvoiceBuilder n'aient besoin d'AUCUNE
 modification — seul l'objet injecté change.
 
-Portée : le chemin AIOrchestrator (route API /invoices/upload) et la
+Portée : le chemin InvoiceProcessingOrchestrator (route API /invoices/upload) et la
 génération de factures client (billing.py). Le daemon headless
 (scripts/run_agent.py, agent/pipeline.py, agent/agent.py) et son
 PipelineComponents SQLAlchemy ont été supprimés (Lot B, sub-lot 6) — ils
-étaient confirmés superseded en pratique par le chemin API+AIOrchestrator.
-AIOrchestrator utilise désormais AIComponents (agent/config_loader.py), un
+étaient confirmés superseded en pratique par le chemin API+InvoiceProcessingOrchestrator.
+InvoiceProcessingOrchestrator utilise désormais AIComponents (agent/config_loader.py), un
 sous-ensemble sans SQLAlchemy de ce que PipelineComponents fournissait.
 """
 from __future__ import annotations
@@ -374,14 +374,14 @@ def historical_payment_terms_sync(issuer_tax_id: str, exclude_id) -> list[int]:
 
 def log_ai_audit_event_sync(entry: "AuditLogCreate") -> None:
     """Écrit un événement d'audit IA directement dans Mongo — équivalent synchrone
-    de service_bridge.log_audit_event_native(), pour AIOrchestrator._audit_ai()
+    de service_bridge.log_audit_event_native(), pour InvoiceProcessingOrchestrator._audit_ai()
     (pipeline synchrone — voir le docstring de ce module pour le pourquoi).
 
     Même collection ("audit_logs"), même formule de row_hash que le chemin async
     (api/security/audit_integrity.py::compute_row_hash_from_doc) — pas de
     dépendance à Motor/Beanie ici, uniquement pymongo synchrone.
 
-    Lève toute exception pymongo à l'appelant — AIOrchestrator._audit_ai() est
+    Lève toute exception pymongo à l'appelant — InvoiceProcessingOrchestrator._audit_ai() est
     responsable de l'avaler pour ne jamais interrompre le pipeline (comportement
     déjà en place côté SQLite, inchangé ici).
     """

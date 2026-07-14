@@ -152,8 +152,8 @@ async def upload_invoice(
                 )
 
         # Run through AI orchestrator (extraction → classification → anomaly → accounting)
-        from src.ai_agents.orchestrator import AIOrchestrator
-        orchestrator = AIOrchestrator(components, session)
+        from src.ai_agents.invoice_processing_orchestrator import InvoiceProcessingOrchestrator
+        orchestrator = InvoiceProcessingOrchestrator(components, session)
         orchestrator.process_invoice(invoice)
 
         # Re-fetch invoice from DB to get final persisted state

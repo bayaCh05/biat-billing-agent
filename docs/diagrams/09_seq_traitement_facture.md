@@ -7,7 +7,7 @@ title Traitement Pipeline IA — Facture Fournisseur (PDF → JOURNALED) — ave
 Comptable [color: "#1A3A5C", icon: user]
 Frontend [color: "#2E86C1", icon: monitor]
 FastAPI [color: "#2E86C1", icon: server]
-Orchestrator [color: "#F0A500", icon: layers]
+Orchestrator [label: "Invoice Processing Orchestrator", color: "#F0A500", icon: layers]
 ExtractionAgent [color: "#F0A500", icon: scan]
 ClassificationAgent [color: "#F0A500", icon: tag]
 AnomalyAgent [color: "#F0A500", icon: alert-triangle]

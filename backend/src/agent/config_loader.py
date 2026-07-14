@@ -39,10 +39,10 @@ def load_rules(path: str) -> list[dict]:
 
 @dataclass
 class AIComponents:
-    """Stateless business-logic components shared by AIOrchestrator's agents.
+    """Stateless business-logic components shared by InvoiceProcessingOrchestrator's agents.
 
-    Nothing here is bound to a SQLAlchemy session — AIOrchestrator reads/writes
-    invoices via the sync Mongo repositories directly (see orchestrator.py), so
+    Nothing here is bound to a SQLAlchemy session — InvoiceProcessingOrchestrator reads/writes
+    invoices via the sync Mongo repositories directly (see invoice_processing_orchestrator.py), so
     duplicate_detector/anomaly_detector below are pre-bound to
     SyncMongoInvoiceRepository at construction time, not left to be rebound later.
     """
@@ -65,7 +65,7 @@ def build_ai_components(
     config_path: str = "config/settings.yaml",
     llm_backend=None,
 ) -> "AIComponents":
-    """Assemble the stage objects AIOrchestrator needs — no SQLAlchemy involved."""
+    """Assemble the stage objects InvoiceProcessingOrchestrator needs — no SQLAlchemy involved."""
     from src.storage.sync_mongo_repository import SyncMongoInvoiceRepository
 
     cfg = load_config(config_path)

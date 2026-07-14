@@ -267,7 +267,7 @@ class TestInvoices:
             "INVOICE_UPLOADED est indexé par file_hash, pas resource_id=invoice_id "
             "— vérifié séparément ci-dessous"
         )
-        # AI_* events are keyed by invoice_id (see AIOrchestrator._audit_ai)
+        # AI_* events are keyed by invoice_id (see InvoiceProcessingOrchestrator._audit_ai)
         ai_actions = [a for a in actions if a.startswith("AI_")]
         assert ai_actions == sorted(set(ai_actions), key=ai_actions.index), "ordre inattendu"
         assert ai_actions[:3] == ["AI_EXTRACT", "AI_CLASSIFY", "AI_ANOMALY"], ai_actions

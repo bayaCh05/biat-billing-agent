@@ -54,8 +54,8 @@ def _job_retrain_classifier() -> None:
     """Réentraîne le modèle ML si ≥ ML_RETRAIN_MIN_INVOICES nouvelles factures VALIDATED/EXPORTED.
 
     Reads invoice data from Mongo (SyncMongoInvoiceRepository), not the SQLAlchemy
-    repository — invoices uploaded through the real API path (AIOrchestrator) only
-    ever land in Mongo, so counting/training against SQLite silently ignored all of
+    repository — invoices uploaded through the real API path (InvoiceProcessingOrchestrator)
+    only ever land in Mongo, so counting/training against SQLite silently ignored all of
     them. components.repository (SQLAlchemy) is still used nowhere here; only
     components.coder.ml_classifier is needed, to retrain+persist the live model.
     """

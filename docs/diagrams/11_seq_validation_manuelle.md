@@ -8,7 +8,7 @@ Comptable [color: "#1A3A5C", icon: user]
 ReviewQueue [color: "#2E86C1", icon: monitor]
 FastAPI [color: "#2E86C1", icon: server]
 Database [color: "#1A3A5C", icon: database]
-Orchestrator [color: "#F0A500", icon: layers]
+Orchestrator [label: "Invoice Processing Orchestrator", color: "#F0A500", icon: layers]
 Ollama [color: "#F0A500", icon: cpu]
 
 Comptable -> ReviewQueue: "Ouvre /review"

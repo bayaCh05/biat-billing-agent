@@ -35,7 +35,7 @@ import pytest
 
 from api.security.audit_integrity import verify_row_hash_from_doc
 from src.ai_agents.agent_schemas import AgentResult
-from src.ai_agents.orchestrator import AIOrchestrator
+from src.ai_agents.invoice_processing_orchestrator import InvoiceProcessingOrchestrator
 from src.models.enums import InvoiceStatus
 from src.models.invoice import InvoiceRecord
 from src.storage.mongodb import MONGODB_DB, MONGODB_URI
@@ -73,7 +73,7 @@ def test_full_pipeline_produces_4_ordered_ai_audit_events_no_duplicate(mongo_tes
     components = MagicMock()
 
     db_session = MagicMock()
-    orchestrator = AIOrchestrator(components, db_session)
+    orchestrator = InvoiceProcessingOrchestrator(components, db_session)
 
     with patch(
         "src.ai_agents.extraction_agent.ExtractionAgent",
@@ -124,7 +124,7 @@ def test_audit_write_failure_does_not_break_pipeline(mongo_test_db):
 
     components = MagicMock()
 
-    orchestrator = AIOrchestrator(components, MagicMock())
+    orchestrator = InvoiceProcessingOrchestrator(components, MagicMock())
 
     with patch(
         "src.ai_agents.extraction_agent.ExtractionAgent",

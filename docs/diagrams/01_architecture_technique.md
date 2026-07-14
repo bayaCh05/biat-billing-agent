@@ -26,7 +26,7 @@ Backend [icon: server, color: "#1A3A5C"] {
 
 // ── AI LAYER ──────────────────────────────────────────
 AI [icon: cpu, color: "#F0A500"] {
-  Orchestrator [label: "AI Orchestrator", icon: layers, color: "#F0A500"]
+  Orchestrator [label: "Invoice Processing Orchestrator", icon: layers, color: "#F0A500"]
   ExtractionAgent [label: "ExtractionAgent", icon: file-text, color: "#F0A500"]
   ClassificationAgent [label: "ClassificationAgent", icon: tag, color: "#F0A500"]
   AnomalyAgent [label: "AnomalyAgent", icon: alert-triangle, color: "#F0A500"]

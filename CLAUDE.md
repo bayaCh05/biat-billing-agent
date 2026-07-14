@@ -116,22 +116,22 @@ touches it, unlike the dev/prod volume above which requires auth by design).
 
 > **Path note:** the module paths below (`src/...`) predate the FastAPI backend and
 > predate this doc being kept in sync with it. The actual current repo root for all
-> of these is `backend/` (i.e. `backend/src/ai_agents/orchestrator.py`, not
-> `src/ai_agents/orchestrator.py`). There is also a full FastAPI REST API at
+> of these is `backend/` (i.e. `backend/src/ai_agents/invoice_processing_orchestrator.py`, not
+> `src/ai_agents/invoice_processing_orchestrator.py`). There is also a full FastAPI REST API at
 > `backend/api/` (routers under `backend/api/routers/`: `invoices.py`, `auth.py`,
 > `admin.py`, `users.py`, `security.py`, `billing.py`, `payments.py`, `budget.py`,
 > `capex.py`, `projet_budget.py`, `roadmap.py`, `risks.py`, `livrables.py`,
 > `notifications.py`, `review.py`, `journal.py`, `suivi.py`, `ai.py`, `audit.py`,
 > `kpi.py`, `nl_query.py`, `projects.py`, plus
 > `backend/api/scheduler.py` for nightly jobs). `POST /api/invoices/upload` runs
-> invoices through `backend/src/ai_agents/orchestrator.py::AIOrchestrator` (see
+> invoices through `backend/src/ai_agents/invoice_processing_orchestrator.py::InvoiceProcessingOrchestrator` (see
 > below) — this is the **only** invoice-processing entry point left. The old
 > headless daemon (`scripts/run_agent.py`, `agent/pipeline.py::process_invoice()`,
 > `agent/agent.py::InvoiceAgent`) and the Streamlit app that used to call it
 > directly were both deleted (2026-07, "Lot B" SQLAlchemy cleanup) — they were
-> confirmed superseded by the API+AIOrchestrator path in practice before removal.
+> confirmed superseded by the API+InvoiceProcessingOrchestrator path in practice before removal.
 > Below this note, "Orchestrator... deleted in v3" refers to a different, older,
-> unrelated class — `AIOrchestrator` is current and heavily used; do not read
+> unrelated class — `InvoiceProcessingOrchestrator` is current and heavily used; do not read
 > that note as discouraging it.
 
 ### Module dependency order (no cycles)
@@ -145,27 +145,27 @@ models → storage → cost_catalog
        → budget
        → capex
        → suivi
-       → ai_agents/          ← AIOrchestrator + its 4 sync agents
+       → ai_agents/          ← InvoiceProcessingOrchestrator + its 4 sync agents
        → api/                ← FastAPI routers
 frontend/                    ← separate React/Vite app, calls api/ over HTTP
 ```
 
-### Key design: `AIOrchestrator` coordinates synchronous agents
+### Key design: `InvoiceProcessingOrchestrator` coordinates synchronous agents
 
 Invoice processing is **not** a set of free pipeline functions anymore (that
 was `agent/pipeline.py::process_invoice()`, deleted along with the daemon —
-see the path note above). `backend/src/ai_agents/orchestrator.py::AIOrchestrator`
+see the path note above). `backend/src/ai_agents/invoice_processing_orchestrator.py::InvoiceProcessingOrchestrator`
 is a class whose `process_invoice(invoice)` method runs an invoice through 4
 agents in sequence, each doing one stage:
 
 ```python
-from src.ai_agents.orchestrator import AIOrchestrator
+from src.ai_agents.invoice_processing_orchestrator import InvoiceProcessingOrchestrator
 
-orchestrator = AIOrchestrator(components, session)  # components: AIComponents, session: SQLAlchemy Session (see below)
+orchestrator = InvoiceProcessingOrchestrator(components, session)  # components: AIComponents, session: SQLAlchemy Session (see below)
 result = orchestrator.process_invoice(invoice)       # extraction → classification → anomaly → accounting/journal
 ```
 
-`AIOrchestrator` is deliberately **synchronous** ("Built as synchronous to
+`InvoiceProcessingOrchestrator` is deliberately **synchronous** ("Built as synchronous to
 match the existing FastAPI + SQLAlchemy patterns" — see its docstring) even
 though it reads/writes almost everything via Mongo — it uses the sync
 `pymongo`-based repositories in `src/storage/sync_mongo_repository.py`
@@ -184,7 +184,7 @@ components = build_ai_components()   # AIComponents — extractor, coder, classi
                                       # duplicate_detector, anomaly_detector,
                                       # entry_generator, cost_catalog
 try:
-    orchestrator = AIOrchestrator(components, session)
+    orchestrator = InvoiceProcessingOrchestrator(components, session)
     ...
 finally:
     components.close()   # no-op today — kept so call sites don't need to change
@@ -205,7 +205,7 @@ src/
   agent/
     config_loader.py     # ← wires AIComponents from settings.yaml (build_ai_components())
   ai_agents/
-    orchestrator.py      # ← AIOrchestrator — the real invoice-processing entry point
+    invoice_processing_orchestrator.py  # ← InvoiceProcessingOrchestrator — the real invoice-processing entry point
     extraction_agent.py, classification_agent.py, anomaly_agent.py, accounting_agent.py
     risk_agent.py, insight_agent.py  # secondary flows (roadmap risk scan, health-summary)
     rag/
@@ -300,7 +300,7 @@ are relative to `backend/`.
 ### What's Mongo-primary (SQLite frozen/stale for these)
 
 - **Invoices, journal entries, CAPEX assets, payment installments** — written by
-  `src/ai_agents/orchestrator.py::AIOrchestrator` (the real upload pipeline) via a
+  `src/ai_agents/invoice_processing_orchestrator.py::InvoiceProcessingOrchestrator` (the real upload pipeline) via a
   **synchronous** pymongo repository layer, `src/storage/sync_mongo_repository.py`
   (`SyncMongoInvoiceRepository`, `SyncMongoJournalRepository`, `SyncMongoAssetRepository`,
   `SyncMongoClientInvoiceRepository`, plus free functions `save_payment_installments_sync`,
@@ -316,11 +316,11 @@ are relative to `backend/`.
   `admin.py`, `users.py`, `security.py`.
 - **Audit log entries — all of them now**, not just auth/admin/security. As of
   Lots 7–9, `invoices.py` upload-time events (`FILE_REJECTED`, `INVOICE_UPLOADED`),
-  `ai_agents/orchestrator.py::_audit_ai()` (`AI_EXTRACT`, `AI_CLASSIFY`,
+  `ai_agents/invoice_processing_orchestrator.py::_audit_ai()` (`AI_EXTRACT`, `AI_CLASSIFY`,
   `AI_ANOMALY`, `AI_JOURNAL`), and `api/routers/audit.py`'s `AUDIT_INTEGRITY_CHECK`
   entries all write Mongo-native too (`log_audit_event_native()` /
   `log_ai_audit_event_sync()` — the latter in `sync_mongo_repository.py`, sync
-  by design since `AIOrchestrator` is sync). **`src/services/audit_service.py::log_action()`
+  by design since `InvoiceProcessingOrchestrator` is sync). **`src/services/audit_service.py::log_action()`
   (the old SQLAlchemy audit writer) now has zero real callers anywhere in the
   codebase** — grep confirms only its own definition and stale docstring
   references remain. `audit_logs` in SQLite receives no new writes through any
@@ -480,7 +480,7 @@ All 4 jobs are Mongo-native as of 2026-07.
   `_get_by_str_id(doc_class, id_str)` helper in `service_bridge.py`.
 - **Sync vs async is not a style choice — it's forced by the caller.** FastAPI routes
   are `async def` → use the async Beanie functions in `service_bridge.py`. The invoice
-  pipeline (`AIOrchestrator` and its 4 agents in `ai_agents/`) and anything called
+  pipeline (`InvoiceProcessingOrchestrator` and its 4 agents in `ai_agents/`) and anything called
   from `InvoiceNumberer`/`InvoiceBuilder` (billing) are genuinely synchronous by
   design — use `sync_mongo_repository.py` (plain `pymongo.MongoClient`) there instead,
   never `await` inside them.
@@ -561,7 +561,7 @@ half a millime). Don't round to 2 decimals anywhere in the money path.
 Enum definition (`models/enums.py`) still lists the full historical set:
 `RECEIVED → EXTRACTING → EXTRACTED → CLASSIFYING → CLASSIFIED → VALIDATING → VALIDATED/FLAGGED → EXPORTING → EXPORTED → JOURNALING → JOURNALED → PAID/COLLECTED`.
 
-**What `AIOrchestrator.process_invoice()` (the only live writer) actually
+**What `InvoiceProcessingOrchestrator.process_invoice()` (the only live writer) actually
 transitions through today** is a subset — it does NOT set the `-ING`
 in-progress statuses at all (those were `agent/pipeline.py`'s stage-start
 markers, deleted with the daemon), and it skips `EXPORTING`/`EXPORTED`
@@ -569,7 +569,7 @@ entirely (no JSON/CSV export step anymore — `pipeline.py::export_file()` and
 the exporters that backed it were also deleted):
 `RECEIVED → EXTRACTED → CLASSIFIED → VALIDATED (or FLAGGED) → JOURNALED`.
 `JOURNALED` is the real happy-path terminal status for a successfully
-processed invoice — set directly by `AIOrchestrator`'s accounting step, no
+processed invoice — set directly by `InvoiceProcessingOrchestrator`'s accounting step, no
 intermediate `JOURNALING`. `EXPORTED` still appears in code that reads
 historical/legacy data (`ml_classifier.py`'s training-label set,
 `suivi/reconciler.py`, `suivi/aggregator.py`, `scheduler.py`'s retrain job
@@ -688,7 +688,7 @@ except one. Don't re-scope or re-flag these — check here first.
   SQLAlchemy-only dependents (`ProjectRepository`, `MonthlyInvoiceBuilder`,
   `AutoCorrector`, `CostAllocator`, `FlagEscalator`, the JSON/CSV exporters,
   `FolderWatcher`, the SQLAlchemy `JournalRepository`) deleted outright —
-  `AIOrchestrator` was first decoupled onto a new SQLAlchemy-free
+  `InvoiceProcessingOrchestrator` was first decoupled onto a new SQLAlchemy-free
   `AIComponents` (see Architecture above) so the real upload path kept
   working throughout. `ingestion/` (including `base.py`, its last
   remaining file with zero implementers) was deleted in this same commit
@@ -743,8 +743,8 @@ except one. Don't re-scope or re-flag these — check here first.
 
 - Do not use the old `Orchestrator` class from pre-v3 (deleted) or reference
   `process_invoice()`/`PipelineComponents`/`agent/pipeline.py` — all deleted
-  2026-07 along with the daemon (see Architecture above). Use `AIOrchestrator`
-  (`ai_agents/orchestrator.py`) with `AIComponents`
+  2026-07 along with the daemon (see Architecture above). Use `InvoiceProcessingOrchestrator`
+  (`ai_agents/invoice_processing_orchestrator.py`) with `AIComponents`
   (`agent/config_loader.py::build_ai_components()`) instead — that's what
   `POST /api/invoices/upload` actually runs.
 - Do not use `AccountingCoder(rules=...)` — v1 API, removed; use `AccountingCoder(catalog=CostCatalog)`
@@ -761,7 +761,7 @@ except one. Don't re-scope or re-flag these — check here first.
 - Do not use `Document.get(x)` or `Document.field == value` typed queries against string-stored UUID/reference
   fields (`_id`, `user_id`, etc.) — Beanie coerces to the declared Pydantic type and silently matches nothing.
   Use dict-filtered `.find_one({"_id": id_str})` or `_get_by_str_id()` in `service_bridge.py`
-- Do not `await` anything inside `AIOrchestrator`/its 4 agents or `InvoiceNumberer`/`InvoiceBuilder` — that
+- Do not `await` anything inside `InvoiceProcessingOrchestrator`/its 4 agents or `InvoiceNumberer`/`InvoiceBuilder` — that
   call graph is synchronous by design; use `sync_mongo_repository.py`, not Beanie's async API, there
 - Do not write a new Mongo document via `Document(...).insert()` for any field that should be a string
   UUID — Pydantic will coerce it to a native UUID/BSON Binary on write. Use

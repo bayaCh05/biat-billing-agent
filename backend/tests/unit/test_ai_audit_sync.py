@@ -1,5 +1,5 @@
 """Tests unitaires — log_ai_audit_event_sync (équivalent synchrone pour
-AIOrchestrator._audit_ai(), testé en isolation AVANT tout branchement au
+InvoiceProcessingOrchestrator._audit_ai(), testé en isolation AVANT tout branchement au
 pipeline réel — voir src/storage/sync_mongo_repository.py).
 
 Aucune connexion MongoDB réelle : _get_db() est monkeypatché avec une
@@ -78,7 +78,7 @@ def test_log_ai_audit_event_sync_row_hash_is_verifiable(fake_coll):
 
 def test_log_ai_audit_event_sync_never_awaited_no_event_loop_needed(fake_coll):
     """Sanity check that this is genuinely synchronous — required since it will
-    be called from AIOrchestrator/_audit_ai(), which must never await anything
+    be called from InvoiceProcessingOrchestrator/_audit_ai(), which must never await anything
     (see CLAUDE.md: sync vs async is forced by the caller)."""
     import inspect
     assert not inspect.iscoroutinefunction(sync_mongo_repository.log_ai_audit_event_sync)
@@ -90,7 +90,7 @@ def test_log_ai_audit_event_sync_never_awaited_no_event_loop_needed(fake_coll):
 
 
 def test_log_ai_audit_event_sync_propagates_mongo_errors(monkeypatch):
-    """AIOrchestrator._audit_ai() is responsible for swallowing failures (as it
+    """InvoiceProcessingOrchestrator._audit_ai() is responsible for swallowing failures (as it
     already does for the SQLite path) — the writer itself must NOT swallow them,
     otherwise a silent Mongo outage would look identical to a successful audit write."""
     class _BrokenCollection:

@@ -54,7 +54,7 @@ def get_engine():
 
 
 def get_components() -> AIComponents:
-    """Build a fresh AIComponents (Ollama backend) for AIOrchestrator. Close after use."""
+    """Build a fresh AIComponents (Ollama backend) for InvoiceProcessingOrchestrator. Close after use."""
     return build_ai_components()
 
 

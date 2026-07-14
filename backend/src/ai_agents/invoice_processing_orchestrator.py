@@ -1,4 +1,4 @@
-"""AI Orchestrator — coordinates all agents for invoice processing.
+"""Invoice Processing Orchestrator — coordinates all agents for invoice processing.
 
 Takes an AIComponents bundle (agent/config_loader.py) of stateless stage
 objects. Built as synchronous to match the existing FastAPI + SQLAlchemy
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class AIOrchestrator:
+class InvoiceProcessingOrchestrator:
     """Coordinates AI agents for the complete invoice processing pipeline."""
 
     def __init__(self, components: "AIComponents", db: Session) -> None:

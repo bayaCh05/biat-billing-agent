@@ -108,7 +108,7 @@ internship_biat/
 │   ├── src/
 │   │   ├── agent/            ← config_loader.py (wire AIComponents) — l'ancien daemon
 │   │   │                       (pipeline.py + agent.py) a été supprimé en 2026-07
-│   │   ├── ai_agents/        ← AIOrchestrator + 6 agents IA spécialisés
+│   │   ├── ai_agents/        ← InvoiceProcessingOrchestrator + 6 agents IA spécialisés
 │   │   ├── models/           ← InvoiceRecord, enums, journal, asset
 │   │   ├── storage/          ← ORM SQLAlchemy + repositories
 │   │   ├── extraction/       ← HybridExtractor (PDF natif → OCR → LLM)
@@ -236,7 +236,7 @@ AccountingAgent
 RECEIVED → EXTRACTED → CLASSIFIED → VALIDATED / FLAGGED → JOURNALED → PAID
 ```
 (Les statuts intermédiaires `-ING` et `EXPORTING`/`EXPORTED` existent encore dans
-l'enum mais ne sont plus jamais posés par `AIOrchestrator` — c'était le
+l'enum mais ne sont plus jamais posés par `InvoiceProcessingOrchestrator` — c'était le
 comportement de l'ancien daemon `agent/pipeline.py`, supprimé en 2026-07.)
 
 Statuts terminaux (arrêt pipeline) : `FLAGGED, ESCALATED, ERROR, EXTRACTION_FAILED`
@@ -249,7 +249,7 @@ Statuts terminaux (arrêt pipeline) : `FLAGGED, ESCALATED, ERROR, EXTRACTION_FAI
 
 **Note (2026-07)** : ce correctif décrivait l'état SQLAlchemy d'alors. Depuis,
 la facture elle-même est lue/écrite via `SyncMongoInvoiceRepository()` (Mongo,
-pas SQLAlchemy) dans `AIOrchestrator.__init__` — le verrou SQLite décrit
+pas SQLAlchemy) dans `InvoiceProcessingOrchestrator.__init__` — le verrou SQLite décrit
 ci-dessus ne peut plus se produire sur ce chemin. `self._db` (SQLAlchemy)
 reste un paramètre réel du constructeur, transmis à certains agents, mais
 n'est plus utilisé pour le repository des factures.

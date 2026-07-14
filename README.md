@@ -182,7 +182,7 @@ internship_biat/
 │   ├── src/
 │   │   ├── agent/            # config_loader.py — wires AIComponents (build_ai_components())
 │   │   ├── ai_agents/
-│   │   │   ├── orchestrator.py         # AIOrchestrator — the real invoice-processing entry point
+│   │   │   ├── invoice_processing_orchestrator.py  # InvoiceProcessingOrchestrator — the real invoice-processing entry point
 │   │   │   ├── extraction_agent.py, classification_agent.py,
 │   │   │   │   anomaly_agent.py, accounting_agent.py   # the 4 sequential agents
 │   │   │   ├── risk_agent.py, insight_agent.py  # roadmap risk scan, health-summary
@@ -207,7 +207,7 @@ internship_biat/
 │   │   seed_risks.py, seed_roadmap.py  # Mongo-native, idempotent seeders
 │   ├── review_queue.py       # terminal review UI (reads SQLite — see Prerequisites)
 │   └── run_api.py            # FastAPI entry point
-│   # run_agent.py (headless daemon) removed 2026-07 — superseded by the API+AIOrchestrator path
+│   # run_agent.py (headless daemon) removed 2026-07 — superseded by the API+InvoiceProcessingOrchestrator path
 ├── frontend/
 │   └── src/
 │       ├── pages/
@@ -252,7 +252,7 @@ PDF / invoice file
                          → JOURNALED
 ```
 
-Orchestration: `backend/src/ai_agents/orchestrator.py` — `AIOrchestrator.process_invoice()`,
+Orchestration: `backend/src/ai_agents/invoice_processing_orchestrator.py` — `InvoiceProcessingOrchestrator.process_invoice()`,
 invoked from `POST /api/invoices/upload` — this is the only invoice-processing
 entry point (an older headless daemon existed until 2026-07; removed as
 superseded once confirmed unused in practice).  

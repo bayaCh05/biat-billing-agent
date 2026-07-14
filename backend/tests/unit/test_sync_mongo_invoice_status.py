@@ -3,7 +3,7 @@
 Added so the ML retrain job/endpoint (scheduler.py::_job_retrain_classifier,
 ai.py::retrain_model) can read invoice data from Mongo instead of the
 SQLAlchemy repository, which only ever sees a frozen migration-time
-snapshot — invoices uploaded through the real API (AIOrchestrator) land
+snapshot — invoices uploaded through the real API (InvoiceProcessingOrchestrator) land
 in Mongo only. No real MongoDB connection: _get_db() is monkeypatched
 with an in-memory fake, matching the rest of this module's test suite
 (see test_ai_audit_sync.py).

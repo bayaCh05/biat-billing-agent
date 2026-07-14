@@ -46,7 +46,7 @@ package "Backend (port 8000)" {
 }
 
 package "Couche IA (LOCAL uniquement)" #FFFCE8 {
-  [AIOrchestrator] as Orchestrator
+  [InvoiceProcessingOrchestrator] as Orchestrator
   [ExtractionAgent] as ExtAgent
   [ClassificationAgent] as ClassAgent
   [AnomalyAgent] as AnomalyAgent
@@ -164,7 +164,7 @@ SEC --> AI
 skinparam backgroundColor #FAFAFA
 title 6 Agents IA + RAG — Architecture Interne
 
-package "AIOrchestrator" #FFF8E8 {
+package "InvoiceProcessingOrchestrator" #FFF8E8 {
   [ExtractionAgent\nPDF → OCR → LLM] as EA #FFE0A0
   [ClassificationAgent\nFuzzy → ML → RAG] as CA #FFE0A0
   [AnomalyAgent\n8 contrôles + embeddings] as AA #FFE0A0

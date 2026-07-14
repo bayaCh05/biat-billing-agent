@@ -5,7 +5,7 @@ Before this fix, scheduler.py::_job_retrain_classifier and
 ai.py::retrain_model both called components.repository.count_by_status()/
 retrain_from_repo(components.repository) — the SQLAlchemy repository,
 which only ever sees a frozen migration-time snapshot since invoices
-uploaded through the real API (AIOrchestrator) land in Mongo only. These
+uploaded through the real API (InvoiceProcessingOrchestrator) land in Mongo only. These
 tests prove components.repository is never touched anymore, and that the
 Mongo repository is what actually gets passed to retrain_from_repo().
 """

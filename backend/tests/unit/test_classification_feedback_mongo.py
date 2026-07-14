@@ -3,7 +3,7 @@ via MongoDB, not the SQLAlchemy classification_feedback table.
 
 Before this fix (Lot A8), this endpoint read the invoice via the SQLAlchemy
 InvoiceRepository — which never sees invoices uploaded through the real API
-(AIOrchestrator writes Mongo-only) — and wrote feedback to a SQLite-only
+(InvoiceProcessingOrchestrator writes Mongo-only) — and wrote feedback to a SQLite-only
 table with no Mongo equivalent at all. ClassificationFeedbackDocument already
 existed as an unused Beanie schema; these tests prove it's now actually
 written to, and that the invoice read/write and retrain trigger go through

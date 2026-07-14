@@ -17,7 +17,7 @@ flowchart TB
   M7["⚠️ Module 7\nRisques & Feuille de Route\n(Matrice criticité)"]:::module
   M8["📊 Module 8\nReporting & Dashboards\n(KPIs + IA + NL Query)"]:::report
 
-  AI1["🤖 AI Orchestrator\n4 agents Ollama local"]:::ai
+  AI1["🤖 Invoice Processing Orchestrator\n4 agents Ollama local"]:::ai
   AI2["🤖 RiskAgent\n(scan nocturne)"]:::ai
   AI3["🤖 InsightAgent\n(résumé exécutif)"]:::ai
 

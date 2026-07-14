@@ -168,7 +168,7 @@ data/chromadb/              ← CHROMADB_PATH (configurable via env)
 **Collection `invoice_embeddings`** :
 - **Usage** : détection de doublons sémantiques dans `AnomalyAgent._check_semantic_duplicate()`
 - **Format** : `{issuer_name} {invoice_number} {amount_ttc} {invoice_date}`
-- **Indexation** : après `InvoiceStatus.JOURNALED` dans `AIOrchestrator._embed_invoice()`
+- **Indexation** : après `InvoiceStatus.JOURNALED` dans `InvoiceProcessingOrchestrator._embed_invoice()`
 - **Seuil** : similarité > 0.92 → flag `NEAR_DUPLICATE`
 
 ### Modèle d'embedding
@@ -333,9 +333,9 @@ Non, formellement. La docstring de `orchestrator.py` dit : *"Coordinates AI agen
 
 ## 2.2 Comment l'orchestrateur fonctionne concrètement
 
-### Ce que fait l'AIOrchestrator
+### Ce que fait l'InvoiceProcessingOrchestrator
 
-Lire `orchestrator.py` honnêtement : l'orchestrateur fait principalement **trois choses** :
+Lire `invoice_processing_orchestrator.py` honnêtement : l'orchestrateur fait principalement **trois choses** :
 
 1. **Séquencement et gestion de l'état** : instantiation des agents, passage de l'`InvoiceRecord` muté, mise à jour du statut de la facture entre chaque étape via `repository.save()`.
 2. **Un seul vrai branchement conditionnel** : si `AnomalyAgent` retourne `requires_human_review = True`, le pipeline s'arrête et AccountingAgent est sauté (status `FLAGGED`).
@@ -348,7 +348,7 @@ Lire `orchestrator.py` honnêtement : l'orchestrateur fait principalement **troi
 Exemple : facture Dell PowerEdge 85 000 TND TTC.
 
 ```
-AIOrchestrator.process_invoice(invoice)
+InvoiceProcessingOrchestrator.process_invoice(invoice)
 │
 ├── [1] ExtractionAgent.run({"invoice": invoice})
 │       → self._extractor.extract(invoice)         # HybridExtractor (OCR/PyMuPDF)
@@ -475,7 +475,7 @@ Ce n'est pas un problème d'architecture multi-agents en général — c'est une
 |---------|------|-------------|
 | `src/ai_agents/base_agent.py` | Classe de base abstraite | 73 |
 | `src/ai_agents/models.py` | AgentResult, PipelineStep, OrchestratorResult | 38 |
-| `src/ai_agents/orchestrator.py` | AIOrchestrator — séquencement + 1 branchement | 263 |
+| `src/ai_agents/invoice_processing_orchestrator.py` | InvoiceProcessingOrchestrator — séquencement + 1 branchement | 263 |
 | `src/ai_agents/extraction_agent.py` | Wrapper HybridExtractor | 79 |
 | `src/ai_agents/classification_agent.py` | 3 passes + explication | 156 |
 | `src/ai_agents/anomaly_agent.py` | 7 checks + sémantique | 204 |
@@ -558,7 +558,7 @@ def process_invoice_with_ai(invoice, components, db):
 
 2. **RiskAgent et InsightAgent dans la même hiérarchie** que les agents du pipeline facture. Ces deux agents ne traitent pas de factures — les appeler "agents" dans le même sens qu'ExtractionAgent est un abus de vocabulaire.
 
-3. **Le terme "orchestrateur"** suggère une coordination dynamique (routing, retry, parallélisme) qui n'existe pas. Ce que `AIOrchestrator.process_invoice()` fait réellement : appeler 4 fonctions séquentielles avec une condition d'arrêt. C'est un **pipeline avec un branchement conditionnel**, pas un orchestrateur au sens technique.
+3. **Le terme "orchestrateur"** suggère une coordination dynamique (routing, retry, parallélisme) qui n'existe pas. Ce que `InvoiceProcessingOrchestrator.process_invoice()` fait réellement : appeler 4 fonctions séquentielles avec une condition d'arrêt. C'est un **pipeline avec un branchement conditionnel**, pas un orchestrateur au sens technique.
 
 **Ce qui est justifié et utile même si "suringénié" :**
 
@@ -577,7 +577,7 @@ def process_invoice_with_ai(invoice, components, db):
 
 **Ce qu'il faudrait corriger à terme** (effort faible, sans risque de régression) :
 - Supprimer les 4 méthodes mortes dans `BaseAgent` ou commenter pourquoi elles existent
-- Renommer `AIOrchestrator` en `InvoicePipeline` pour refléter la réalité
+- ~~Renommer `AIOrchestrator` en `InvoicePipeline` pour refléter la réalité~~ fait (2026-07) — renommé en `InvoiceProcessingOrchestrator`, pour distinguer explicitement du futur Audit Agent (composant d'audit périodique transversal, séparé)
 - Déplacer `RiskAgent` et `InsightAgent` dans `src/ai_agents/services/` pour les distinguer des agents du pipeline
 
 ### Arguments à préparer pour une soutenance
