@@ -238,8 +238,13 @@ class AuditAgent(BaseAgent):
         similar: list[dict] = []
         for alert in alerts:
             try:
+                # 0.40, not 0.75: cosine similarity between a short aggregate
+                # alert sentence and an indexed incident's "{flag_type} {message}"/
+                # "{titre} {description}" text tops out well under 0.75 with
+                # paraphrase-multilingual-MiniLM-L12-v2 — calibrated empirically
+                # against known same-domain/different-domain message pairs.
                 found = store.search_similar_incidents(
-                    alert["message"], n_results=3, min_similarity=0.75
+                    alert["message"], n_results=3, min_similarity=0.40
                 )
             except Exception:
                 logger.warning(

@@ -227,7 +227,7 @@ class PCEVectorStore:
             logger.warning("incident_index_error: %s", exc)
 
     def search_similar_incidents(self, query_text: str, n_results: int = 3,
-                                  min_similarity: float = 0.75) -> list[dict]:
+                                  min_similarity: float = 0.40) -> list[dict]:
         """Incidents passés similaires (risques/anomalies) pour enrichir la
         synthèse narrative d'un rapport d'audit. Retrieval seul — n'influence
         aucune alerte déterministe déjà décidée (voir audit_agent.py)."""
