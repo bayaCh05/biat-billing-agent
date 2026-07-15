@@ -212,6 +212,15 @@ class InvoiceProcessingOrchestrator:
                 f"capex={result4.output.get('asset_created', False)} "
                 f"installments={result4.output.get('installments_created', 0)}",
             )
+
+            if not result4.success or not result4.output.get("is_balanced"):
+                step4.status = "failed"
+                step4.summary = (
+                    result4.error or "Écriture comptable non générée ou déséquilibrée"
+                )
+                logger.error("accounting_agent_error invoice=%s: %s", invoice.id, step4.summary)
+                return self._fail(invoice, "ERROR", start, degraded)
+
             invoice.status = InvoiceStatus.JOURNALED
             self._repo.save(invoice)
             step4.status = "done"
