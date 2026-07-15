@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from api.auth import get_current_user, seed_demo_users, validate_demo_users, refresh_demo_passwords
+from api.auth import get_current_user
 from api.limiter import limiter
 from api.security.security_headers import SecurityHeadersMiddleware
 from src.storage.mongodb import close_mongodb, init_beanie
@@ -67,24 +67,6 @@ def _startup() -> None:
         level=os.getenv("LOG_LEVEL", "INFO"),
         log_file=os.getenv("LOG_FILE") or None,
     )
-
-    # Validate demo user env vars
-    validate_demo_users()
-
-    # Seed demo accounts into the DB so login, reset link and password change
-    # all use the same backend path in local development. DISABLE_DEMO_USERS=true
-    # skips this entirely (see validate_demo_users()'s own check above) — without
-    # this gate, demo accounts were silently re-created/unlocked on every restart
-    # even with the flag set, contradicting its documented purpose.
-    if os.getenv("DISABLE_DEMO_USERS", "false").lower() != "true":
-        try:
-            from api.deps import get_session_ctx
-
-            with get_session_ctx() as session:
-                seed_demo_users(session)
-                refresh_demo_passwords(session)
-        except Exception as exc:
-            _log.warning("Impossible de préparer les comptes démo en base : %s", exc)
 
     # JWT_SECRET itself is validated at import time in api.security.jwt_handler
     # (_validate_secret) — the app fails to start entirely if it's missing, too

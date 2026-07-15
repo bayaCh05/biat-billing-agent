@@ -52,21 +52,6 @@ def _build_me(user) -> UserMeOut:
     )
 
 
-def _demo_me(role: str, email: str) -> UserMeOut:
-    demo_names = {
-        "Comptable":      ("Baya", "C."),
-        "Chef de Projet": ("Karim", "B."),
-        "Direction":      ("Directeur", "IT"),
-        "Admin":          ("Admin", "BIAT"),
-    }
-    nom, prenom = demo_names.get(role, ("Demo", "User"))
-    return UserMeOut(
-        id=None, nom=nom, prenom=prenom,
-        email=email, role=role, departement="", created_at=None,
-        profile_picture=None,
-    )
-
-
 @router.get(
     "/me",
     response_model=UserMeOut,
@@ -79,11 +64,14 @@ async def get_me(
 
     email = current_user.get("email")
     if not email:
-        return _demo_me(current_user.get("role", ""), "")
+        raise HTTPException(status_code=401, detail="Session invalide — reconnectez-vous.")
 
     mongo_user = await get_user_by_email_mongo(email)
     if mongo_user is _NOT_FOUND:
-        return _demo_me(current_user.get("role", ""), email)
+        # A valid JWT with no backing Mongo user — the account was deleted
+        # (or its email changed) after this token was issued (JWTs live up
+        # to 8h). Not a demo account: there is no demo login path anymore.
+        raise HTTPException(status_code=401, detail="Compte introuvable — reconnectez-vous.")
     if mongo_user is None:
         # MongoDB itself is unreachable (not just "no matching user") — say
         # so instead of masking the outage behind a fake demo profile.

@@ -3,8 +3,10 @@
 Strategy:
   - Override get_session with an in-memory SQLite session (same pattern as
     other integration tests)
-  - Demo users fall through to the USERS fallback dict (no DB seeding needed
-    for auth)
+  - The 4 standard test accounts (comptable/chef/directeur/admin@biat-it.tn)
+    are real Mongo users, seeded once at module load via _seed_test_users()
+    — there is no demo-account fallback in the app anymore (removed, see
+    CLAUDE.md "Section 1 — demo accounts")
   - Rate limiting disabled via env var set at module level
   - Tests cover: auth, RBAC, response shapes, 401/403 guards
 """
@@ -60,6 +62,46 @@ app.dependency_overrides[get_session] = _override_session
 client = TestClient(app, raise_server_exceptions=True)
 client.__enter__()
 
+# Seed real Mongo test users for the 4 roles this module logs in as
+# throughout. Demo accounts (a hardcoded USERS fallback dict in
+# api/auth.py, bypassing Mongo entirely) were removed from the login path
+# — see CLAUDE.md "Section 1 — demo accounts removed from auth". These are
+# genuine documents in the isolated biat_billing_test "users" collection,
+# in the same shape service_bridge.py::create_user_native() would insert —
+# written via plain synchronous pymongo (not that async function directly)
+# because this runs at module-collection time, before pytest has started
+# any event loop for Beanie's async Document registration to run in.
+def _seed_test_users() -> None:
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    import pymongo
+
+    from api.auth import hash_password
+    from src.storage.mongodb import MONGODB_DB, MONGODB_URI
+
+    coll = pymongo.MongoClient(MONGODB_URI)[MONGODB_DB]["users"]
+    now = datetime.now(timezone.utc)
+    for email, password, role in [
+        ("comptable@biat-it.tn", "biat2026", "Comptable"),
+        ("chef@biat-it.tn", "biat2026", "Chef de Projet"),
+        ("directeur@biat-it.tn", "biat2026", "Direction"),
+        ("admin@biat-it.tn", "admin2026", "Admin"),
+    ]:
+        if coll.find_one({"email": email}):
+            continue
+        coll.insert_one({
+            "_id": str(uuid4()),
+            "nom": role, "prenom": "Test", "email": email,
+            "hashed_password": hash_password(password), "role": role, "departement": "IT",
+            "is_first_login": False, "is_active": True, "created_at": now,
+            "failed_login_attempts": 0, "locked_until": None, "last_failed_login": None,
+            "last_login_at": None, "last_login_ip": None, "profile_picture": None,
+        })
+
+
+_seed_test_users()
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _close_client_and_drop_test_db():
@@ -91,7 +133,7 @@ def _auth(token: str) -> dict:
 # ── Auth tests ────────────────────────────────────────────────────────────────
 
 class TestLogin:
-    def test_demo_comptable_login_succeeds(self):
+    def test_comptable_login_succeeds(self):
         r = client.post("/api/auth/login", json={
             "email": "comptable@biat-it.tn", "password": "biat2026"
         })
@@ -101,7 +143,7 @@ class TestLogin:
         assert "access_token" in body
         assert body["token_type"] == "bearer"
 
-    def test_demo_admin_login_succeeds(self):
+    def test_admin_login_succeeds(self):
         r = client.post("/api/auth/login", json={
             "email": "admin@biat-it.tn", "password": "admin2026"
         })
@@ -415,8 +457,6 @@ class TestAnalytics:
 
 class TestUsersMe:
     def test_get_me_returns_profile_for_db_user(self):
-        # Demo users fall back to USERS dict and have no DB record → /users/me
-        # returns placeholder values; just check 200 + expected fields
         token = _login("comptable@biat-it.tn", "biat2026")
         r = client.get("/api/users/me", headers=_auth(token))
         assert r.status_code == 200
@@ -719,58 +759,15 @@ class TestReviewRBAC:
         assert r.status_code == 403, r.text
 
 
-# ── Reset token replay — M1b ──────────────────────────────────────────────────
-
-class TestResetTokenReplay:
-    """Vérifie que le token de réinitialisation de mot de passe est invalidé après usage."""
-
-    def test_demo_reset_token_cannot_be_replayed(self):
-        from src.services.password_verification_service import (
-            generate_demo_reset_link,
-            _DEMO_RESET_TOKENS,
-        )
-
-        demo_email = "comptable@biat-it.tn"
-        original_password = "biat2026"
-
-        link = generate_demo_reset_link(demo_email, "FORGOT_PASSWORD")
-        token = link.split("token=", 1)[1]
-
-        try:
-            # Premier usage : doit réussir
-            r1 = client.post("/api/auth/reset-password", json={
-                "token": token,
-                "new_password": "NouveauPass99!",
-            })
-            assert r1.status_code == 200, r1.text
-            assert r1.json()["success"] is True
-
-            # Deuxième usage avec le même token : doit échouer (token consommé)
-            r2 = client.post("/api/auth/reset-password", json={
-                "token": token,
-                "new_password": "AutrePass99!",
-            })
-            assert r2.status_code == 400, r2.text
-        finally:
-            # Restaure le mot de passe d'origine pour ne pas casser les autres tests
-            from api.routers.auth import USERS, DEMO_AUTH_STATE
-            if demo_email in USERS:
-                USERS[demo_email]["password"] = original_password
-            DEMO_AUTH_STATE.pop(demo_email, None)
-
-
 # ── Session revocation on password change/reset — post-audit follow-up ───────
 
 class TestSessionRevocationOnPasswordChange:
     """A JWT stolen before a password change/reset must not survive it.
 
-    Uses fresh, disposable, non-demo users (created via the admin API) rather
-    than the shared comptable@biat-it.tn account: any *-biat-it.tn email is
-    treated as a demo account (_is_demo_account()) and takes a pure in-memory
-    shortcut that bypasses the real Mongo-native code paths entirely — a demo
-    account also has no real UserDocument seeded into this test module's
-    isolated Mongo DB in the first place. A dedicated user per test also
-    avoids mutating shared global state (the USERS dict) across the suite.
+    Uses fresh, disposable users (created via the admin API) rather than the
+    shared comptable@biat-it.tn account, so each test's password/session
+    mutations stay isolated instead of leaking into other tests that also
+    log in as the shared account.
     """
 
     def _create_real_user(self) -> tuple[str, str, str]:
@@ -878,3 +875,25 @@ class TestSessionRevocationOnPasswordChange:
         # it must not survive (no "current session" concept here).
         assert not self._still_valid(token_a)
         assert not self._still_valid(token_b)
+
+    def test_reset_token_cannot_be_replayed(self):
+        """A reset token must be consumed on first use — a second attempt
+        with the same token must fail. Formerly tested against the demo-only
+        in-memory reset-link mechanism (removed with demo accounts); now
+        exercises the real Mongo-native reset flow via a disposable user."""
+        user_id, email, _password = self._create_real_user()
+
+        r = client.post("/api/auth/forgot-password", json={"email": email})
+        assert r.status_code == 200, r.text
+        token = self._get_password_verification_secret(user_id, "LINK")
+
+        r1 = client.post("/api/auth/reset-password", json={
+            "token": token, "new_password": "NouveauPass99!",
+        })
+        assert r1.status_code == 200, r1.text
+        assert r1.json()["success"] is True
+
+        r2 = client.post("/api/auth/reset-password", json={
+            "token": token, "new_password": "AutrePass99!",
+        })
+        assert r2.status_code == 400, r2.text

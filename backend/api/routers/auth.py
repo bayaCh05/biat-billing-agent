@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
-from api.auth import DEMO_AUTH_STATE, USERS, get_current_user, hash_password, needs_rehash, verify_password
+from api.auth import get_current_user, hash_password, needs_rehash, verify_password
 from api.limiter import limiter, limit
 from api.security import jwt_handler, account_lockout
 from src.models.audit import AuditLogCreate
@@ -103,11 +103,6 @@ class RevokeSessionRequest(BaseModel):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _is_demo_account(user_id: str, email: str) -> bool:
-    """True for demo/test accounts that cannot receive real emails."""
-    return user_id.startswith("demo:") or email.endswith("@biat-it.tn")
-
 
 def _mask_email(email: str) -> str:
     try:
@@ -318,29 +313,6 @@ async def login(
             user_id=str(db_user.id),
             force_password_change=db_user.is_first_login,
             is_first_login=db_user.is_first_login,
-        )
-
-    # Demo user path
-    demo = USERS.get(email)
-    if demo and demo.get("password") and secrets.compare_digest(demo["password"], body.password):
-        access_token = jwt_handler.create_access_token(
-            user_id=f"demo:{email}",
-            role=demo["role"],
-            email=email,
-        )
-        refresh_token = jwt_handler.create_refresh_token(user_id=f"demo:{email}")
-        await log_audit_event_native(AuditLogCreate(
-            user_email=email, user_role=demo["role"],
-            action="LOGIN_SUCCESS", resource_type="User", status="SUCCESS",
-            detail=f"Compte démo depuis {ip}", ip_address=ip, user_agent=ua,
-        ))
-        _set_refresh_cookie(response, refresh_token)
-        return LoginResponse(
-            access_token=access_token,
-            role=demo["role"],
-            user_id=f"demo:{email}",
-            force_password_change=DEMO_AUTH_STATE.get(email, {}).get("is_first_login", False),
-            is_first_login=DEMO_AUTH_STATE.get(email, {}).get("is_first_login", False),
         )
 
     await log_audit_event_native(AuditLogCreate(
@@ -577,19 +549,6 @@ async def change_password(
         ))
         return {"message": "Mot de passe modifié avec succès."}
 
-    if email in USERS:
-        if not secrets.compare_digest(body.current_password, USERS[email]["password"]):
-            raise HTTPException(400, "Mot de passe actuel incorrect.")
-        USERS[email]["password"] = body.new_password
-        DEMO_AUTH_STATE.setdefault(email, {})["is_first_login"] = False
-        await log_audit_event_native(AuditLogCreate(
-            user_email=email, user_role=USERS[email]["role"],
-            action="PASSWORD_CHANGED", resource_type="User", resource_id=email,
-            status="SUCCESS", detail="Mot de passe démo changé (direct)",
-            ip_address=_ip(request), user_agent=_ua(request),
-        ))
-        return {"message": "Mot de passe modifié avec succès."}
-
     raise HTTPException(404, "Utilisateur non trouvé.")
 
 
@@ -599,29 +558,14 @@ async def request_otp(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    """Generate and email a 6-digit OTP. Demo accounts skip email entirely."""
+    """Generate and email a 6-digit OTP."""
     from src.storage.documents.service_bridge import (
         generate_otp_native, get_user_by_email_native, log_audit_event_native,
     )
 
     email = current_user.get("email")
     if not email:
-        raise HTTPException(400, "Non disponible pour les comptes de démonstration.")
-
-    user_id = current_user.get("sub", "")
-
-    # Demo accounts cannot receive real emails — skip OTP entirely
-    if _is_demo_account(user_id, email):
-        await log_audit_event_native(AuditLogCreate(
-            user_email=email, action="OTP_REQUESTED", resource_type="User",
-            status="SUCCESS", detail="OTP ignoré — compte de démonstration",
-            ip_address=_ip(request), user_agent=_ua(request),
-        ))
-        return {
-            "skip_otp": True,
-            "message": "Compte de démonstration — vérification email ignorée.",
-            "masked_email": _mask_email(email),
-        }
+        raise HTTPException(400, "Utilisateur non trouvé.")
 
     user = await get_user_by_email_native(email)
     if user:
@@ -656,40 +600,9 @@ async def confirm_otp(
 
     email = current_user.get("email")
     if not email:
-        raise HTTPException(400, "Non disponible pour les comptes de démonstration.")
+        raise HTTPException(400, "Utilisateur non trouvé.")
     _validate_password_strength(body.new_password)
 
-    user_id = current_user.get("sub", "")
-
-    # Demo accounts: skip OTP — just update the password directly
-    if _is_demo_account(user_id, email):
-        user = await get_user_by_email_native(email)
-        if user:
-            await update_user_password_native(str(user.id), hash_password(body.new_password), is_first_login=False)
-            revoked_count = await revoke_all_user_tokens_native(
-                str(user.id), except_jti=current_user.get("jti"), reason="password_change_otp",
-            )
-            await log_audit_event_native(AuditLogCreate(
-                user_id=str(user.id), user_email=user.email, user_role=user.role,
-                action="PASSWORD_CHANGED", resource_type="User", resource_id=str(user.id),
-                status="SUCCESS",
-                detail=f"Mot de passe changé (compte démo — sans OTP) — {revoked_count} autre(s) session(s) révoquée(s)",
-                ip_address=_ip(request), user_agent=_ua(request),
-            ))
-            return {"success": True, "message": "Mot de passe modifié avec succès."}
-        if email in USERS:
-            USERS[email]["password"] = body.new_password
-            DEMO_AUTH_STATE.setdefault(email, {})["is_first_login"] = False
-            await log_audit_event_native(AuditLogCreate(
-                user_email=email, user_role=USERS[email].get("role", ""),
-                action="PASSWORD_CHANGED", resource_type="User", resource_id=email,
-                status="SUCCESS", detail="Mot de passe démo changé (sans OTP)",
-                ip_address=_ip(request), user_agent=_ua(request),
-            ))
-            return {"success": True, "message": "Mot de passe modifié avec succès."}
-        raise HTTPException(404, "Utilisateur non trouvé.")
-
-    # Real users: verify OTP
     user = await get_user_by_email_native(email)
     if user:
         if body.current_password and not verify_password(body.current_password, user.hashed_password):
@@ -742,7 +655,6 @@ async def forgot_password(
     request: Request,
     body: ForgotPasswordRequest,
 ):
-    from src.services.password_verification_service import generate_demo_reset_link
     from src.storage.documents.service_bridge import (
         generate_reset_link_native, get_user_by_email_native, log_audit_event_native,
     )
@@ -756,14 +668,6 @@ async def forgot_password(
             user_id=str(user.id), user_email=user.email, user_role=user.role,
             action="PASSWORD_RESET_REQUESTED", resource_type="User", resource_id=str(user.id),
             status="SUCCESS", detail="Lien de réinitialisation envoyé",
-            ip_address=_ip(request), user_agent=_ua(request),
-        ))
-    elif email in USERS:
-        generate_demo_reset_link(email, "FORGOT_PASSWORD")
-        await log_audit_event_native(AuditLogCreate(
-            user_email=email, user_role=USERS[email]["role"],
-            action="PASSWORD_RESET_REQUESTED", resource_type="User", resource_id=email,
-            status="SUCCESS", detail="Lien de réinitialisation démo envoyé",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
     else:
@@ -783,7 +687,6 @@ async def reset_password(
     request: Request,
     body: ResetPasswordRequest,
 ):
-    from src.services.password_verification_service import verify_demo_reset_token
     from src.storage.documents.service_bridge import (
         log_audit_event_native, revoke_all_user_tokens_native,
         update_user_password_native, verify_reset_token_native,
@@ -807,18 +710,6 @@ async def reset_password(
             action="PASSWORD_RESET_COMPLETED", resource_type="User", resource_id=str(user.id),
             status="SUCCESS",
             detail=f"Mot de passe réinitialisé via lien — {revoked_count} session(s) révoquée(s)",
-            ip_address=_ip(request), user_agent=_ua(request),
-        ))
-        return {"success": True, "message": "Mot de passe réinitialisé avec succès."}
-
-    demo_email = verify_demo_reset_token(body.token)
-    if demo_email and demo_email in USERS:
-        USERS[demo_email]["password"] = body.new_password
-        DEMO_AUTH_STATE.setdefault(demo_email, {})["is_first_login"] = False
-        await log_audit_event_native(AuditLogCreate(
-            user_email=demo_email, user_role=USERS[demo_email]["role"],
-            action="PASSWORD_RESET_COMPLETED", resource_type="User", resource_id=demo_email,
-            status="SUCCESS", detail="Mot de passe démo réinitialisé via lien",
             ip_address=_ip(request), user_agent=_ua(request),
         ))
         return {"success": True, "message": "Mot de passe réinitialisé avec succès."}

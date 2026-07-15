@@ -10,19 +10,22 @@ Every write is upsert-by-id or skip-if-exists — this seeds the SAME MongoDB
 the app reads from (not a disposable demo-only file, unlike the old SQLite
 version), so re-running never wipes existing data.
 
-Populates (in order):
-  1.  24 supplier invoices spanning all statuses + all cost catalogue entries
-  2.   9 double-entry journal entries (matched to JOURNALED invoices)
-  3.  30 monthly depreciation entries (5 assets × Jan–Jun 2026)
-  4.   5 CAPEX assets (linear + dégressive)
-  5.   3 projects + 9 phases
-  6.   3 outgoing client invoices (PAID / SENT / DRAFT)
-  7.   Budget plan updated to match seeded amounts
-  8.   4 demo users (one per role)
-  9.  Livrables for all 9 phases
-  10. Budget lines for all 3 projects
-  11. Feuille de route 2026 (6 items)
-  12. Audit log entries (realistic history)
+Populates (in order — matches the numbered [n/9] steps printed at runtime):
+  1. 24 supplier invoices spanning all statuses + all cost catalogue entries
+  2.  9 double-entry journal entries (matched to JOURNALED invoices)
+  3. 30 monthly depreciation entries (5 assets × Jan–Jun 2026) + 5 CAPEX assets
+  4.  3 projects + 9 phases
+  5.  3 outgoing client invoices (PAID / SENT / DRAFT)
+  6. Budget plan updated to match seeded amounts
+  7. Livrables for all 9 phases
+  8. Budget lines for all 3 projects
+  9. Feuille de route 2026 (6 items)
+
+Does NOT create user accounts — this script used to also seed 4 demo
+accounts (@biat-it.com.tn, hardcoded password), removed along with the
+rest of the demo-account mechanism. Provisioning the first real Admin
+account is a separate, currently unsolved problem (no script or endpoint
+exists for it yet).
 """
 from __future__ import annotations
 
@@ -43,12 +46,12 @@ try:
     # api.auth must be imported first — it's what loads .env (MONGODB_URI
     # included) before src.storage.mongodb reads it as a module-level
     # constant. Importing mongodb.py first would freeze MONGODB_URI at "".
-    from api.auth import hash_password
+    import api.auth  # noqa: F401
     from src.storage.mongodb import close_mongodb, init_beanie
     from src.storage.sync_mongo_repository import (
         SyncMongoAssetRepository, SyncMongoClientInvoiceRepository,
         SyncMongoInvoiceRepository, SyncMongoJournalRepository,
-        create_user_sync, phase_has_livrables_sync, save_charte_projet_sync,
+        phase_has_livrables_sync, save_charte_projet_sync,
         save_feuille_de_route_sync, save_ligne_budget_sync, save_livrable_sync,
         save_phase_sync,
     )
@@ -457,22 +460,6 @@ def _make_client_invoices() -> list[ClientInvoice]:
     ]
 
 
-# ── Section 4 — Demo users ────────────────────────────────────────────────────
-
-DEMO_USERS = [
-    dict(nom="Admin", prenom="Système",
-         email="admin@biat-it.com.tn", password="biat2026!",
-         role="Admin", departement="Département DSI"),
-    dict(nom="Ben Ali", prenom="Sonia",
-         email="comptable@biat-it.com.tn", password="biat2026!",
-         role="Comptable", departement="Département Comptabilité"),
-    dict(nom="Trabelsi", prenom="Karim",
-         email="chef.projet@biat-it.com.tn", password="biat2026!",
-         role="Chef de Projet", departement="Département IT"),
-    dict(nom="Mansour", prenom="Leila",
-         email="direction@biat-it.com.tn", password="biat2026!",
-         role="Direction", departement="Direction Générale"),
-]
 
 
 # ── Section 5 — Livrables ─────────────────────────────────────────────────────
@@ -613,7 +600,7 @@ def seed() -> None:
         return db["journal_entries"].find_one({"reference": reference}) is not None
 
     # ── 1. Supplier invoices + journal entries ────────────────────────────────
-    print("\n[1/10] Supplier invoices…")
+    print("\n[1/9] Supplier invoices…")
     journal_queue: list[tuple[InvoiceRecord, str]] = []
     created = skipped = 0
 
@@ -643,7 +630,7 @@ def seed() -> None:
 
     print(f"  {created} created, {skipped} skipped (already exist)")
 
-    print(f"\n[2/10] Journal entries ({len(journal_queue)})…")
+    print(f"\n[2/9] Journal entries ({len(journal_queue)})…")
     jnl_created = 0
     for inv, compte in journal_queue:
         entry = make_journal(inv, compte)
@@ -653,7 +640,7 @@ def seed() -> None:
     print(f"  {jnl_created} created, {len(journal_queue) - jnl_created} skipped (already exist)")
 
     # ── 3. CAPEX assets + depreciation ───────────────────────────────────────
-    print("\n[3/10] CAPEX assets + depreciation (Jan–Jun 2026)…")
+    print("\n[3/9] CAPEX assets + depreciation (Jan–Jun 2026)…")
     assets: list[Asset] = []
     assets_created = 0
     for spec in ASSET_SPECS:
@@ -695,7 +682,7 @@ def seed() -> None:
     print(f"  {dep_count} created, {dep_skipped} skipped (already exist)")
 
     # ── 4. Projects + phases ──────────────────────────────────────────────────
-    print("\n[4/10] Projects + phases…")
+    print("\n[4/9] Projects + phases…")
     proj_data = [
         dict(id="CHR-2026-0001", project_id="PRJ-CBK", project_name="Migration Core Banking System",
              client="BIAT", valid_from=d(2026,1,5), valid_until=d(2026,12,31),
@@ -761,7 +748,7 @@ def seed() -> None:
     print(f"  {len(proj_data)} projects, {len(phase_data)} phases")
 
     # ── 5. Client invoices ────────────────────────────────────────────────────
-    print("\n[5/10] Client invoices…")
+    print("\n[5/9] Client invoices…")
     ci_created = ci_skipped = 0
     for ci in _make_client_invoices():
         if db["client_invoices"].find_one({"invoice_number": ci.invoice_number}):
@@ -773,29 +760,11 @@ def seed() -> None:
     print(f"  {ci_created} created, {ci_skipped} skipped (already exist)")
 
     # ── 6. Budget plan YAML ───────────────────────────────────────────────────
-    print("\n[6/10] Updating budget_plan.yaml…")
+    print("\n[6/9] Updating budget_plan.yaml…")
     _update_budget_plan()
 
-    # ── 7. Users ──────────────────────────────────────────────────────────────
-    print("\n[7/10] Demo users…")
-    created_users = []
-    for spec in DEMO_USERS:
-        created = create_user_sync(
-            nom=spec["nom"], prenom=spec["prenom"], email=spec["email"],
-            hashed_password=hash_password(spec["password"]),
-            role=spec["role"], departement=spec["departement"],
-            is_first_login=False,
-        )
-        if created:
-            created_users.append(spec["email"])
-    if created_users:
-        for email in created_users:
-            print(f"  {email}")
-    else:
-        print("  All users already exist — skipped")
-
-    # ── 8. Livrables ──────────────────────────────────────────────────────────
-    print("\n[8/10] Livrables…")
+    # ── 7. Livrables ──────────────────────────────────────────────────────────
+    print("\n[7/9] Livrables…")
     n_liv = 0
     for phase_spec in LIVRABLES_DATA:
         phase_id = phase_spec["phase_id"]
@@ -811,7 +780,7 @@ def seed() -> None:
     print(f"  {n_liv} livrables created" if n_liv else "  Already seeded — skipped")
 
     # ── 9. Budget lines ───────────────────────────────────────────────────────
-    print("\n[9/10] Budget lines…")
+    print("\n[8/9] Budget lines…")
     n_budget = 0
     for spec in BUDGET_LINES:
         created = save_ligne_budget_sync(
@@ -823,7 +792,7 @@ def seed() -> None:
     print(f"  {n_budget} budget lines created" if n_budget else "  Already seeded — skipped")
 
     # ── 10. Roadmap 2026 ──────────────────────────────────────────────────────
-    print("\n[10/10] Feuille de route 2026…")
+    print("\n[9/9] Feuille de route 2026…")
     n_road = 0
     for spec in ROADMAP_ITEMS:
         created = save_feuille_de_route_sync(

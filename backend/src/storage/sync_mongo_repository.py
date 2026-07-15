@@ -1044,7 +1044,9 @@ def get_audit_snapshot_by_id_sync(snapshot_id: str) -> dict | None:
     return coll.find_one({"_id": snapshot_id})
 
 
-# ── Seed helpers (scripts/seed_demo.py, seed_users.py) ──────────────────────
+# ── Seed helpers (scripts/seed_demo.py) ──────────────────────────────────────
+# create_user_sync has no live caller as of the demo-account removal (see
+# CLAUDE.md "Section 1 — demo accounts") — kept as a general-purpose helper.
 # Domaines sans écrivain Mongo dédié avant Lot A5 — les Documents Beanie
 # existent déjà (mongodb.py::_all_document_models()), il ne manquait qu'un
 # chemin d'écriture synchrone pour les scripts de seed (pas de boucle asyncio

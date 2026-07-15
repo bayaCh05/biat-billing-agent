@@ -6,8 +6,9 @@ Covers the only OTP-generation site actually wired to api/routers/auth.py:
 src/storage/documents/service_bridge.py::generate_otp_native (Mongo-native).
 The SQLAlchemy-based generate_otp/generate_demo_otp in
 password_verification_service.py that used to be tested here were dead code
-(zero callers after the Mongo migration) and have since been removed —
-see that module's docstring.
+(zero callers after the Mongo migration); the whole module (including its
+demo-account reset-link functions) was deleted once demo accounts were
+removed from the login path (see CLAUDE.md "Section 1 — demo accounts").
 """
 from __future__ import annotations
 
@@ -42,8 +43,3 @@ class TestOTPUsesSecretsNotRandom:
         assert spy_choice.call_count == 6
         mock_send.assert_called_once()
         coll.insert_one.assert_awaited_once()
-
-    def test_password_verification_service_no_longer_imports_random(self):
-        import src.services.password_verification_service as mod
-
-        assert not hasattr(mod, "random")

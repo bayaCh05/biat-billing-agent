@@ -123,18 +123,19 @@ PYTHONPATH=backend uvicorn \           npm run dev
 
 ---
 
-## Demo accounts
+## Accounts and roles
 
-Passwords are read from env vars (`DEMO_ADMIN_PASSWORD`/`DEMO_COMPTABLE_PASSWORD`/
-`DEMO_CHEF_PASSWORD`/`DEMO_DIRECTION_PASSWORD` in `.env`, no hardcoded fallback —
-see `backend/api/auth.py`). Typical dev values:
+There is no demo-account login path anymore — `login()` checks only real
+Mongo `users` documents. To get a local account to log in with, either:
+create one directly in Mongo (see `_seed_test_users()` in
+`backend/tests/integration/test_api_e2e.py` for the exact document shape),
+or via `POST /api/admin/users` once you already have an Admin session.
 
-| Email | Password | Role |
-|-------|----------|------|
-| admin@biat-it.tn | admin2026 | Admin |
-| comptable@biat-it.tn | biat2026 | Comptable |
-| chef@biat-it.tn | biat2026 | Chef de Projet |
-| directeur@biat-it.tn | biat2026 | Direction |
+**Known gap**: nothing currently creates the *first* Admin account on a
+brand-new database without one already existing — `POST /api/admin/users`
+requires an Admin session to call. Until this is solved, bootstrap the
+first account by writing directly to Mongo's `users` collection (same
+shape as `_seed_test_users()` above).
 
 | Role | Pages accessible |
 |------|-----------------|
@@ -203,11 +204,13 @@ internship_biat/
 │       ├── unit/             # 42 files, mocked deps
 │       └── integration/      # real disposable Mongo test DB, mocked LLM
 ├── scripts/
-│   ├── seed_demo.py, seed_users.py, seed_budget_actuals.py, seed_projects.py,
+│   ├── seed_demo.py, seed_budget_actuals.py, seed_projects.py,
 │   │   seed_risks.py, seed_roadmap.py  # Mongo-native, idempotent seeders
+│   │   # (does NOT create user accounts — no demo accounts anymore, see below)
 │   ├── review_queue.py       # terminal review UI (reads SQLite — see Prerequisites)
 │   └── run_api.py            # FastAPI entry point
 │   # run_agent.py (headless daemon) removed 2026-07 — superseded by the API+InvoiceProcessingOrchestrator path
+│   # seed_users.py removed — created hardcoded-password demo Mongo accounts
 ├── frontend/
 │   └── src/
 │       ├── pages/

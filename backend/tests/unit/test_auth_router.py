@@ -23,7 +23,6 @@ from api.routers.auth import (
     LoginRequest,
     ResetPasswordRequest,
     RevokeSessionRequest,
-    _is_demo_account,
     _mask_email,
     _should_use_ldap,
     _validate_password_strength,
@@ -125,19 +124,6 @@ class TestShouldUseLdap:
             patch("api.routers.auth._LDAP_USER_DOMAIN", "biat.local"),
         ):
             assert _should_use_ldap("jdoe@biat-it.tn") is False
-
-
-# ── _is_demo_account ─────────────────────────────────────────────────────────
-
-class TestIsDemoAccount:
-    def test_demo_prefixed_user_id_is_demo(self):
-        assert _is_demo_account("demo:comptable@biat-it.tn", "comptable@biat-it.tn") is True
-
-    def test_biat_it_tn_email_is_demo(self):
-        assert _is_demo_account("some-real-uuid", "user@biat-it.tn") is True
-
-    def test_real_account_is_not_demo(self):
-        assert _is_demo_account("some-real-uuid", "user@biat.local") is False
 
 
 # ── _mask_email ──────────────────────────────────────────────────────────────
@@ -264,25 +250,6 @@ class TestLoginLocal:
             update_user_password_native=update_mock,
         )
         update_mock.assert_called_once()
-
-    def test_unknown_user_falls_back_to_demo_login(self):
-        with patch.dict(
-            "api.routers.auth.USERS",
-            {"demo1@biat-it.tn": {"password": "DemoPass1!", "role": "Comptable"}},
-        ):
-            result = self._run(LoginRequest(email="demo1@biat-it.tn", password="DemoPass1!"))
-        assert result.user_id == "demo:demo1@biat-it.tn"
-        assert result.role == "Comptable"
-
-    def test_demo_login_wrong_password_raises_401(self):
-        with patch.dict(
-            "api.routers.auth.USERS",
-            {"demo2@biat-it.tn": {"password": "DemoPass1!", "role": "Comptable"}},
-        ):
-            with pytest.raises(HTTPException) as exc:
-                self._run(LoginRequest(email="demo2@biat-it.tn", password="WrongOne!"))
-        assert exc.value.status_code == 401
-
 
 # ── login() — LDAP authentication ───────────────────────────────────────────
 
@@ -572,10 +539,10 @@ class TestChangePassword:
             for c in ctxs:
                 c.stop()
 
-    def test_demo_current_user_without_email_raises_400(self):
+    def test_token_without_email_claim_raises_400(self):
         with pytest.raises(HTTPException) as exc:
             self._run(
-                {"sub": "demo:x@biat-it.tn"},
+                {"sub": "some-uuid"},
                 ChangePasswordRequest(current_password="a", new_password="NewPass1!"),
             )
         assert exc.value.status_code == 400
@@ -602,29 +569,6 @@ class TestChangePassword:
         )
         assert result["message"] == "Mot de passe modifié avec succès."
         revoke_mock.assert_called_once_with(str(user.id), except_jti="current-jti", reason="password_change")
-
-    def test_demo_user_wrong_password_raises_400(self):
-        with patch.dict(
-            "api.routers.auth.USERS",
-            {"demo3@biat-it.tn": {"password": "DemoPass1!", "role": "Comptable"}},
-        ):
-            with pytest.raises(HTTPException) as exc:
-                self._run(
-                    {"email": "demo3@biat-it.tn", "sub": "demo:demo3@biat-it.tn"},
-                    ChangePasswordRequest(current_password="Wrong!", new_password="NewPass1!"),
-                )
-        assert exc.value.status_code == 400
-
-    def test_demo_user_correct_password_succeeds(self):
-        with patch.dict(
-            "api.routers.auth.USERS",
-            {"demo4@biat-it.tn": {"password": "DemoPass1!", "role": "Comptable"}},
-        ):
-            result = self._run(
-                {"email": "demo4@biat-it.tn", "sub": "demo:demo4@biat-it.tn"},
-                ChangePasswordRequest(current_password="DemoPass1!", new_password="NewPass1!"),
-            )
-        assert result["message"] == "Mot de passe modifié avec succès."
 
     def test_user_not_found_anywhere_raises_404(self):
         with pytest.raises(HTTPException) as exc:
@@ -657,12 +601,8 @@ class TestRequestOtp:
 
     def test_no_email_raises_400(self):
         with pytest.raises(HTTPException) as exc:
-            self._run({"sub": "demo:x"})
+            self._run({"sub": "some-uuid"})
         assert exc.value.status_code == 400
-
-    def test_demo_account_skips_otp(self):
-        result = self._run({"sub": "demo:x@biat-it.tn", "email": "x@biat-it.tn"})
-        assert result["skip_otp"] is True
 
     def test_real_user_generates_otp(self):
         user = _make_db_user()
@@ -705,36 +645,8 @@ class TestConfirmOtp:
 
     def test_no_email_raises_400(self):
         with pytest.raises(HTTPException) as exc:
-            self._run({"sub": "demo:x"}, ConfirmOtpRequest(new_password="NewPass1!"))
+            self._run({"sub": "some-uuid"}, ConfirmOtpRequest(new_password="NewPass1!"))
         assert exc.value.status_code == 400
-
-    def test_demo_account_db_user_succeeds(self):
-        user = _make_db_user(email="demo5@biat-it.tn")
-        result = self._run(
-            {"sub": "demo:demo5@biat-it.tn", "email": user.email, "jti": "j1"},
-            ConfirmOtpRequest(new_password="NewPass1!"),
-            get_user_by_email_native=AsyncMock(return_value=user),
-        )
-        assert result["success"] is True
-
-    def test_demo_account_users_dict_only_succeeds(self):
-        with patch.dict(
-            "api.routers.auth.USERS",
-            {"demo6@biat-it.tn": {"password": "Old!", "role": "Comptable"}},
-        ):
-            result = self._run(
-                {"sub": "demo:demo6@biat-it.tn", "email": "demo6@biat-it.tn"},
-                ConfirmOtpRequest(new_password="NewPass1!"),
-            )
-        assert result["success"] is True
-
-    def test_demo_account_not_found_anywhere_raises_404(self):
-        with pytest.raises(HTTPException) as exc:
-            self._run(
-                {"sub": "demo:ghost@biat-it.tn", "email": "ghost@biat-it.tn"},
-                ConfirmOtpRequest(new_password="NewPass1!"),
-            )
-        assert exc.value.status_code == 404
 
     def test_real_user_wrong_current_password_raises_400(self):
         user = _make_db_user()
@@ -796,7 +708,7 @@ class TestForgotPassword:
         "Si cet email est associé à un compte actif, un lien de réinitialisation a été envoyé."
     )
 
-    def _run(self, email, demo_reset_mock=None, **sb_overrides):
+    def _run(self, email, **sb_overrides):
         patches = dict(
             generate_reset_link_native=AsyncMock(return_value="tok"),
             get_user_by_email_native=AsyncMock(return_value=None),
@@ -804,10 +716,6 @@ class TestForgotPassword:
         )
         patches.update(sb_overrides)
         ctxs = [patch(f"{_SB}.{name}", new=val) for name, val in patches.items()]
-        ctxs.append(patch(
-            "src.services.password_verification_service.generate_demo_reset_link",
-            new=demo_reset_mock or MagicMock(return_value="demo-tok"),
-        ))
         for c in ctxs:
             c.start()
         try:
@@ -827,16 +735,6 @@ class TestForgotPassword:
         generate_mock.assert_called_once()
         assert result["message"] == self._EXPECTED_MESSAGE
 
-    def test_demo_email_generates_demo_reset_link(self):
-        demo_mock = MagicMock(return_value="demo-tok")
-        with patch.dict(
-            "api.routers.auth.USERS",
-            {"demo7@biat-it.tn": {"password": "x", "role": "Comptable"}},
-        ):
-            result = self._run("demo7@biat-it.tn", demo_reset_mock=demo_mock)
-        demo_mock.assert_called_once()
-        assert result["message"] == self._EXPECTED_MESSAGE
-
     def test_unknown_email_gives_identical_message(self):
         """Same response regardless of outcome — prevents user enumeration."""
         result = self._run("nobody@nowhere.tn")
@@ -846,7 +744,7 @@ class TestForgotPassword:
 # ── reset_password() ─────────────────────────────────────────────────────────
 
 class TestResetPassword:
-    def _run(self, body, demo_verify_mock=None, **sb_overrides):
+    def _run(self, body, **sb_overrides):
         patches = dict(
             log_audit_event_native=AsyncMock(),
             revoke_all_user_tokens_native=AsyncMock(return_value=0),
@@ -855,10 +753,6 @@ class TestResetPassword:
         )
         patches.update(sb_overrides)
         ctxs = [patch(f"{_SB}.{name}", new=val) for name, val in patches.items()]
-        ctxs.append(patch(
-            "src.services.password_verification_service.verify_demo_reset_token",
-            new=demo_verify_mock or MagicMock(return_value=None),
-        ))
         for c in ctxs:
             c.start()
         try:
@@ -888,18 +782,6 @@ class TestResetPassword:
         )
         assert result["success"] is True
         revoke_mock.assert_called_once_with(str(user.id), except_jti=None, reason="password_reset_link")
-
-    def test_valid_demo_token_resets_demo_password(self):
-        demo_mock = MagicMock(return_value="demo8@biat-it.tn")
-        with patch.dict(
-            "api.routers.auth.USERS",
-            {"demo8@biat-it.tn": {"password": "Old!", "role": "Comptable"}},
-        ):
-            result = self._run(
-                ResetPasswordRequest(token="demo-tok", new_password="NewPass1!"),
-                demo_verify_mock=demo_mock,
-            )
-        assert result["success"] is True
 
     def test_invalid_token_raises_400(self):
         with pytest.raises(HTTPException) as exc:

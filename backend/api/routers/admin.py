@@ -104,17 +104,13 @@ async def create_user(
     "/users",
     response_model=list[UserOut],
     summary="Lister les utilisateurs",
-    description=(
-        "Retourne tous les comptes : utilisateurs en base de données et comptes démo système. "
-        "Les comptes démo sont marqués `is_demo=true` et n'ont pas d'actions disponibles."
-    ),
+    description="Retourne tous les comptes utilisateurs en base de données.",
     response_description="Liste complète des utilisateurs avec rôles et statuts",
     responses={403: {"description": "Rôle Admin requis"}},
 )
 async def list_users(
     _: dict = _ADMIN,
 ):
-    from api.auth import USERS
     from src.storage.documents.service_bridge import list_users_mongo
 
     mongo_users = await list_users_mongo()
@@ -125,9 +121,8 @@ async def list_users(
         db_users = []
     else:
         db_users = mongo_users
-    db_emails = {u.email for u in db_users}
 
-    result = [
+    return [
         UserOut(
             id=str(u.id),
             nom=u.nom,
@@ -138,29 +133,9 @@ async def list_users(
             is_first_login=u.is_first_login,
             is_active=u.is_active,
             created_at=u.created_at.isoformat(),
-            is_demo=u.email in USERS,
         )
         for u in db_users
     ]
-
-    # Append hardcoded demo accounts that are not in the DB
-    for email, info in USERS.items():
-        if email not in db_emails:
-            slug = email.split("@")[0]
-            result.append(UserOut(
-                id=f"demo-{slug}",
-                nom=slug.capitalize(),
-                prenom="Demo",
-                email=email,
-                role=info["role"],
-                departement="Demo",
-                is_first_login=False,
-                is_active=True,
-                created_at="2026-01-01T00:00:00",
-                is_demo=True,
-            ))
-
-    return result
 
 
 @router.patch(

@@ -1,4 +1,9 @@
-"""Unit tests — sync Mongo seed-writer helpers (scripts/seed_demo.py, seed_users.py).
+"""Unit tests — sync Mongo seed-writer helpers (scripts/seed_demo.py).
+
+create_user_sync has no live caller as of the demo-account removal (see
+CLAUDE.md "Section 1 — demo accounts") — kept, and still tested here, as a
+general-purpose Mongo user-creation helper available for future seed
+scripts, not dead code slated for deletion.
 
 No real MongoDB connection: sync_mongo_repository._get_db() is monkeypatched
 with in-memory fakes, matching test_sync_mongo_invoice_status.py's pattern.
