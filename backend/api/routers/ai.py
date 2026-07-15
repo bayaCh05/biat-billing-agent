@@ -43,12 +43,13 @@ class ClassificationCorrectionRequest(BaseModel):
 )
 def get_health_summary():
     from src.ai_agents.insight_agent import InsightAgent
+    from src.ai_agents.ollama_client import OllamaClient
     agent = InsightAgent()
     result = agent.run({"task": "health_summary"})
     return {
         **result.output,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "ollama_available": result.success,
+        "ollama_available": OllamaClient.get().is_available(),
     }
 
 
