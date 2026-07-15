@@ -17,7 +17,6 @@ from src.models.invoice import InvoiceRecord, ValidationFlag
 
 logger = logging.getLogger(__name__)
 
-_HIGH_VALUE_TND = float(__import__("os").getenv("ANOMALY_HIGH_VALUE_TND", "50000"))
 _CATEGORY_PCT = int(__import__("os").getenv("ANOMALY_CATEGORY_PERCENTILE_THRESHOLD", "90"))
 
 _TN_MF_RE = re.compile(r"^\d{7}[A-Z]/[A-Z]/[A-Z]/\d{3}$", re.IGNORECASE)
