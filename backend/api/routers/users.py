@@ -85,10 +85,12 @@ async def get_me(
     if mongo_user is _NOT_FOUND:
         return _demo_me(current_user.get("role", ""), email)
     if mongo_user is None:
-        # Users are written Mongo-only (see CLAUDE.md) — the old SQLite
-        # fallback here could only ever serve permanently stale data.
-        _log.warning("get_me: MongoDB indisponible — %s introuvable.", email)
-        return _demo_me(current_user.get("role", ""), email)
+        # MongoDB itself is unreachable (not just "no matching user") — say
+        # so instead of masking the outage behind a fake demo profile.
+        # Users are written Mongo-only (see CLAUDE.md), so there is no
+        # SQLite fallback to serve here anyway.
+        _log.warning("get_me: MongoDB indisponible pour %s.", email)
+        raise HTTPException(status_code=503, detail="Service utilisateur indisponible")
     return _build_me(mongo_user)
 
 

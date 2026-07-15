@@ -106,7 +106,7 @@ class RevokeSessionRequest(BaseModel):
 
 def _is_demo_account(user_id: str, email: str) -> bool:
     """True for demo/test accounts that cannot receive real emails."""
-    return user_id.startswith("demo:") or "biat-it.tn" in email
+    return user_id.startswith("demo:") or email.endswith("@biat-it.tn")
 
 
 def _mask_email(email: str) -> str:
