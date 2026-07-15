@@ -1,10 +1,11 @@
 """Natural-language → SQL query endpoint."""
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends
 
 from api.auth import require_role
-from api.deps import get_config
 from api.schemas import NLQueryRequest, NLQueryResult
 
 router = APIRouter(prefix="/nl-query", tags=["analytics"])
@@ -27,12 +28,14 @@ _COMPTABLE_DIRECTION = Depends(require_role("Comptable", "Direction"))
 def nl_query(
     body: NLQueryRequest,
     _: dict = _COMPTABLE_DIRECTION,
-    cfg: dict = Depends(get_config),
 ):
     from src.query.nl_query_engine import NLQueryEngine
 
-    model = cfg.get("extraction", {}).get("llm_model", "qwen2.5:3b")
-    ollama_url = cfg.get("llm", {}).get("base_url", "http://localhost:11434")
+    # Same env vars OllamaClient resolves against (ollama_client.py) — config/
+    # settings.yaml has no `llm.base_url` key, so reading it here always fell
+    # through to the hardcoded default regardless of OLLAMA_BASE_URL.
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
     try:
         nl_engine = NLQueryEngine(ollama_url=ollama_url, model=model)
