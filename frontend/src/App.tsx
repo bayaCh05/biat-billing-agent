@@ -27,6 +27,7 @@ import ResetPassword from './pages/auth/ResetPassword'
 import InscriptionPage from './pages/admin/InscriptionPage'
 import HabilitationsPage from './pages/admin/HabilitationsPage'
 import Audit from './pages/transversal/Audit'
+import AuditReports from './pages/transversal/AuditReports'
 import Echeancier from './pages/comptabilite/Echeancier'
 import { useAuth } from './context/AuthContext'
 import { roleHome } from './config/navigation'
@@ -103,6 +104,7 @@ export default function App() {
                 <Route path="/ai-activity"    element={<AIActivity />} />
                 <Route path="/security"       element={<Security />} />
                 <Route path="/audit"            element={<Audit />} />
+                <Route path="/audit-reports"    element={<AuditReports />} />
                 <Route path="/admin/inscription"   element={<InscriptionPage />} />
                 <Route path="/admin/habilitations" element={<HabilitationsPage />} />
               </Route>

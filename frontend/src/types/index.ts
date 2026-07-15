@@ -391,6 +391,82 @@ export interface AuditLog {
   detail: string | null
 }
 
+// ── Audit Reports (Audit Agent) ────────────────────────────────────────────────
+
+export type AuditGranularity = 'DAILY' | 'WEEKLY' | 'MONTHLY'
+export type AuditSnapshotStatus = 'OK' | 'DEGRADED'
+export type AuditAlertSeverity = 'CRITICAL' | 'WARNING' | 'INFO'
+
+export interface AuditReportSummary {
+  id: string
+  granularity: AuditGranularity
+  period_start: string
+  period_end: string
+  generated_at: string
+  status: AuditSnapshotStatus
+  alert_count: number
+  critical_count: number
+}
+
+export interface AuditAlert {
+  domain: string
+  severity: AuditAlertSeverity
+  code: string
+  message: string
+}
+
+export interface AuditSimilarIncident {
+  source_type: string
+  source_id: string
+  date: string | null
+  similarity: number
+  excerpt: string
+  related_alert_code: string
+}
+
+export interface AuditReconciliationDetail {
+  count: number
+  detail: Array<Record<string, unknown>>
+}
+
+export interface AuditBudgetOverrun {
+  catalog_id: string
+  budget_ytd: number
+  actual_ytd: number
+  top_invoices: Array<{ invoice_id: string; invoice_number: string | null; amount_ht: number | null }>
+}
+
+export interface AuditJournalMismatch {
+  missing_entry_count: number
+  missing_entry: Array<Record<string, unknown>>
+  duplicate_entry_count: number
+  duplicate_entry: Array<Record<string, unknown>>
+  amount_mismatch_count: number
+  amount_mismatch: Array<Record<string, unknown>>
+}
+
+export interface AuditReconciliation {
+  overdue_without_installment_plan?: AuditReconciliationDetail | null
+  late_installment_not_flagged?: AuditReconciliationDetail | null
+  budget_overrun_attribution?: AuditBudgetOverrun[] | null
+  journal_mismatch?: AuditJournalMismatch | null
+}
+
+export interface AuditReportDetail {
+  id: string
+  granularity: AuditGranularity
+  period_start: string
+  period_end: string
+  generated_at: string
+  status: AuditSnapshotStatus
+  metrics: Record<string, Record<string, unknown> | null>
+  trend: Record<string, Record<string, number>>
+  alerts: AuditAlert[]
+  reconciliation: AuditReconciliation
+  similar_incidents: AuditSimilarIncident[]
+  narrative_summary: string | null
+}
+
 // ── Risks ─────────────────────────────────────────────────────────────────────
 
 export type TypeRisque = 'DELAI' | 'BUDGET' | 'TECHNIQUE' | 'RESSOURCE' | 'FOURNISSEUR' | 'REGLEMENTAIRE' | 'AUTRE'

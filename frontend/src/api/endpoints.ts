@@ -16,6 +16,7 @@ import type {
   AccountSpendItem,
   AnalyticsKPIs,
   Risk, RiskSummary, RoadmapItemWithRisks, RisquesProjetGroupe,
+  AuditGranularity, AuditReportSummary, AuditReportDetail,
 } from '../types'
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
@@ -262,6 +263,29 @@ export const listAuditLogs = (params: {
   const qs = q.toString()
   return apiFetch<AuditLog[]>(`/audit/logs${qs ? '?' + qs : ''}`)
 }
+
+// ── Audit Reports (Audit Agent) ──────────────────────────────────────────────
+
+export const listAuditReports = (params: {
+  granularity?: AuditGranularity
+  limit?: number
+  skip?: number
+} = {}) => {
+  const q = new URLSearchParams()
+  if (params.granularity)  q.set('granularity', params.granularity)
+  if (params.limit != null) q.set('limit', String(params.limit))
+  if (params.skip != null)  q.set('skip', String(params.skip))
+  const qs = q.toString()
+  return apiFetch<{ total: number; items: AuditReportSummary[] }>(`/audit-reports${qs ? '?' + qs : ''}`)
+}
+
+export const getAuditReport = (id: string) =>
+  apiFetch<AuditReportDetail>(`/audit-reports/${id}`)
+
+export const runAuditReport = (granularity: AuditGranularity) =>
+  apiFetch<{ snapshot_id: string; granularity: AuditGranularity; alerts: unknown[]; degraded: boolean }>(
+    '/audit-reports/run', { method: 'POST', body: JSON.stringify({ granularity }) }
+  )
 
 // ── Risks ─────────────────────────────────────────────────────────────────────
 

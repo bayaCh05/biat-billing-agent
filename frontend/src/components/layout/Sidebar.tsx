@@ -4,6 +4,7 @@ import {
   Activity, BookOpen, BookMarked, CreditCard, BarChart2,
   Building2, TrendingUp, Gauge, MessageSquare, FolderKanban,
   LogOut, Map, ShieldCheck, ShieldAlert, Users, History, Bot, CalendarClock,
+  FileBarChart2,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { ROLE_PATHS } from '../../config/roles'
@@ -32,6 +33,7 @@ const ALL_NAV = [
   { path: '/ai-activity',    icon: Bot,      label: 'Activité IA',    roles: ['Admin'] },
   { path: '/security',       icon: ShieldCheck, label: 'Sécurité',     roles: ['Admin'] },
   { path: '/audit',          icon: History,  label: 'Piste d\'Audit',  roles: ['Admin', 'Direction'] },
+  { path: '/audit-reports',  icon: FileBarChart2, label: 'Rapports d\'Audit', roles: ['Comptable', 'Chef de Projet', 'Direction', 'Admin'] },
 ]
 
 export default function Sidebar() {
