@@ -21,10 +21,13 @@ os.environ.setdefault("JWT_SECRET", "test-secret-for-security-summary-padding")
 
 from api.routers.audit import compute_integrity_summary
 from api.routers.security import security_summary
-from api.security.audit_integrity import compute_row_hash
+from api.security.audit_integrity import compute_row_hash, verify_row_status
 
 
-def _fake_row(action: str, row_hash: str | None) -> SimpleNamespace:
+def _fake_row(
+    action: str, row_hash: str | None,
+    rebaseline_hash: str | None = None, rebaselined_at=None,
+) -> SimpleNamespace:
     return SimpleNamespace(
         id="log-1",
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -35,6 +38,8 @@ def _fake_row(action: str, row_hash: str | None) -> SimpleNamespace:
         status="SUCCESS",
         ip_address="127.0.0.1",
         row_hash=row_hash,
+        rebaseline_hash=rebaseline_hash,
+        rebaselined_at=rebaselined_at,
     )
 
 
@@ -99,6 +104,59 @@ class TestComputeIntegritySummary:
         assert result["tampered_count"] == 1
         assert result["tampered_entries"][0]["id"] == "mongo-log-1"
 
+    def test_rebaselined_row_is_not_counted_as_tampered(self):
+        """A row whose row_hash no longer verifies (secret rotation) but whose
+        rebaseline_hash does must be reported separately, never as tampered —
+        see scripts/rebaseline_audit_hmac.py and docs/audit_hmac_incident.md."""
+        row = _fake_row("LOGIN_SUCCESS", "stale-pre-rotation-hash")
+        row.rebaseline_hash = compute_row_hash(row)
+        row.rebaselined_at = datetime(2026, 7, 15, tzinfo=timezone.utc)
+        session = _session_with_rows([row])
+
+        with patch(
+            "src.storage.documents.service_bridge.verify_integrity_native",
+            new=AsyncMock(return_value=None),
+        ):
+            result = asyncio.run(compute_integrity_summary(session))
+
+        assert result["tampered_count"] == 0
+        assert result["rebaselined_count"] == 1
+        assert result["rebaselined_entries"][0]["id"] == "log-1"
+        assert "rebaselined" in result["message"]
+
+    def test_row_hash_and_rebaseline_hash_both_fail_is_still_tampered(self):
+        row = _fake_row("LOGIN_SUCCESS", "stale-hash", rebaseline_hash="also-wrong-hash")
+        session = _session_with_rows([row])
+
+        with patch(
+            "src.storage.documents.service_bridge.verify_integrity_native",
+            new=AsyncMock(return_value=None),
+        ):
+            result = asyncio.run(compute_integrity_summary(session))
+
+        assert result["tampered_count"] == 1
+        assert result["rebaselined_count"] == 0
+
+
+class TestVerifyRowStatus:
+    def test_original_hash_still_valid(self):
+        row = _fake_row("LOGIN_SUCCESS", None)
+        row.row_hash = compute_row_hash(row)
+        assert verify_row_status(row) == "original"
+
+    def test_rebaseline_hash_valid_when_row_hash_stale(self):
+        row = _fake_row("LOGIN_SUCCESS", "stale-hash")
+        row.rebaseline_hash = compute_row_hash(row)
+        assert verify_row_status(row) == "rebaselined"
+
+    def test_neither_matches_is_failed(self):
+        row = _fake_row("LOGIN_SUCCESS", "stale-hash", rebaseline_hash="also-stale")
+        assert verify_row_status(row) == "failed"
+
+    def test_no_row_hash_at_all_is_failed(self):
+        row = _fake_row("LOGIN_SUCCESS", None)
+        assert verify_row_status(row) == "failed"
+
 
 class TestSecuritySummaryWiring:
     """The /security/summary route must surface the real count, on both
@@ -111,7 +169,7 @@ class TestSecuritySummaryWiring:
         }
         with patch(
             "api.routers.security.compute_integrity_summary",
-            new=AsyncMock(return_value={"tampered_count": 7}),
+            new=AsyncMock(return_value={"tampered_count": 7, "rebaselined_count": 2}),
         ), patch(
             "src.storage.documents.service_bridge.security_summary_mongo",
             new=AsyncMock(return_value=dict(mongo_dict)),
@@ -119,6 +177,7 @@ class TestSecuritySummaryWiring:
             result = asyncio.run(security_summary(_={"role": "Admin"}, session=MagicMock()))
 
         assert result["tampered_entries_count"] == 7
+        assert result["rebaselined_entries_count"] == 2
 
     def test_sqlite_fallback_path_uses_real_tampered_count(self):
         session = MagicMock()
@@ -130,7 +189,7 @@ class TestSecuritySummaryWiring:
 
         with patch(
             "api.routers.security.compute_integrity_summary",
-            new=AsyncMock(return_value={"tampered_count": 5}),
+            new=AsyncMock(return_value={"tampered_count": 5, "rebaselined_count": 1}),
         ), patch(
             "src.storage.documents.service_bridge.security_summary_mongo",
             new=AsyncMock(return_value=None),
@@ -138,3 +197,4 @@ class TestSecuritySummaryWiring:
             result = asyncio.run(security_summary(_={"role": "Admin"}, session=session))
 
         assert result["tampered_entries_count"] == 5
+        assert result["rebaselined_entries_count"] == 1

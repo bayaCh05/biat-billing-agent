@@ -51,7 +51,7 @@ export default function NotificationBell() {
 
   // Reload when the dropdown opens
   useEffect(() => {
-    if (open) loadNotifs()
+    if (open) queueMicrotask(loadNotifs)
   }, [open, loadNotifs])
 
   // Close on click outside

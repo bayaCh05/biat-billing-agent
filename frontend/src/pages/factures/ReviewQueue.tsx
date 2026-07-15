@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { CheckCircle, XCircle, Wrench, ChevronDown, ChevronUp } from 'lucide-react'
 import { getReviewQueue, approveInvoice, rejectInvoice } from '../../api/endpoints'
 import type { InvoiceSummary, InvoiceFlag } from '../../types'
@@ -48,12 +48,12 @@ export default function ReviewQueue() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('Tous')
   const [toasts, setToasts] = useState<Toast[]>([])
-  const toastId = useState(0)
+  const toastId = useRef(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
 
   const addToast = (msg: string, type: 'ok' | 'err') => {
-    const id = ++toastId[0]
+    const id = ++toastId.current
     setToasts(prev => [...prev, { id, msg, type }])
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500)
   }

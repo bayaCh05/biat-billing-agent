@@ -109,11 +109,13 @@ export default function Profile() {
   const [revokingJti, setRevokingJti]         = useState<string | null>(null)
 
   useEffect(() => {
-    setLoadingSessions(true)
-    getSessions()
-      .then(d => setSessions(d.sessions))
-      .catch(() => {})
-      .finally(() => setLoadingSessions(false))
+    queueMicrotask(() => {
+      setLoadingSessions(true)
+      getSessions()
+        .then(d => setSessions(d.sessions))
+        .catch(() => {})
+        .finally(() => setLoadingSessions(false))
+    })
   }, [])
 
   const handleRevokeSession = async (jti: string) => {

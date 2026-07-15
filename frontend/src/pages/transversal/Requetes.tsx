@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../../api/client'
@@ -18,6 +18,15 @@ const CHIPS = [
   '🔁 Doublons détectés',
   '🏗️ Actifs CAPEX acquis en 2026',
 ]
+
+function loadHistory(): HistoryItem[] {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    return stored ? JSON.parse(stored) : []
+  } catch {
+    return []
+  }
+}
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
@@ -74,15 +83,8 @@ export default function Requetes() {
   const [result, setResult] = useState<NLQueryResult | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [sqlOpen, setSqlOpen] = useState(false)
-  const [history, setHistory] = useState<HistoryItem[]>([])
+  const [history, setHistory] = useState<HistoryItem[]>(loadHistory)
   const [inputFocused, setInputFocused] = useState(false)
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY)
-      if (stored) setHistory(JSON.parse(stored))
-    } catch { /* ignore */ }
-  }, [])
 
   async function submit() {
     const q = query.trim()

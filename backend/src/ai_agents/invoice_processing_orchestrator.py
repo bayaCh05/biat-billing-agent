@@ -2,8 +2,11 @@
 
 Takes an AIComponents bundle (agent/config_loader.py) of stateless stage
 objects. Built as synchronous to match the existing FastAPI + SQLAlchemy
-patterns (the `db: Session` param is used by ValidationAgent/AccountingAgent
-directly — see their `.run()` calls below).
+patterns, though nothing here is SQLAlchemy-bound today — a `db: Session`
+constructor param used to be threaded through to AnomalyAgent/AccountingAgent's
+`.run()` calls, but neither agent ever read it (verified against both
+agents' `context keys:` docstrings, 2026-07-15) — removed as dead code, see
+CLAUDE.md "Lot 10".
 """
 from __future__ import annotations
 
@@ -11,8 +14,6 @@ import logging
 import os
 import time
 from typing import TYPE_CHECKING
-
-from sqlalchemy.orm import Session
 
 from src.ai_agents.agent_schemas import OrchestratorResult, PipelineStep
 from src.ai_agents.ollama_client import OllamaClient
@@ -29,9 +30,8 @@ logger = logging.getLogger(__name__)
 class InvoiceProcessingOrchestrator:
     """Coordinates AI agents for the complete invoice processing pipeline."""
 
-    def __init__(self, components: "AIComponents", db: Session) -> None:
+    def __init__(self, components: "AIComponents") -> None:
         self._c = components
-        self._db = db
         self._steps: list[PipelineStep] = []
 
         # Mongo primaire pour le chemin de traitement d'une facture — voir
@@ -138,7 +138,7 @@ class InvoiceProcessingOrchestrator:
                 self._duplicate_detector,
                 self._anomaly_detector,
             )
-            result3 = agent3.run({"invoice": invoice, "db": self._db})
+            result3 = agent3.run({"invoice": invoice})
 
             if not result3.success:
                 step3.status = "failed"
@@ -203,7 +203,7 @@ class InvoiceProcessingOrchestrator:
                 self._journal_repo,
                 self._c.cost_catalog,
             )
-            result4 = agent4.run({"invoice": invoice, "db": self._db})
+            result4 = agent4.run({"invoice": invoice})
 
             self._audit_ai(
                 "AI_JOURNAL", str(invoice.id),

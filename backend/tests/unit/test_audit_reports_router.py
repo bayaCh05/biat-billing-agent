@@ -7,13 +7,15 @@ and AuditAgent monkeypatched at their call sites.
 """
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
 
 from api.routers.audit_reports import (
-    RunAuditReportRequest, get_audit_report, list_audit_reports, run_audit_report,
+    RunAuditReportRequest, get_audit_report, get_audit_report_pdf,
+    list_audit_reports, run_audit_report,
 )
 
 
@@ -83,6 +85,41 @@ class TestGetAuditReport:
 
         with pytest.raises(HTTPException) as exc_info:
             get_audit_report("missing")
+        assert exc_info.value.status_code == 404
+
+
+class TestGetAuditReportPdf:
+    def test_returns_pdf_streaming_response(self, monkeypatch):
+        doc = {
+            "_id": "s1", "granularity": "DAILY",
+            "period_start": "2026-07-15", "period_end": "2026-07-15",
+            "generated_at": "2026-07-15T02:00:00Z", "status": "OK",
+            "metrics": {}, "alerts": [], "narrative_summary": None,
+        }
+        monkeypatch.setattr(
+            "src.storage.sync_mongo_repository.get_audit_snapshot_by_id_sync",
+            lambda snapshot_id: doc,
+        )
+
+        response = get_audit_report_pdf("s1")
+
+        assert response.media_type == "application/pdf"
+        assert "rapport-audit-daily-2026-07-15.pdf" in response.headers["Content-Disposition"]
+
+        async def _drain() -> bytes:
+            return b"".join([chunk async for chunk in response.body_iterator])
+
+        body = asyncio.run(_drain())
+        assert body.startswith(b"%PDF")
+
+    def test_missing_snapshot_raises_404(self, monkeypatch):
+        monkeypatch.setattr(
+            "src.storage.sync_mongo_repository.get_audit_snapshot_by_id_sync",
+            lambda snapshot_id: None,
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            get_audit_report_pdf("missing")
         assert exc_info.value.status_code == 404
 
 

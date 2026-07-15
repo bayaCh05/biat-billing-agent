@@ -33,12 +33,14 @@ export default function Journaux() {
   const [error, setError] = useState(false)
 
   useEffect(() => {
-    setLoading(true)
-    setError(false)
-    listJournal(startDate, endDate)
-      .then(data => setEntries(data))
-      .catch(() => setError(true))
-      .finally(() => setLoading(false))
+    queueMicrotask(() => {
+      setLoading(true)
+      setError(false)
+      listJournal(startDate, endDate)
+        .then(data => setEntries(data))
+        .catch(() => setError(true))
+        .finally(() => setLoading(false))
+    })
   }, [startDate, endDate])
 
   if (loading || error) return <PageSpinner loading={loading} error={error} />

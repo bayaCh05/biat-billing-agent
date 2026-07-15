@@ -111,18 +111,20 @@ export default function Facturation() {
 
   useEffect(() => {
     if (!selectedProjectId) return
-    setPhasesLoading(true)
-    setPhases([])
-    setJhInputs({})
-    listProjectPhases(selectedProjectId)
-      .then(ps => {
-        setPhases(ps)
-        const defaults: Record<string, number> = {}
-        ps.forEach(p => { defaults[p.id] = 0 })
-        setJhInputs(defaults)
-      })
-      .catch(() => {})
-      .finally(() => setPhasesLoading(false))
+    queueMicrotask(() => {
+      setPhasesLoading(true)
+      setPhases([])
+      setJhInputs({})
+      listProjectPhases(selectedProjectId)
+        .then(ps => {
+          setPhases(ps)
+          const defaults: Record<string, number> = {}
+          ps.forEach(p => { defaults[p.id] = 0 })
+          setJhInputs(defaults)
+        })
+        .catch(() => {})
+        .finally(() => setPhasesLoading(false))
+    })
   }, [selectedProjectId])
 
   const openFiche = (projectId: string) => {
@@ -139,7 +141,7 @@ export default function Facturation() {
         const t = await listTemplates()
         setTemplates(t)
         if (t.length) setSelectedTemplate(t[0].id)
-      } catch {}
+      } catch { /* ignore */ }
     }
   }
 

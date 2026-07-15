@@ -66,7 +66,7 @@ export default function SecurityPage() {
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { queueMicrotask(load) }, [])
 
   const integrityScore = integrity?.integrity_score ?? summary?.last_integrity_score
   const scoreColor = integrityScore == null ? '#5D6D7E'
@@ -147,6 +147,19 @@ export default function SecurityPage() {
               </div>
             )}
 
+            {/* Rebaselined entries — known secret-rotation exception, not suspicious */}
+            {integrity != null && integrity.rebaselined_count > 0 && (
+              <div className="mb-2 p-2 rounded-lg bg-blue-50 border border-blue-200">
+                <p className="text-xs font-semibold text-blue-700 flex items-center gap-1">
+                  🔵 Entrées rebaselined (rotation de secret, non suspectes) : {integrity.rebaselined_count}
+                </p>
+                <p className="text-[10px] text-blue-600 mt-0.5">
+                  row_hash d'origine devenu non-vérifiable suite à la rotation du 2026-07-10 —
+                  voir docs/audit_hmac_incident.md. Hash d'origine conservé, jamais écrasé.
+                </p>
+              </div>
+            )}
+
             {/* Genuinely tampered entries */}
             {integrity?.tampered_entries && integrity.tampered_entries.length > 0 && (
               <div className="mb-2 p-2 rounded-lg bg-red-50 border border-red-200">
@@ -162,7 +175,7 @@ export default function SecurityPage() {
             )}
 
             {/* All clear after check */}
-            {integrity != null && integrity.null_hash_count === 0 && integrity.tampered_count === 0 && (
+            {integrity != null && integrity.null_hash_count === 0 && integrity.rebaselined_count === 0 && integrity.tampered_count === 0 && (
               <div className="mb-2 p-2 rounded-lg bg-green-50 border border-green-200">
                 <p className="text-xs text-green-700 font-medium">
                   ✅ {integrity.total_checked} entrées vérifiées — aucune anomalie.

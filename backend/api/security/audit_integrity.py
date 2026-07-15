@@ -52,6 +52,28 @@ def verify_row_hash(log) -> bool:
     return hmac.compare_digest(expected, stored)
 
 
+def verify_row_status(log) -> str:
+    """Three-way tamper status, aware of the rebaseline columns added for the
+    2026-07-10 secret rotation (see docs/audit_hmac_incident.md):
+
+    - "original"   : row_hash (computed at write time) still verifies — the
+      normal case for any row written under the current secret.
+    - "rebaselined": row_hash no longer verifies (secret was rotated since),
+      but rebaseline_hash — computed once, after the rotation, and stored
+      alongside row_hash without ever overwriting it — does. The row is
+      real and its rebaseline is on record; it is deliberately NOT reported
+      as "tampered".
+    - "failed"     : neither matches — either row_hash is unset and no
+      rebaseline was ever computed, or the row genuinely fails both checks.
+    """
+    if verify_row_hash(log):
+        return "original"
+    rebaseline_hash = getattr(log, "rebaseline_hash", None)
+    if rebaseline_hash and hmac.compare_digest(compute_row_hash(log), rebaseline_hash):
+        return "rebaselined"
+    return "failed"
+
+
 # ── Mongo-native equivalents ───────────────────────────────────────────────────
 # compute_row_hash()/verify_row_hash() above read attributes (log.id, log.action,
 # ...) so they already work unchanged against any duck-typed object — including

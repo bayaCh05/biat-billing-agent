@@ -61,7 +61,7 @@ export default function AIActivityPage() {
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { queueMicrotask(load) }, [])
 
   const stats = data?.ollama_stats
 

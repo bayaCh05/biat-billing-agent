@@ -38,13 +38,15 @@ export default function InvoiceDetail() {
   }, [])
 
   useEffect(() => {
-    if (!selectedId) { setDetail(null); setJournalEntry(null); setShowJournal(false); setPdfError(false); return }
-    setDetailLoading(true)
-    setJournalEntry(null); setShowJournal(false); setPdfError(false)
-    getInvoice(selectedId)
-      .then(setDetail)
-      .catch(() => setDetail(null))
-      .finally(() => setDetailLoading(false))
+    queueMicrotask(() => {
+      if (!selectedId) { setDetail(null); setJournalEntry(null); setShowJournal(false); setPdfError(false); return }
+      setDetailLoading(true)
+      setJournalEntry(null); setShowJournal(false); setPdfError(false)
+      getInvoice(selectedId)
+        .then(setDetail)
+        .catch(() => setDetail(null))
+        .finally(() => setDetailLoading(false))
+    })
   }, [selectedId])
 
   async function handleViewPdf() {

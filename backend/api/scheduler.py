@@ -95,6 +95,24 @@ def _job_audit_daily() -> None:
         logger.error("audit_daily_error: %s", exc)
 
 
+def _job_audit_weekly() -> None:
+    try:
+        from src.ai_agents.audit_agent import AuditAgent
+        result = AuditAgent().run({"granularity": "WEEKLY"})
+        logger.info("audit_weekly: %s", result.output)
+    except Exception as exc:
+        logger.error("audit_weekly_error: %s", exc)
+
+
+def _job_audit_monthly() -> None:
+    try:
+        from src.ai_agents.audit_agent import AuditAgent
+        result = AuditAgent().run({"granularity": "MONTHLY"})
+        logger.info("audit_monthly: %s", result.output)
+    except Exception as exc:
+        logger.error("audit_monthly_error: %s", exc)
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler and _scheduler.running:
@@ -143,6 +161,22 @@ def start_scheduler() -> BackgroundScheduler:
         id="audit_daily",
         replace_existing=True,
         misfire_grace_time=3600,
+    )
+
+    _scheduler.add_job(
+        _job_audit_weekly,
+        "cron", day_of_week="mon", hour=7, minute=0,
+        id="audit_weekly",
+        replace_existing=True,
+        misfire_grace_time=7200,
+    )
+
+    _scheduler.add_job(
+        _job_audit_monthly,
+        "cron", day=1, hour=3, minute=0,
+        id="audit_monthly",
+        replace_existing=True,
+        misfire_grace_time=7200,
     )
 
     _scheduler.start()

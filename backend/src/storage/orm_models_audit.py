@@ -57,3 +57,9 @@ class AuditLogORM(Base):
 
     # ── Tamper detection ──────────────────────────────────────────────────────
     row_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # ── HMAC rebaseline (post-2026-07-10 secret rotation, never overwrites
+    # row_hash — see docs/audit_hmac_incident.md and scripts/rebaseline_audit_hmac.py) ──
+    rebaseline_hash:   Mapped[str | None] = mapped_column(String(64),  nullable=True)
+    rebaselined_at:    Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rebaseline_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)

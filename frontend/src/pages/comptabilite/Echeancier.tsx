@@ -197,7 +197,7 @@ export default function EcheancierPage() {
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { queueMicrotask(load) }, [])
 
   const filtered = statusFilter === 'ALL'
     ? installments

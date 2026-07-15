@@ -1,4 +1,4 @@
-import { apiFetch, apiUpload } from './client'
+import { apiFetch, apiUpload, apiBlobFetch } from './client'
 
 import type {
   Invoice, InvoiceSummary, JournalEntry, BudgetSummary,
@@ -287,6 +287,9 @@ export const runAuditReport = (granularity: AuditGranularity) =>
     '/audit-reports/run', { method: 'POST', body: JSON.stringify({ granularity }) }
   )
 
+export const downloadAuditReportPdf = (id: string, filename: string) =>
+  apiBlobFetch(`/audit-reports/${id}/pdf`, filename)
+
 // ── Risks ─────────────────────────────────────────────────────────────────────
 
 export const listRisks = (params: {
@@ -449,6 +452,7 @@ export interface SecuritySummary {
   last_integrity_check: string | null
   last_integrity_score: number | null
   tampered_entries_count: number
+  rebaselined_entries_count: number
   active_sessions_count: number
   unauthorized_access_attempts_today: number
   accounts_with_recent_failures: { email: string; failed_attempts: number; last_attempt: string | null }[]
@@ -459,6 +463,8 @@ export interface IntegrityResult {
   total_checked: number
   valid: number
   null_hash_count: number
+  rebaselined_count: number
+  rebaselined_entries: { id: string; created_at: string; action: string; rebaselined_at: string | null }[]
   tampered_count: number
   tampered_entries: { id: string; created_at: string; action: string }[]
   integrity_score: number

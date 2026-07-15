@@ -37,12 +37,14 @@ async def get_review_queue(session: Session = Depends(get_session)):
     if mongo_queue is not None:
         return [InvoiceSummary.from_record(inv) for inv in mongo_queue]
 
-    # Unlike the other 5 "silent stale fallback" domains from the audit, this
-    # one is intentionally kept: the headless daemon (scripts/run_agent.py)
-    # still writes invoices SQLite-only (see CLAUDE.md), so an invoice needing
-    # review can legitimately exist only here — dropping this fallback would
-    # hide real invoices, not just stale ones. Logged so the trigger is at
-    # least visible instead of silent.
+    # The headless daemon this fallback originally guarded against (an invoice
+    # written SQLite-only by scripts/run_agent.py) was deleted in Lot B
+    # (2026-07) — no code path can write a new SQLite-only invoice anymore.
+    # Kept anyway (re-verified 2026-07-15, see CLAUDE.md "Lot 10"): any
+    # invoice flagged for review *before* that deletion still only exists in
+    # SQLite, and dropping this fallback would make those old rows silently
+    # disappear from the queue rather than just going unreachable when Mongo
+    # is down. Logged so the trigger is at least visible instead of silent.
     _log.warning(
         "get_review_queue: MongoDB indisponible — repli sur la file de révision SQLite."
     )

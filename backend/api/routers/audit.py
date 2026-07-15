@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from api.auth import require_role
 from api.deps import get_session
-from api.security.audit_integrity import compute_row_hash, verify_row_hash
+from api.security.audit_integrity import compute_row_hash, verify_row_hash, verify_row_status
 from src.models.audit import AuditLogCreate, AuditLogOut
 from src.storage.orm_models_audit import AuditLogORM
 
@@ -155,6 +155,7 @@ async def compute_integrity_summary(session: Session, limit: int = 5000) -> dict
 
     valid = 0
     null_hash_entries = []
+    rebaselined_entries = []
     tampered = []
     for row in rows:
         if not row.row_hash:
@@ -166,8 +167,20 @@ async def compute_integrity_summary(session: Session, limit: int = 5000) -> dict
                 "action": row.action,
             })
             valid += 1
-        elif verify_row_hash(row):
+            continue
+        status = verify_row_status(row)
+        if status == "original":
             valid += 1
+        elif status == "rebaselined":
+            # Known, on-record exception — see docs/audit_hmac_incident.md and
+            # scripts/rebaseline_audit_hmac.py. Not counted as tampered, but
+            # kept in its own bucket rather than silently folded into "valid".
+            rebaselined_entries.append({
+                "id": str(row.id),
+                "created_at": row.created_at.isoformat(),
+                "action": row.action,
+                "rebaselined_at": row.rebaselined_at.isoformat() if row.rebaselined_at else None,
+            })
         else:
             tampered.append({
                 "id": str(row.id),
@@ -181,6 +194,7 @@ async def compute_integrity_summary(session: Session, limit: int = 5000) -> dict
     total = len(rows)
     total_valid = valid
     total_null = len(null_hash_entries)
+    total_rebaselined_entries = list(rebaselined_entries)
     total_tampered_entries = list(tampered)
 
     if mongo_result is not None:
@@ -190,23 +204,22 @@ async def compute_integrity_summary(session: Session, limit: int = 5000) -> dict
         total_tampered_entries += mongo_result["tampered_entries"]
 
     tampered_count = len(total_tampered_entries)
-    score = (total_valid / total * 100) if total > 0 else 100.0
+    rebaselined_count = len(total_rebaselined_entries)
+    score = ((total_valid + rebaselined_count) / total * 100) if total > 0 else 100.0
 
-    if total_null and tampered_count:
-        detail_msg = (
-            f"{total_null} entrée(s) antérieure(s) au système HMAC (non suspectes). "
-            f"{tampered_count} entrée(s) potentiellement altérée(s)."
+    parts = []
+    if total_null:
+        parts.append(f"{total_null} entrée(s) antérieure(s) au système HMAC (non suspectes)")
+    if rebaselined_count:
+        parts.append(
+            f"{rebaselined_count} entrée(s) rebaselined suite à la rotation de secret "
+            "du 2026-07-10 (voir docs/audit_hmac_incident.md, non suspectes)"
         )
-    elif total_null:
-        detail_msg = (
-            f"{total_null} entrée(s) antérieure(s) au système HMAC (non suspectes). "
-            f"Score recalculé: {score:.1f}%."
-        )
-    elif tampered_count:
-        detail_msg = (
-            f"{tampered_count} entrée(s) potentiellement altérée(s) détectée(s). "
-            f"Score: {score:.1f}%."
-        )
+    if tampered_count:
+        parts.append(f"{tampered_count} entrée(s) potentiellement altérée(s)")
+
+    if parts:
+        detail_msg = ". ".join(p[0].upper() + p[1:] for p in parts) + f". Score: {score:.1f}%."
     else:
         detail_msg = f"Intégrité vérifiée — {total} entrées conformes. Score: {score:.1f}%."
 
@@ -214,6 +227,8 @@ async def compute_integrity_summary(session: Session, limit: int = 5000) -> dict
         "total_checked": total,
         "valid": total_valid,
         "null_hash_count": total_null,
+        "rebaselined_count": rebaselined_count,
+        "rebaselined_entries": total_rebaselined_entries,
         "tampered_count": tampered_count,
         "tampered_entries": total_tampered_entries,
         "integrity_score": round(score, 2),

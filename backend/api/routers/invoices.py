@@ -48,7 +48,6 @@ async def upload_invoice(
     file: UploadFile = File(...),
     live: bool = Form(True),
     current_user: dict = Depends(get_current_user),
-    session: Session = Depends(get_session),
 ):
     if current_user["role"] not in ("Comptable", "Admin"):
         raise HTTPException(403, "Accès refusé. Seul un Comptable peut soumettre des factures.")
@@ -153,7 +152,7 @@ async def upload_invoice(
 
         # Run through AI orchestrator (extraction → classification → anomaly → accounting)
         from src.ai_agents.invoice_processing_orchestrator import InvoiceProcessingOrchestrator
-        orchestrator = InvoiceProcessingOrchestrator(components, session)
+        orchestrator = InvoiceProcessingOrchestrator(components)
         orchestrator.process_invoice(invoice)
 
         # Re-fetch invoice from DB to get final persisted state

@@ -106,6 +106,7 @@ export default function ChangerMotDePassePage() {
         setStep('password')
       } else {
         setSkipOtp(false)
+        // eslint-disable-next-line react-hooks/purity -- inside an async click handler, never during render
         sentAt.current = Date.now()
         setCountdown(600)
         setResendIn(60)
@@ -127,6 +128,7 @@ export default function ChangerMotDePassePage() {
     try {
       const res = await requestOtp()
       if (res.masked_email) setMaskedEmail(res.masked_email)
+      // eslint-disable-next-line react-hooks/purity -- inside an async click handler, never during render
       sentAt.current = Date.now()
       setCountdown(600)
       setResendIn(60)

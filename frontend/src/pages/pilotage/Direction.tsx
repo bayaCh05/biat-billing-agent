@@ -41,13 +41,16 @@ function Skeleton({ h = 'h-4', w = 'w-full', cls = '' }: { h?: string; w?: strin
   return <div className={`animate-pulse bg-gray-200 rounded ${h} ${w} ${cls}`} />
 }
 
+// Computed once at module load (not during render) so ChartSkeleton stays pure.
+const SKELETON_BAR_HEIGHTS = Array.from({ length: 12 }, () => 30 + Math.random() * 70)
+
 function ChartSkeleton() {
   return (
     <div className="flex flex-col gap-2 p-4">
       <Skeleton h="h-3" w="w-1/3" />
       <div className="flex items-end gap-2 h-40 mt-2">
-        {Array.from({ length: 12 }, (_, i) => (
-          <div key={i} className="flex-1 bg-gray-200 animate-pulse rounded-t" style={{ height: `${30 + Math.random() * 70}%` }} />
+        {SKELETON_BAR_HEIGHTS.map((h, i) => (
+          <div key={i} className="flex-1 bg-gray-200 animate-pulse rounded-t" style={{ height: `${h}%` }} />
         ))}
       </div>
     </div>
@@ -170,9 +173,11 @@ export default function Direction() {
   }, [loadAnalytics, loadOverview])
 
   useEffect(() => {
-    loadAnalytics()
-    loadOverview()
-    loadHealthSummary()
+    queueMicrotask(() => {
+      loadAnalytics()
+      loadOverview()
+      loadHealthSummary()
+    })
   }, [loadAnalytics, loadOverview, loadHealthSummary])
 
   // Derived

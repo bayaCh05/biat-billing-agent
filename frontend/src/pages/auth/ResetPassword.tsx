@@ -16,7 +16,7 @@ export default function ResetPasswordPage() {
   const [success, setSuccess]   = useState(false)
 
   useEffect(() => {
-    if (!token) setError('Lien invalide — aucun token trouvé dans l\'URL.')
+    if (!token) queueMicrotask(() => setError('Lien invalide — aucun token trouvé dans l\'URL.'))
   }, [token])
 
   async function handleSubmit(e: React.FormEvent) {

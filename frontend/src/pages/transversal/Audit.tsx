@@ -135,7 +135,7 @@ export default function AuditPage() {
     }
   }, [filters])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { queueMicrotask(load) }, [load])
 
   const exportCsv = () => {
     const headers = ['Date', 'Email', 'Rôle', 'Action', 'Ressource', 'ID', 'Statut', 'IP', 'Détail']

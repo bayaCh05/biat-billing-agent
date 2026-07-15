@@ -72,8 +72,7 @@ def test_full_pipeline_produces_4_ordered_ai_audit_events_no_duplicate(mongo_tes
 
     components = MagicMock()
 
-    db_session = MagicMock()
-    orchestrator = InvoiceProcessingOrchestrator(components, db_session)
+    orchestrator = InvoiceProcessingOrchestrator(components)
 
     with patch(
         "src.ai_agents.extraction_agent.ExtractionAgent",
@@ -106,11 +105,6 @@ def test_full_pipeline_produces_4_ordered_ai_audit_events_no_duplicate(mongo_tes
         assert row["user_role"] == "AI"
         assert verify_row_hash_from_doc(row), f"HMAC invalide pour {row['action']}"
 
-    # SQLite ne doit recevoir aucune de ces écritures (Mongo-natif intégral)
-    assert db_session.add.call_count == 0 or all(
-        "AuditLog" not in str(type(c.args[0])) for c in db_session.add.call_args_list
-    )
-
 
 def test_audit_write_failure_does_not_break_pipeline(mongo_test_db):
     """Si l'écriture Mongo échoue en plein milieu du pipeline IA, _audit_ai()
@@ -124,7 +118,7 @@ def test_audit_write_failure_does_not_break_pipeline(mongo_test_db):
 
     components = MagicMock()
 
-    orchestrator = InvoiceProcessingOrchestrator(components, MagicMock())
+    orchestrator = InvoiceProcessingOrchestrator(components)
 
     with patch(
         "src.ai_agents.extraction_agent.ExtractionAgent",

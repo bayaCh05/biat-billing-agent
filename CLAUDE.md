@@ -161,7 +161,7 @@ agents in sequence, each doing one stage:
 ```python
 from src.ai_agents.invoice_processing_orchestrator import InvoiceProcessingOrchestrator
 
-orchestrator = InvoiceProcessingOrchestrator(components, session)  # components: AIComponents, session: SQLAlchemy Session (see below)
+orchestrator = InvoiceProcessingOrchestrator(components)  # components: AIComponents only
 result = orchestrator.process_invoice(invoice)       # extraction → classification → anomaly → accounting/journal
 ```
 
@@ -170,9 +170,13 @@ match the existing FastAPI + SQLAlchemy patterns" — see its docstring) even
 though it reads/writes almost everything via Mongo — it uses the sync
 `pymongo`-based repositories in `src/storage/sync_mongo_repository.py`
 (`SyncMongoInvoiceRepository`, `SyncMongoJournalRepository`), never Beanie's
-async API. The `session: Session` (SQLAlchemy) constructor arg is a real,
-still-used parameter — passed through to some agents' `.run()` calls — not a
-fallback pattern; do not try to remove it.
+async API. It used to also take a `session: Session` (SQLAlchemy) constructor
+arg, threaded into `AnomalyAgent`/`AccountingAgent`'s `.run()` calls as
+`context["db"]` — this doc previously said not to remove it, on the belief it
+was a real, still-used parameter. Verified 2026-07-15 (Lot 10) that neither
+agent ever reads `context["db"]` (both agents' `run()` docstrings document
+only `context keys: invoice`) — it was dead code, removed. If you're reading
+an older version of this doc or of the orchestrator, that guidance was wrong.
 
 ### Build the components
 
@@ -444,15 +448,24 @@ classification-feedback, CI) was closed in Lot A. The daemon and its
 SQLAlchemy-only dependents (`agent/pipeline.py`, `agent/agent.py`,
 `ProjectRepository`, `MonthlyInvoiceBuilder`, `AutoCorrector`, `CostAllocator`,
 `FlagEscalator`, the JSON/CSV exporters, `FolderWatcher`, the SQLAlchemy
-`JournalRepository`) were deleted in Lot B (2026-07). What's left blocking a
-full SQLite read-only/removal ("Lot 10") now: the HMAC-mismatch finding above
-(needs a decision, not just code), and the SQLAlchemy fallback branches that
-still exist in `api/deps.py`/`storage/db.py`/`storage/repository.py` and a
-handful of routers with **deliberately-kept** SQL paths independent of the
-daemon question — `audit.py` (this HMAC chain), `review.py::get_review_queue`
-(a facture flagged before the daemon's deletion could still only exist in
-SQLite), `invoices.py::get_pipeline_status`'s journal-entry completeness
-guard, `budget.py`/`security.py`/others' `get_session` dependency. Do not set
+`JournalRepository`) were deleted in Lot B (2026-07). The HMAC-mismatch
+finding above no longer blocks this — decided and resolved 2026-07-15, see
+"Security Hardening Status" below (rebaseline, not re-signature). Lot 10
+(2026-07-15) also re-verified the actual current SQLAlchemy footprint router
+by router rather than trusting this list — two corrections: **`budget.py` and
+`auth.py` turned out to be 100% Mongo-native already**, no `get_session`
+dependency at all (this doc's previous claim otherwise was stale); and
+`InvoiceProcessingOrchestrator`'s `db: Session` param, believed load-bearing,
+was verified dead and removed (see above). What's actually left blocking a
+full SQLite read-only/removal now is narrower than previously stated: the
+SQLAlchemy fallback branches in `api/deps.py`/`storage/db.py`/`storage/repository.py`,
+and 3 routers with **deliberately-kept** SQL paths, re-verified 2026-07-15 —
+`audit.py` (the HMAC chain), `review.py::get_review_queue` (a facture flagged
+before the daemon's deletion in Lot B could still only exist in SQLite —
+comment updated 2026-07-15 to stop citing the now-deleted daemon as if it
+were still live), `invoices.py::get_pipeline_status`'s journal-entry
+completeness guard, and `security.py`'s own `get_session` (feeds
+`compute_integrity_summary`, same HMAC chain as `audit.py`). Do not set
 SQLite read-only or delete these remaining SQLAlchemy code paths without a
 deliberate, per-router removal pass and explicit confirmation each time.
 
@@ -791,27 +804,40 @@ except one. Don't re-scope or re-flag these — check here first.
   substitute citation per project owner's decision. Generic "BCT" mentions
   (the institution name) are unaffected and remain throughout the audit
   code.
+- Lot D (2026-07-15): Audit-log HMAC rebaseline + Lot 10 step 1. (A) The
+  `audit_hmac_incident.md` "708/708" figure was itself wrong (a broken
+  environment check) — corrected to the real 569/708, then non-destructively
+  rebaselined: `row_hash` untouched forever, new `rebaseline_hash`/
+  `rebaselined_at`/`rebaseline_reason` columns added (migration
+  `a1b2c3d4e5f7`) and populated via `scripts/rebaseline_audit_hmac.py`
+  (idempotent). `verify_row_status()` now reports 3 states instead of a
+  binary pass/fail; `/audit/verify-integrity` and `/security/summary` no
+  longer misreport these 569 rows as tampered. (B) Full per-router
+  SQLAlchemy inventory (Lot 10 step 1) found `budget.py`/`auth.py` already
+  100% Mongo-native (this doc previously listed them as SQL-dependent) and
+  `InvoiceProcessingOrchestrator`'s `db: Session` param genuinely dead
+  (`AnomalyAgent`/`AccountingAgent` never read `context["db"]`) — removed,
+  contradicting this doc's own prior "do not remove it" note. `review.py`'s
+  fallback comment was citing the already-deleted daemon as its
+  justification — corrected to the real reason (pre-Lot-B legacy rows).
 
 **Still open:**
 - Refresh token rotation (jti reusable up to 7 days) — explicitly deprioritized
-- "Lot 10" (SQLite → read-only → removal) — the functional gaps that used to
-  block this are closed, and the daemon-specific SQLAlchemy code is gone
-  (Lot B above), but SQLite/SQLAlchemy itself is still load-bearing for
-  `audit.py`, `review.py`, `security.py` and a few other routers with
-  deliberately-kept SQL paths unrelated to the daemon — see "MongoDB
-  Migration Status" for the current, narrower list. Final removal step
-  explicitly needs supervisor sign-off regardless.
-- **Audit-log HMAC mismatch (2026-07, unresolved, documented as known
-  limitation)**: 708 of 708 `audit_logs` rows (100%) fail HMAC verification
-  against the current `JWT_SECRET`, as of a live re-check on 2026-07-13.
-  Confirmed root cause via commit history: the `JWT_SECRET` hardening on
-  2026-07-10 (`2775772`) rotated the effective secret away from the old
-  default/fallback value, and every row written before that rotation was
-  hashed under a secret that no longer exists — a genuine one-time key
-  rotation, not tampering. Full incident note:
-  `docs/audit_hmac_incident.md`. Do not silently "fix" this by recomputing
-  `row_hash` — see that doc for why re-signing would defeat the purpose of
-  the tamper check instead of resolving the incident.
+- "Lot 10" (SQLite → read-only → removal) — supervisor sign-off obtained
+  2026-07-15; step 1 (full per-router inventory) done — see "MongoDB
+  Migration Status" above for the current, re-verified list (`budget.py`/
+  `auth.py` turned out already Mongo-native, and `InvoiceProcessingOrchestrator`'s
+  dead `db: Session` param was removed). SQLite/SQLAlchemy remains
+  load-bearing for `audit.py`, `review.py`, `security.py`, and
+  `invoices.py::get_pipeline_status` — genuinely narrower than previously
+  documented, but not yet zero. Step 2 (actual removal of what's left) not
+  yet done.
+- ~~Audit-log HMAC mismatch (2026-07, unresolved, documented as known
+  limitation)~~ — **resolved 2026-07-15**, see "Security Hardening Status"
+  below and `docs/audit_hmac_incident.md` section 6. Note the "708/708"
+  figure below was itself corrected to 569/708 during that fix (the 2026-07-13
+  check that produced "708" turned out to have run without
+  `AUDIT_HMAC_SECRET`/`JWT_SECRET` loaded).
 
 ---
 

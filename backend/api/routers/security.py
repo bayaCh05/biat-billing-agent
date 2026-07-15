@@ -50,6 +50,7 @@ async def security_summary(
             "last_integrity_check": None,
             "last_integrity_score": None,
             "tampered_entries_count": integrity["tampered_count"],
+            "rebaselined_entries_count": integrity["rebaselined_count"],
             "active_sessions_count": 0,
             "unauthorized_access_attempts_today": 0,
             "accounts_with_recent_failures": [],
@@ -57,6 +58,7 @@ async def security_summary(
         }
 
     mongo_result["tampered_entries_count"] = integrity["tampered_count"]
+    mongo_result["rebaselined_entries_count"] = integrity["rebaselined_count"]
     return mongo_result
 
 

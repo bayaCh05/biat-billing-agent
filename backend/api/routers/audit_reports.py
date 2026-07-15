@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from api.auth import require_role
@@ -89,6 +90,30 @@ def get_audit_report(snapshot_id: str, _user=_VIEW):
     doc = dict(doc)
     doc["id"] = doc.pop("_id")
     return doc
+
+
+@router.get(
+    "/{snapshot_id}/pdf",
+    summary="Export PDF d'un rapport d'audit",
+    description="Même contenu que GET /audit-reports/{id}, mis en forme en PDF pour diffusion/archivage.",
+)
+def get_audit_report_pdf(snapshot_id: str, _user=_VIEW):
+    from src.ai_agents.audit_report_pdf import AuditReportPDFGenerator
+    from src.storage.sync_mongo_repository import get_audit_snapshot_by_id_sync
+
+    doc = get_audit_snapshot_by_id_sync(snapshot_id)
+    if not doc:
+        raise HTTPException(404, detail="Rapport d'audit introuvable.")
+
+    pdf_bytes = AuditReportPDFGenerator().generate_to_bytes(doc)
+    granularity = doc.get("granularity", "audit").lower()
+    period = str(doc.get("period_start", ""))[:10]
+    filename = f"rapport-audit-{granularity}-{period}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.post(

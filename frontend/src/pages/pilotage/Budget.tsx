@@ -257,7 +257,7 @@ export default function Budget() {
     Promise.all(calls).catch(() => setError(true)).finally(() => setLoading(false))
   }, [year, month, showProjectBanner])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { queueMicrotask(load) }, [load])
 
   const handleSaveEntry = async (entry: BudgetPlanEntry, monthly: number[], label: string, note: string) => {
     await updateBudgetPlanEntry(entry.catalog_id, year, { monthly, label, note })

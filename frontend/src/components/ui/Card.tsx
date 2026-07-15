@@ -14,17 +14,33 @@ export default function Card({ className = '', children }: Props) {
   )
 }
 
-export function KpiCard({ label, value, delta, sub }: {
+const KPI_STATUS_COLORS: Record<'ok' | 'warning' | 'critical', string> = {
+  ok: '#1D9E76',
+  warning: '#F0A600',
+  critical: '#C0391B',
+}
+
+export function KpiCard({ label, value, delta, sub, status }: {
   label: string; value: string | number; delta?: string; sub?: string
+  status?: 'ok' | 'warning' | 'critical'
 }) {
   const isPositive = delta?.startsWith('+')
   const isNegative = delta?.startsWith('-')
   return (
     <div
       className="bg-white rounded-xl border p-5 shadow-sm"
-      style={{ borderColor: '#D5E8F5', boxShadow: '0 1px 4px rgba(26,58,92,0.06)' }}
+      style={{
+        borderColor: '#D5E8F5',
+        boxShadow: '0 1px 4px rgba(26,58,92,0.06)',
+        borderLeft: status ? `3px solid ${KPI_STATUS_COLORS[status]}` : undefined,
+      }}
     >
-      <p className="text-xs font-medium mb-2" style={{ color: '#5D6D7E' }}>{label}</p>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-medium" style={{ color: '#5D6D7E' }}>{label}</p>
+        {status && (
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: KPI_STATUS_COLORS[status] }} />
+        )}
+      </div>
       <p className="text-2xl font-bold" style={{ color: '#1A3A5C' }}>{value}</p>
       {delta && (
         <p className={`text-xs mt-1 font-medium ${isPositive ? 'text-[#1D9E76]' : isNegative ? 'text-[#C0391B]' : 'text-[#5D6D7E]'}`}>
