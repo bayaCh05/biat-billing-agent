@@ -274,8 +274,9 @@ class InvoiceProcessingOrchestrator:
         invoice.status = InvoiceStatus(status)
         try:
             self._repo.save(invoice)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.error("invoice_fail_save_error invoice=%s status=%s: %s",
+                         invoice.id, status, exc)
         return OrchestratorResult(
             invoice_id=str(invoice.id),
             final_status=status,
