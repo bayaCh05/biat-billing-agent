@@ -61,6 +61,13 @@ async def _lifespan(app: FastAPI):
 
 
 def _startup() -> None:
+    from src.utils.logging import configure_logging
+
+    configure_logging(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        log_file=os.getenv("LOG_FILE") or None,
+    )
+
     # Validate demo user env vars
     validate_demo_users()
 
