@@ -125,7 +125,7 @@ export default function InvoicePipeline() {
   const [file, setFile] = useState<File | null>(null)
   const [stage, setStage] = useState<Stage>('idle')
   const [isDragging, setIsDragging] = useState(false)
-  const [live, setLive] = useState(false)
+  const [live, setLive] = useState(true)
   const [result, setResult] = useState<Invoice | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
   const [recent, setRecent] = useState<InvoiceSummary[]>([])
