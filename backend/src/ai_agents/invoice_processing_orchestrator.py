@@ -140,6 +140,16 @@ class InvoiceProcessingOrchestrator:
             )
             result3 = agent3.run({"invoice": invoice, "db": self._db})
 
+            if not result3.success:
+                step3.status = "failed"
+                step3.summary = result3.error
+                logger.error("anomaly_agent_error invoice=%s: %s", invoice.id, result3.error)
+                step4 = PipelineStep(step_number=4, agent_name="AccountingAgent",
+                                     status="skipped",
+                                     summary="Bloqué — échec de la détection d'anomalies")
+                self._steps.append(step4)
+                return self._fail(invoice, "ERROR", start, degraded)
+
             step3.status = "done"
             step3.duration_ms = result3.duration_ms
             n_flags = result3.output.get("anomaly_count", 0)
