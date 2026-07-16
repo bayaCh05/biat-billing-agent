@@ -834,6 +834,14 @@ async def risks_for_project_mongo(projet_id: str) -> list | None:
 
 # ── Étape 5, Lot 3 : notifications (100% Mongo — plus de source SQLite) ──────
 
+_NOTIFICATION_TYPE_LABELS = {
+    "INVOICE_FLAGGED":   "Facture signalée",
+    "INVOICE_ESCALATED": "Facture escaladée",
+    "PAYMENT_OVERDUE":   "Paiement en retard",
+    "BUDGET_EXCEEDED":   "Budget dépassé",
+}
+
+
 async def _ensure_invoice_notification_native(invoice_id: UUID, issuer: str | None, status: str) -> None:
     """Crée une notification pour une facture signalée si elle n'existe pas déjà.
 
@@ -841,7 +849,6 @@ async def _ensure_invoice_notification_native(invoice_id: UUID, issuer: str | No
     NotificationDocument sert à la fois de source de vérité pour la dédup et
     de store de lecture (list/count) — plus de SQLAlchemy dans ce chemin.
     """
-    from src.notifications.notification_service import _TYPE_LABELS
     from src.storage.documents.notification import NotificationDocument
 
     existing = await NotificationDocument.find_one({"invoice_id": str(invoice_id)})
@@ -860,7 +867,7 @@ async def _ensure_invoice_notification_native(invoice_id: UUID, issuer: str | No
     await coll.insert_one({
         "_id": str(uuid4()),
         "type": notif_type,
-        "title": f"{_TYPE_LABELS[notif_type]} — {label}",
+        "title": f"{_NOTIFICATION_TYPE_LABELS[notif_type]} — {label}",
         "body": f"La facture de {label} requiert une révision humaine (statut : {status}).",
         "is_read": False,
         "created_at": datetime.now(timezone.utc),
