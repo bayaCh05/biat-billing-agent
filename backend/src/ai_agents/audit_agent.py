@@ -412,7 +412,10 @@ class AuditAgent(BaseAgent):
             return None, True
 
         prompt = self._build_narrative_prompt(metrics, trend, alerts, reconciliation, similar_incidents)
-        raw = self._call_ollama(prompt, temperature=0.3, max_tokens=250)
+        # 600, not 250 : le format à 4 sections (RESUME/CAUSES/IMPACT/
+        # RECOMMANDATIONS à 3 items) ne tient plus dans l'ancien plafond calibré
+        # pour une synthèse de 5 phrases — voir _build_narrative_prompt().
+        raw = self._call_ollama(prompt, temperature=0.3, max_tokens=600)
         if not raw:
             return None, True
         return raw.strip(), False
@@ -513,8 +516,19 @@ class AuditAgent(BaseAgent):
                 lines.append(f"- ({inc.get('date', '?')}) {inc.get('excerpt', '')}")
 
         lines.append(
-            "\nRédige une synthèse de 5 phrases maximum en français, factuelle et directe, "
-            "à destination de la direction. N'invente et ne recalcule aucun chiffre — "
-            "utilise exactement les valeurs données ci-dessus."
+            "\nRédige une synthèse structurée en français, à destination de la direction, "
+            "en utilisant EXACTEMENT ces 4 marqueurs de section, chacun en début de ligne, "
+            "dans cet ordre — n'en omets aucun même si le contenu est court :\n"
+            "RESUME: 2 à 3 phrases factuelles résumant la période.\n"
+            "CAUSES: liens de cause à effet probables entre domaines quand les données le "
+            "permettent (ex: des factures non comptabilisées qui expliquent un écart "
+            "budgétaire sur la même ligne, ou des échéances en retard qui expliquent une "
+            "alerte échéancier). S'il n'y a pas de lien identifiable, dis-le explicitement.\n"
+            "IMPACT: impact chiffré (pourcentage du budget concerné, montants en TND, "
+            "jours de retard cumulés) en utilisant uniquement les valeurs données ci-dessus.\n"
+            "RECOMMANDATIONS: les 3 actions les plus prioritaires, numérotées 1/2/3, "
+            "classées de la plus urgente à la moins urgente.\n\n"
+            "N'invente et ne recalcule aucun chiffre — utilise exactement les valeurs "
+            "données ci-dessus."
         )
         return "\n".join(lines)
