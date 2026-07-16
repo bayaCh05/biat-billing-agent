@@ -28,7 +28,7 @@ function barColor(pct: number, status: ProjectStatus): string {
   return '#1D9E76'
 }
 
-function ProjectCard({ project, onFiche }: { project: Project; onFiche: (id: string) => void }) {
+function ProjectCard({ project, onFiche, onHistorique }: { project: Project; onFiche: (id: string) => void; onHistorique: () => void }) {
   const pct = project.budget_jh > 0 ? Math.round((project.consumed_jh / project.budget_jh) * 100) : 0
   const s = STATUS_MAP[project.status]
   const bar = barColor(pct, project.status)
@@ -66,6 +66,7 @@ function ProjectCard({ project, onFiche }: { project: Project; onFiche: (id: str
           📋 Fiche mensuelle
         </button>
         <button
+          onClick={onHistorique}
           className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg"
           style={{ background: '#EFF4FA', color: '#1A3A5C' }}
         >
@@ -209,7 +210,7 @@ export default function Facturation() {
             </p>
           ) : (
             projects.map(project => (
-              <ProjectCard key={project.id} project={project} onFiche={openFiche} />
+              <ProjectCard key={project.id} project={project} onFiche={openFiche} onHistorique={() => setActiveTab(2)} />
             ))
           )}
         </div>
