@@ -33,6 +33,7 @@ export default function NotificationBell() {
   const [items, setItems] = useState<NotificationItem[]>([])
   const [loading, setLoading] = useState(false)
   const [marking, setMarking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
 
   const unreadCount = items.filter(n => !n.is_read).length
@@ -40,12 +41,20 @@ export default function NotificationBell() {
 
   const loadNotifs = useCallback(() => {
     setLoading(true)
+    setError(null)
     getNotificationList()
       .then(data => {
         setItems(data)
         setNotifCount?.(data.filter(n => !n.is_read).length)
       })
-      .catch(() => setItems([]))
+      .catch(() => {
+        // Ne pas confondre "vraiment aucune notification" et "la requête a
+        // échoué" — sans ça le badge peut afficher un compteur > 0 (dernier
+        // poll réussi) pendant que la liste semble vide sans aucune raison
+        // visible pour l'utilisateur.
+        setItems([])
+        setError('Impossible de charger les notifications.')
+      })
       .finally(() => setLoading(false))
   }, [setNotifCount])
 
@@ -184,6 +193,26 @@ export default function NotificationBell() {
                     </div>
                   </div>
                 ))}
+              </div>
+            ) : error ? (
+              /* Échec de la requête — distinct de "vraiment aucune notification" */
+              <div className="flex flex-col items-center py-12 gap-3">
+                <div
+                  className="w-12 h-12 rounded-full flex items-center justify-center"
+                  style={{ background: '#FEF0EE' }}
+                >
+                  <AlertTriangle size={22} style={{ color: '#C0391B' }} />
+                </div>
+                <div className="text-center">
+                  <p className="text-xs font-medium" style={{ color: '#C0391B' }}>{error}</p>
+                  <button
+                    onClick={loadNotifs}
+                    className="text-[11px] mt-1 font-medium hover:underline"
+                    style={{ color: '#5BA3C9' }}
+                  >
+                    Réessayer
+                  </button>
+                </div>
               </div>
             ) : visible.length === 0 ? (
               /* État vide */
