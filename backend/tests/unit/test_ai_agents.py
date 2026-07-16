@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import time
-from datetime import date
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -200,24 +199,21 @@ class TestRiskAgentMitigation:
         assert result.duration_ms >= 0
 
 
-def _find_chain(items):
-    chain = MagicMock()
-    chain.to_list = AsyncMock(return_value=items)
-    return chain
-
-
 def _overdue_item(projet_id: str = "proj-1"):
-    return SimpleNamespace(
-        id=uuid4(), titre="Jalon test", description="Jalon en retard",
-        date_fin=date(2020, 1, 1), projet_id=projet_id,
-    )
+    """Shape returned by sync_mongo_repository.overdue_roadmap_items_sync() —
+    a raw pymongo dict, not a Beanie document (see risk_agent.py docstring on
+    why this path is sync pymongo, never Beanie/Motor)."""
+    return {
+        "_id": str(uuid4()), "titre": "Jalon test", "description": "Jalon en retard",
+        "date_fin": datetime(2020, 1, 1), "projet_id": projet_id,
+    }
 
 
 class TestRiskAgentScanRoadmap:
     def test_no_overdue_items_returns_zero_created(self, risk_agent):
         with (
-            patch("src.storage.documents.feuille_de_route.FeuilleDeRouteDocument.find",
-                  return_value=_find_chain([])),
+            patch("src.storage.sync_mongo_repository.overdue_roadmap_items_sync",
+                  return_value=[]),
             patch("src.ai_agents.risk_agent.OllamaClient.get",
                   return_value=_mock_ollama(available=False)),
         ):
@@ -229,7 +225,7 @@ class TestRiskAgentScanRoadmap:
 
     def test_mongo_error_returns_failure(self, risk_agent):
         with (
-            patch("src.storage.documents.feuille_de_route.FeuilleDeRouteDocument.find",
+            patch("src.storage.sync_mongo_repository.overdue_roadmap_items_sync",
                   side_effect=RuntimeError("Mongo error")),
             patch("src.ai_agents.risk_agent.OllamaClient.get",
                   return_value=_mock_ollama(available=False)),
@@ -242,12 +238,13 @@ class TestRiskAgentScanRoadmap:
     def test_creates_risk_for_overdue_item_without_existing_ai_risk(self, risk_agent):
         item = _overdue_item()
         with (
-            patch("src.storage.documents.feuille_de_route.FeuilleDeRouteDocument.find",
-                  return_value=_find_chain([item])),
-            patch("src.storage.documents.risque.RisqueDocument.find_one",
-                  new=AsyncMock(return_value=None)),
-            patch("src.storage.documents.service_bridge.create_risk_native",
-                  new=AsyncMock(return_value=None)) as mock_create,
+            patch("src.storage.sync_mongo_repository.overdue_roadmap_items_sync",
+                  return_value=[item]),
+            patch("src.storage.sync_mongo_repository.existing_ai_risk_for_item_sync",
+                  return_value=False),
+            patch("src.storage.sync_mongo_repository.create_risk_sync",
+                  return_value="new-risk-id") as mock_create,
+            patch("src.storage.sync_mongo_repository.log_ai_audit_event_sync") as mock_audit,
             patch("src.ai_agents.risk_agent.OllamaClient.get",
                   return_value=_mock_ollama(available=False)),
         ):
@@ -258,20 +255,20 @@ class TestRiskAgentScanRoadmap:
         assert result.output["risks_created"] == 1
         assert result.output["items_skipped"] == 0
         mock_create.assert_called_once()
-        body, user = mock_create.call_args[0]
-        assert body.feuille_route_id == str(item.id)
-        assert body.projet_id == "proj-1"
-        assert user == {"email": "system:ai"}
+        risk_data = mock_create.call_args[0][0]
+        assert risk_data["feuille_route_id"] == item["_id"]
+        assert risk_data["projet_id"] == "proj-1"
+        assert risk_data["created_by"] == "system:ai"
+        mock_audit.assert_called_once()
 
     def test_skips_item_with_existing_ai_risk(self, risk_agent):
         item = _overdue_item()
         with (
-            patch("src.storage.documents.feuille_de_route.FeuilleDeRouteDocument.find",
-                  return_value=_find_chain([item])),
-            patch("src.storage.documents.risque.RisqueDocument.find_one",
-                  new=AsyncMock(return_value=SimpleNamespace(id="existing-risk"))),
-            patch("src.storage.documents.service_bridge.create_risk_native",
-                  new=AsyncMock()) as mock_create,
+            patch("src.storage.sync_mongo_repository.overdue_roadmap_items_sync",
+                  return_value=[item]),
+            patch("src.storage.sync_mongo_repository.existing_ai_risk_for_item_sync",
+                  return_value=True),
+            patch("src.storage.sync_mongo_repository.create_risk_sync") as mock_create,
             patch("src.ai_agents.risk_agent.OllamaClient.get",
                   return_value=_mock_ollama(available=False)),
         ):
@@ -282,18 +279,17 @@ class TestRiskAgentScanRoadmap:
         assert result.output["items_skipped"] == 1
         mock_create.assert_not_called()
 
-    def test_item_id_filter_narrows_mongo_query(self, risk_agent):
+    def test_item_id_filter_passed_through_to_query(self, risk_agent):
         item_id = str(uuid4())
         with (
-            patch("src.storage.documents.feuille_de_route.FeuilleDeRouteDocument.find",
-                  return_value=_find_chain([])) as mock_find,
+            patch("src.storage.sync_mongo_repository.overdue_roadmap_items_sync",
+                  return_value=[]) as mock_query,
             patch("src.ai_agents.risk_agent.OllamaClient.get",
                   return_value=_mock_ollama(available=False)),
         ):
             risk_agent.run({"task": "scan_roadmap", "item_id": item_id})
 
-        query = mock_find.call_args[0][0]
-        assert query["_id"] == item_id
+        mock_query.assert_called_once_with(item_id)
 
 
 # ── InsightAgent ──────────────────────────────────────────────────────────────

@@ -976,6 +976,71 @@ def invoice_flags_created_since_sync(since: datetime | None) -> list[dict]:
     return list(coll.aggregate(pipeline))
 
 
+# ── Risk Agent (scan roadmap → création de risques) ──────────────────────────
+# RiskAgent._scan_roadmap() est un appelant sync (route FastAPI `def`, job
+# APScheduler BackgroundScheduler) — utilise ce module (pymongo synchrone),
+# jamais Beanie/Motor. Avant ce lot, _scan_roadmap_async() pontait vers
+# Beanie via asyncio.run(), ce qui réutilisait le client Motor partagé
+# (créé sur la boucle asyncio principale de FastAPI au démarrage) depuis une
+# boucle neuve dans un thread différent — Motor rejette ça avec "Future
+# attached to a different loop". Même cause que documentée pour
+# InvoiceProcessingOrchestrator/AuditAgent : un appelant sync ne doit jamais
+# passer par l'API async de Beanie.
+
+def overdue_roadmap_items_sync(item_id_filter: str | None = None) -> list[dict]:
+    """Jalons roadmap en retard (date_fin < aujourd'hui, statut pas terminal),
+    optionnellement filtré à un seul jalon."""
+    coll = _get_db()["feuilles_de_route"]
+    query: dict = {
+        "date_fin": {"$lt": _to_midnight_utc(date.today())},
+        "statut": {"$nin": ["TERMINE", "ANNULE"]},
+    }
+    if item_id_filter:
+        query["_id"] = str(UUID(item_id_filter))
+    return list(coll.find(query))
+
+
+def existing_ai_risk_for_item_sync(feuille_route_id: str) -> bool:
+    """True si un risque IA (created_by="system:ai") encore IDENTIFIE existe
+    déjà pour ce jalon — évite les doublons entre deux scans."""
+    coll = _get_db()["risques"]
+    return coll.find_one({
+        "feuille_route_id": feuille_route_id,
+        "created_by": "system:ai",
+        "statut": "IDENTIFIE",
+    }) is not None
+
+
+def create_risk_sync(risk_data: dict) -> str:
+    """Insère un risque IA — écriture brute pymongo (jamais Document(...).insert()),
+    _id toujours une chaîne avec tirets (convention CLAUDE.md). Équivalent
+    synchrone de service_bridge.create_risk_native() pour ce chemin d'écriture."""
+    coll = _get_db()["risques"]
+    now = datetime.now(timezone.utc)
+    doc = {
+        "_id": str(uuid4()),
+        "titre": risk_data["titre"],
+        "description": risk_data.get("description", ""),
+        "type_risque": risk_data.get("type_risque", "AUTRE"),
+        "probabilite": risk_data["probabilite"],
+        "impact": risk_data["impact"],
+        "niveau_criticite": risk_data["niveau_criticite"],
+        "statut": risk_data.get("statut", "IDENTIFIE"),
+        "plan_mitigation": risk_data.get("plan_mitigation", ""),
+        "responsable_id": risk_data.get("responsable_id"),
+        "date_identification": _to_midnight_utc(risk_data["date_identification"]),
+        "date_echeance_mitigation": _to_midnight_utc(risk_data.get("date_echeance_mitigation")),
+        "date_cloture": None,
+        "feuille_route_id": risk_data.get("feuille_route_id"),
+        "projet_id": risk_data.get("projet_id"),
+        "created_by": risk_data.get("created_by", "system:ai"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    coll.insert_one(doc)
+    return doc["_id"]
+
+
 # ── Audit Agent (rapport transversal périodique) ─────────────────────────────
 # Voir ai_agents/audit_agent.py — l'Audit Agent ne lit QUE ce que les autres
 # agents ont déjà écrit ; il ne les appelle jamais directement.
