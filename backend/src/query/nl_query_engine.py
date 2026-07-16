@@ -33,6 +33,22 @@ _FORBIDDEN_STAGES = {
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?Z?)?$")
 
+# Fields that are always native BSON dates in their collection (see schema in
+# _build_system_prompt()). qwen2.5:3b occasionally wraps one of these in
+# $dateFromString anyway (e.g. for "factures en retard", comparing due_date
+# against $$NOW) — MongoDB then raises a ConversionFailure since the input
+# isn't a string. The system prompt already gives the correct pattern
+# ($lt directly on the field), but this is non-deterministic to enforce via
+# prompting alone, so it's also fixed deterministically in _run_pipeline().
+_DATE_FIELDS_BY_COLLECTION = {
+    "invoices": {"invoice_date", "due_date", "paid_at"},
+    "journal_entries": {"date_ecriture"},
+    "assets": {"acquisition_date"},
+    "client_invoices": {"invoice_date", "due_date", "paid_at"},
+    "chartes_projet": {"valid_from"},
+    "phases": {"closed_date"},
+}
+
 
 def _build_system_prompt() -> str:
     current_year = datetime.now().year
@@ -343,10 +359,28 @@ class NLQueryEngine:
                 return obj
         return obj
 
+    @classmethod
+    def _strip_date_from_string(cls, obj, date_fields: set[str]):
+        """Unwrap {"$dateFromString": {"dateString": "$<known_date_field>", ...}}
+        back to "$<field>" — that field is already a native BSON date, so
+        MongoDB rejects $dateFromString on it with a ConversionFailure
+        ("requires that 'dateString' be a string, found: date")."""
+        if isinstance(obj, dict):
+            if "$dateFromString" in obj and isinstance(obj["$dateFromString"], dict):
+                date_string = obj["$dateFromString"].get("dateString")
+                if isinstance(date_string, str) and date_string.lstrip("$") in date_fields:
+                    return date_string
+            return {k: cls._strip_date_from_string(v, date_fields) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [cls._strip_date_from_string(v, date_fields) for v in obj]
+        return obj
+
     def _run_pipeline(self, collection: str, pipeline: list) -> tuple[list[dict], str | None]:
         from src.storage.sync_mongo_repository import _get_db
         try:
-            coerced = self._coerce_dates(pipeline)
+            date_fields = _DATE_FIELDS_BY_COLLECTION.get(collection, set())
+            sanitized = self._strip_date_from_string(pipeline, date_fields)
+            coerced = self._coerce_dates(sanitized)
             cursor = _get_db()[collection].aggregate(coerced, maxTimeMS=10_000)
             return [self._jsonify(doc) for doc in cursor], None
         except Exception as e:

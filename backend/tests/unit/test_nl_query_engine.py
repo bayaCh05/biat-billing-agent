@@ -95,6 +95,35 @@ class TestCoerceDates:
         assert result == {"n": 5, "flag": True, "x": None}
 
 
+class TestStripDateFromString:
+    """Regression test — qwen2.5:3b occasionally wraps an already-native date
+    field (e.g. due_date) in $dateFromString, which MongoDB rejects with a
+    ConversionFailure ("requires that 'dateString' be a string, found: date").
+    Seen live for "Factures en retard" (2026-07-16)."""
+
+    def test_unwraps_known_date_field(self):
+        node = {"$dateFromString": {"dateString": "$due_date"}}
+        result = NLQueryEngine._strip_date_from_string(node, {"due_date"})
+        assert result == "$due_date"
+
+    def test_leaves_unknown_field_untouched(self):
+        node = {"$dateFromString": {"dateString": "$some_string_field"}}
+        result = NLQueryEngine._strip_date_from_string(node, {"due_date"})
+        assert result == node
+
+    def test_recurses_into_expr_and_unwraps_in_place(self):
+        pipeline = [{"$match": {"$expr": {
+            "$lt": [{"$dateFromString": {"dateString": "$due_date"}}, "$$NOW"]
+        }}}]
+        result = NLQueryEngine._strip_date_from_string(pipeline, {"due_date"})
+        assert result[0]["$match"]["$expr"]["$lt"][0] == "$due_date"
+
+    def test_leaves_pipeline_without_date_from_string_untouched(self):
+        pipeline = [{"$match": {"status": "FLAGGED"}}]
+        result = NLQueryEngine._strip_date_from_string(pipeline, {"due_date"})
+        assert result == pipeline
+
+
 class TestFormatAnswer:
     def test_single_float_formats_as_tnd(self):
         rows = [{"total": 12345.678}]
