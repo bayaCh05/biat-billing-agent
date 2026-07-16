@@ -1026,7 +1026,7 @@ async def budget_summary_mongo(plan, year: int, through_month: int) -> dict | No
     Seules les données réelles (dépenses factures) sont lues depuis MongoDB.
     """
     try:
-        from src.budget.budget_tracker import MonthlyVariance, YearVariance
+        from src.budget.budget_plan import MonthlyVariance, YearVariance
         from src.storage.documents.invoice import InvoiceDocument
 
         start = datetime(year, 1, 1, tzinfo=timezone.utc)

@@ -13,7 +13,7 @@ from api.schemas import (
     BudgetSummaryOut, BudgetLineOut,
     BudgetPlanEntryOut, BudgetPlanEntryIn, BudgetPlanUpdateIn,
 )
-from src.budget.budget_tracker import BudgetPlan
+from src.budget.budget_plan import BudgetPlan
 
 router = APIRouter(prefix="/budget", tags=["budget"])
 

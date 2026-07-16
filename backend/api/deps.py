@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from src.agent.config_loader import AIComponents, build_ai_components, load_config
 from src.storage.db import build_engine, build_session_factory, init_db
 from src.cost_catalog.catalog import CostCatalog
-from src.budget.budget_tracker import BudgetPlan
+from src.budget.budget_plan import BudgetPlan
 
 
 @lru_cache(maxsize=1)
