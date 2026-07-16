@@ -295,7 +295,16 @@ export default function AuditReportsPage() {
       await loadList(granularity)
       setSelectedId(result.snapshot_id)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Échec de la génération du rapport')
+      // A generation this long-running (RAG + synthèse IA locale, jusqu'à une
+      // minute) can be interrupted at the network level (proxy, veille, etc.)
+      // avant que la réponse revienne — le rapport peut malgré tout avoir été
+      // généré côté serveur. On l'indique explicitement plutôt que de laisser
+      // penser que rien ne s'est passé.
+      const message = e instanceof Error ? e.message : 'Échec de la génération du rapport'
+      setError(
+        `${message} — la génération peut malgré tout avoir abouti côté serveur (elle peut prendre `
+        + `jusqu'à une minute). Cliquez sur « Actualiser » avant de réessayer.`
+      )
     } finally {
       setRunning(false)
     }
@@ -361,6 +370,15 @@ export default function AuditReportsPage() {
       </div>
 
       <div className="flex flex-col gap-5">
+        {running && (
+          <div className="px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-2" style={{ background: '#E3F0F9', color: '#1A3A5C' }}>
+            <RefreshCw size={14} className="animate-spin shrink-0" />
+            Génération en cours — analyse des 6 domaines, rapprochement transversal et synthèse IA
+            locale. Cela peut prendre jusqu'à une minute (davantage lors du tout premier rapport
+            de la session, le temps de charger les modèles).
+          </div>
+        )}
+
         {error && (
           <div className="px-4 py-3 rounded-xl text-sm font-medium" style={{ background: '#FDECEA', color: '#C0391B' }}>
             {error}
