@@ -31,6 +31,86 @@ const SEVERITY_STYLES: Record<AuditAlertSeverity, { bg: string; color: string; i
 
 const SEVERITY_ORDER: Record<AuditAlertSeverity, number> = { CRITICAL: 0, WARNING: 1, INFO: 2 }
 
+interface ParsedNarrative {
+  resume: string
+  causes: string
+  impact: string
+  recommandations: string[]
+}
+
+/**
+ * Parse le format à 4 marqueurs fixes attendu du prompt AuditAgent
+ * (RESUME:/CAUSES:/IMPACT:/RECOMMANDATIONS:) — jamais du JSON.parse, le
+ * modèle (qwen2.5:3b) est trop petit pour garantir un schéma JSON strict.
+ * Retourne null si un marqueur manque ou si RECOMMANDATIONS est vide —
+ * l'appelant doit alors afficher narrative_summary tel quel, sans erreur.
+ */
+function parseNarrativeSummary(text: string): ParsedNarrative | null {
+  const markerRegex = /^(RESUME|CAUSES|IMPACT|RECOMMANDATIONS)\s*:/gim
+  const matches = [...text.matchAll(markerRegex)]
+  if (matches.length < 4) return null
+
+  const sections: Record<string, string> = {}
+  matches.forEach((m, i) => {
+    const key = m[1].toUpperCase()
+    const start = (m.index ?? 0) + m[0].length
+    const end = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length
+    sections[key] = text.slice(start, end).trim()
+  })
+
+  const { RESUME, CAUSES, IMPACT, RECOMMANDATIONS } = sections
+  if (!RESUME || !CAUSES || !IMPACT || !RECOMMANDATIONS) return null
+
+  const recommandations = RECOMMANDATIONS
+    .split(/\n/)
+    .map(line => line.replace(/^\s*\d+[.)]\s*/, '').trim())
+    .filter(Boolean)
+  if (recommandations.length === 0) return null
+
+  return { resume: RESUME, causes: CAUSES, impact: IMPACT, recommandations }
+}
+
+function NarrativeSummary({ text }: { text: string }) {
+  const parsed = parseNarrativeSummary(text)
+  return (
+    <div className="p-4 rounded-xl text-sm" style={{ background: '#F0EBF9', color: '#3D2166' }}>
+      <p className="text-xs font-semibold mb-2" style={{ color: '#804CD7' }}>🤖 Synthèse IA</p>
+      {parsed ? (
+        <div className="space-y-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#804CD7' }}>
+              Résumé
+            </p>
+            <p>{parsed.resume}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#804CD7' }}>
+              Causes probables
+            </p>
+            <p>{parsed.causes}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#804CD7' }}>
+              Impact
+            </p>
+            <p>{parsed.impact}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#804CD7' }}>
+              Recommandations prioritaires
+            </p>
+            <ol className="list-decimal list-inside space-y-0.5">
+              {parsed.recommandations.map((r, i) => <li key={i}>{r}</li>)}
+            </ol>
+          </div>
+        </div>
+      ) : (
+        <p>{text}</p>
+      )}
+    </div>
+  )
+}
+
 function signedDelta(value: number | undefined, decimals = 1): string | undefined {
   if (value == null || value === 0) return undefined
   const rounded = Number(value.toFixed(decimals))
@@ -423,12 +503,7 @@ export default function AuditReportsPage() {
                 <ReconciliationSection report={detail} />
 
                 {/* Narrative */}
-                {detail.narrative_summary && (
-                  <div className="p-4 rounded-xl text-sm" style={{ background: '#F0EBF9', color: '#3D2166' }}>
-                    <p className="text-xs font-semibold mb-1.5" style={{ color: '#804CD7' }}>🤖 Synthèse IA</p>
-                    {detail.narrative_summary}
-                  </div>
-                )}
+                {detail.narrative_summary && <NarrativeSummary text={detail.narrative_summary} />}
 
                 {/* Similar incidents (RAG) */}
                 {detail.similar_incidents.length > 0 && (
