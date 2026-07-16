@@ -77,7 +77,7 @@ class AuditAgent(BaseAgent):
             self._index_new_incidents(previous)
             similar_incidents = self._retrieve_similar_incidents(alerts)
             narrative_summary, narrative_degraded = self._generate_narrative(
-                metrics, trend, alerts, similar_incidents
+                metrics, trend, alerts, reconciliation, similar_incidents
             )
             degraded = metrics_degraded or reconciliation_degraded or narrative_degraded
 
@@ -400,7 +400,8 @@ class AuditAgent(BaseAgent):
     # ── Action (RAG déjà récupéré ci-dessus, texte à produire ici) ─────────────
 
     def _generate_narrative(
-        self, metrics: dict, trend: dict, alerts: list[dict], similar_incidents: list[dict],
+        self, metrics: dict, trend: dict, alerts: list[dict], reconciliation: dict,
+        similar_incidents: list[dict],
     ) -> tuple[str | None, bool]:
         """Synthèse en langage naturel — le LLM ne reçoit QUE des métriques déjà
         calculées et des incidents déjà retrouvés par le RAG ; il ne recalcule
@@ -410,14 +411,76 @@ class AuditAgent(BaseAgent):
         if not OllamaClient.get().is_available():
             return None, True
 
-        prompt = self._build_narrative_prompt(metrics, trend, alerts, similar_incidents)
+        prompt = self._build_narrative_prompt(metrics, trend, alerts, reconciliation, similar_incidents)
         raw = self._call_ollama(prompt, temperature=0.3, max_tokens=250)
         if not raw:
             return None, True
         return raw.strip(), False
 
+    def _format_reconciliation_detail(self, reconciliation: dict) -> list[str]:
+        """Échantillon détaillé (factures/montants) du rapprochement transversal
+        (Lot 2) pour le prompt narratif — jamais seulement le compte agrégé,
+        pour permettre au LLM de relier des domaines entre eux (ex: quelle(s)
+        facture(s) précisément alimentent un dépassement budgétaire)."""
+        out: list[str] = []
+
+        overdue = reconciliation.get("overdue_without_installment_plan") or {}
+        if overdue.get("count", 0) > 0:
+            examples = ", ".join(
+                d.get("invoice_number") or d.get("invoice_id", "?")
+                for d in overdue.get("detail", [])[:3]
+            )
+            out.append(
+                f"- {overdue['count']} facture(s) en retard sans échéancier (ex: {examples})."
+            )
+
+        late_nf = reconciliation.get("late_installment_not_flagged") or {}
+        if late_nf.get("count", 0) > 0:
+            examples = ", ".join(d.get("invoice_id", "?") for d in late_nf.get("detail", [])[:3])
+            out.append(
+                f"- {late_nf['count']} échéance(s) en retard non signalée(s) (ex: {examples})."
+            )
+
+        for overrun in reconciliation.get("budget_overrun_attribution") or []:
+            top = ", ".join(
+                f"{inv.get('invoice_number') or inv.get('invoice_id', '?')} "
+                f"({(inv.get('amount_ht') or 0):.3f} TND)"
+                for inv in overrun.get("top_invoices", [])[:3]
+            )
+            out.append(
+                f"- Dépassement budgétaire ligne '{overrun['catalog_id']}' : "
+                f"réalisé {overrun['actual_ytd']:.3f} TND vs budget {overrun['budget_ytd']:.3f} TND. "
+                f"Principales factures contributrices : {top}."
+            )
+
+        jm = reconciliation.get("journal_mismatch") or {}
+        if jm.get("missing_entry_count", 0) > 0:
+            examples = ", ".join(d.get("invoice_id", "?") for d in jm.get("missing_entry", [])[:3])
+            out.append(
+                f"- {jm['missing_entry_count']} facture(s) journalisée(s) sans écriture "
+                f"comptable (ex: {examples})."
+            )
+        if jm.get("duplicate_entry_count", 0) > 0:
+            examples = ", ".join(d.get("invoice_id", "?") for d in jm.get("duplicate_entry", [])[:3])
+            out.append(
+                f"- {jm['duplicate_entry_count']} facture(s) avec écritures en double (ex: {examples})."
+            )
+        if jm.get("amount_mismatch_count", 0) > 0:
+            examples = ", ".join(
+                f"{d.get('invoice_id', '?')} (facture {(d.get('invoice_amount_ttc') or 0):.3f} TND / "
+                f"journal {(d.get('journal_amount') or 0):.3f} TND)"
+                for d in jm.get("amount_mismatch", [])[:3]
+            )
+            out.append(
+                f"- {jm['amount_mismatch_count']} facture(s) avec montant incohérent "
+                f"vs écriture (ex: {examples})."
+            )
+
+        return out
+
     def _build_narrative_prompt(
-        self, metrics: dict, trend: dict, alerts: list[dict], similar_incidents: list[dict],
+        self, metrics: dict, trend: dict, alerts: list[dict], reconciliation: dict,
+        similar_incidents: list[dict],
     ) -> str:
         lines = [
             "Voici les métriques d'audit de la période (ne les recalcule pas, "
@@ -438,6 +501,11 @@ class AuditAgent(BaseAgent):
                 lines.append(f"- [{a['severity']}] {a['message']}")
         else:
             lines.append("\nAucune alerte détectée sur cette période.")
+
+        recon_lines = self._format_reconciliation_detail(reconciliation)
+        if recon_lines:
+            lines.append("\nRapprochement transversal détaillé (échantillon, ne pas recalculer) :")
+            lines.extend(recon_lines)
 
         if similar_incidents:
             lines.append("\nIncidents similaires trouvés dans l'historique :")
