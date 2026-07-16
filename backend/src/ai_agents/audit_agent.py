@@ -412,10 +412,11 @@ class AuditAgent(BaseAgent):
             return None, True
 
         prompt = self._build_narrative_prompt(metrics, trend, alerts, reconciliation, similar_incidents)
-        # 600, not 250 : le format à 4 sections (RESUME/CAUSES/IMPACT/
-        # RECOMMANDATIONS à 3 items) ne tient plus dans l'ancien plafond calibré
-        # pour une synthèse de 5 phrases — voir _build_narrative_prompt().
-        raw = self._call_ollama(prompt, temperature=0.3, max_tokens=600)
+        # 400 : calibré empiriquement contre Ollama réel (qwen2.5:3b) — les 4
+        # sections tiennent déjà en ~250-280 tokens en pratique (350 testé
+        # suffisant à plusieurs reprises), 400 garde une marge sans repayer le
+        # coût de génération inutile de 600.
+        raw = self._call_ollama(prompt, temperature=0.3, max_tokens=400)
         if not raw:
             return None, True
         return raw.strip(), False
