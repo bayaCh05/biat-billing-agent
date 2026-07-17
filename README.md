@@ -123,6 +123,33 @@ PYTHONPATH=backend uvicorn \           npm run dev
 
 ---
 
+## Docker deployment
+
+The steps above are for local development (separate Python venv + Vite dev
+server). For a single-command deployment, `docker-compose.yml` builds one
+combined image (`app`) serving both the compiled React SPA and the FastAPI
+API on the same origin, plus a `mongo` service:
+
+```bash
+cp .env.example .env   # then fill in real secrets — see "Key configuration" below
+docker compose up -d --build
+```
+
+`app` waits on Mongo's healthcheck before starting. Ollama is **not**
+containerized (data residency — see "Prerequisites") and must already be
+running on the host; the container reaches it via `host.docker.internal`
+(works natively on Docker Desktop for Mac/Windows, and via the
+`extra_hosts: host-gateway` entry already in `docker-compose.yml` on Linux).
+See Diagram 19 (`docs/diagrams/19_deploiement_docker_compose.md`) for the
+full topology.
+
+```bash
+docker compose logs -f app        # tail the API/SPA container
+docker compose down               # stop (add -v to also drop named volumes)
+```
+
+---
+
 ## Accounts and roles
 
 There is no demo-account login path anymore — `login()` checks only real

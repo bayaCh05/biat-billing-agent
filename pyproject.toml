@@ -2,6 +2,16 @@
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+# This repo is never imported as an installed package — the app always runs
+# via PYTHONPATH=backend + uvicorn (see README/CLAUDE.md), both locally and
+# in Docker. `pip install -e .` is only ever used to install the dependency
+# list below into a venv. Without this, setuptools refuses to build at all:
+# it auto-discovers every top-level directory (data/, exports/, logs/,
+# config/, docker/, backend/, frontend/) as a candidate package and aborts
+# on the ambiguity.
+[tool.setuptools]
+packages = []
+
 [project]
 name = "invoice-agent"
 version = "0.1.0"
@@ -32,6 +42,12 @@ dependencies = [
 
     # LLM backend — Ollama only (data residency: local inference)
     "ollama>=0.2",
+    # src/ai_agents/ollama_client.py calls the Ollama HTTP API directly via
+    # `requests`, not the ollama>=0.2 client library above — currently only
+    # pulled in transitively (via chromadb); declared explicitly since it's
+    # a direct import on the critical LLM call path, not something that
+    # should depend on another package's transitive dependency tree.
+    "requests>=2.31",
 
     # RAG — local vector store + embeddings for classification Pass C
     "chromadb>=1.5",
@@ -56,6 +72,11 @@ dependencies = [
     "slowapi>=0.1.9",
     "limits>=3.6",
 
+    # Nightly job scheduling (api/scheduler.py) — was missing from this list
+    # entirely (only present by accident in dev venvs), which crashed every
+    # fresh install (Docker included) at startup with ModuleNotFoundError.
+    "apscheduler>=3.10",
+
     # Configuration & environment
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
@@ -75,7 +96,13 @@ dependencies = [
 
     # MongoDB — Phase 1 migration (coexiste avec SQLAlchemy durant la migration)
     "motor>=3.4",      # driver asyncio officiel MongoDB (wraps pymongo)
-    "beanie>=2.0",     # ODM Pydantic v2 basé sur Motor (2.0 = API stable Pydantic v2)
+    # Pinned <2.1, not just >=2.0: beanie 2.1.0 (resolved by any fresh install
+    # without this bound) breaks init_beanie() against motor 3.7.1/pymongo
+    # 4.17.0 — "AsyncIOMotorClient object is not callable... no such method
+    # append_metadata" at startup, silently leaves the app SQLite-only.
+    # Reproduced in the Docker image (2026-07-17); 2.0.0 (already pinned in
+    # dev venvs by accident) works. Re-verify before lifting this bound.
+    "beanie>=2.0,<2.1",
 ]
 
 [project.optional-dependencies]
@@ -86,9 +113,6 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
-
-[project.scripts]
-review-queue = "scripts.review_queue:main"
 
 [tool.ruff]
 line-length = 100
