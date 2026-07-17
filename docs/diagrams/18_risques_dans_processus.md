@@ -1,22 +1,25 @@
-# Diagram 18 — Risques Embarqués dans Chaque Processus Métier (NOUVEAU)
+# Diagram 18 — Risks Embedded in Each Business Process
+
+**Updated 2026-07-16** — translated to English.
+
 # Paste into Eraser → New Diagram → Flowchart
 
 ```mermaid
 flowchart TB
 
-  subgraph P1["📥 Processus 1 — Traitement des Factures Fournisseurs"]
+  subgraph P1["📥 Process 1 — Supplier Invoice Processing"]
     direction LR
-    F1["PDF reçu"] --> F2["Extraction OCR+LLM"]
-    F2 --> F3["Classification PCE"]
-    F3 --> F4["Validation AnomalyAgent"]
-    F4 --> F5["Écriture comptable"]
-    F5 --> F6["Paiement"]
+    F1["PDF received"] --> F2["OCR+LLM extraction"]
+    F2 --> F3["PCE classification"]
+    F3 --> F4["AnomalyAgent validation"]
+    F4 --> F5["Journal entry"]
+    F5 --> F6["Payment"]
 
-    R1A["⚠️ Extraction échoue\n→ Fallback OCR Tesseract\n→ Si échec : EXTRACTION_FAILED"]
-    R1B["⚠️ Classification incorrecte\n→ Confiance < 85%\n→ Révision humaine (FLAGGED)"]
-    R1C["⚠️ Anomalie détectée\n→ Math / Doublon / Montant\n→ File de révision"]
-    R1D["⚠️ Écriture déséquilibrée\n→ Bloquage automatique\n→ Erreur levée avant sauvegarde"]
-    R1E["⚠️ Retard de paiement\n→ Pénalité +10%/30j\n→ Alerte nightly"]
+    R1A["⚠️ Extraction fails\n→ Tesseract OCR fallback\n→ On failure: EXTRACTION_FAILED"]
+    R1B["⚠️ Incorrect classification\n→ Confidence < 85%\n→ Human review (FLAGGED)"]
+    R1C["⚠️ Anomaly detected\n→ Math / duplicate / amount\n→ Review queue"]
+    R1D["⚠️ Unbalanced entry\n→ Automatically blocked\n→ Error raised before save"]
+    R1E["⚠️ Late payment\n→ +10%/30d penalty\n→ Nightly alert"]
 
     F2 --- R1A
     F3 --- R1B
@@ -25,17 +28,17 @@ flowchart TB
     F6 --- R1E
   end
 
-  subgraph P2["📁 Processus 2 — Gestion de Projets"]
+  subgraph P2["📁 Process 2 — Project Management"]
     direction LR
-    G1["Création charte"] --> G2["Phases & livrables"]
-    G2 --> G3["Suivi avancement JH"]
-    G3 --> G4["Validation phase"]
-    G4 --> G5["Clôture projet"]
+    G1["Charter creation"] --> G2["Phases & deliverables"]
+    G2 --> G3["Person-day progress tracking"]
+    G3 --> G4["Phase validation"]
+    G4 --> G5["Project closure"]
 
-    R2A["⚠️ Retard de phase\n→ RiskAgent crée risque DELAI\n→ Badge IA dans UI"]
-    R2B["⚠️ Budget ligne dépassé\n→ Alerte ligne rouge\n→ Visible dans Dashboard"]
-    R2C["⚠️ Livrable non livré\n→ Phase bloquée\n→ Notification Chef Projet"]
-    R2D["⚠️ Ressource indisponible\n→ Risque RESSOURCE manuel\n→ Plan mitigation IA"]
+    R2A["⚠️ Phase delayed\n→ RiskAgent creates DELAI risk\n→ AI badge in UI"]
+    R2B["⚠️ Project line over budget\n→ Red-line alert\n→ Visible in dashboard"]
+    R2C["⚠️ Deliverable not delivered\n→ Phase blocked\n→ Project Manager notified"]
+    R2D["⚠️ Resource unavailable\n→ Manual RESSOURCE risk\n→ AI mitigation plan"]
 
     G3 --- R2A
     G3 --- R2B
@@ -43,32 +46,32 @@ flowchart TB
     G2 --- R2D
   end
 
-  subgraph P3["📄 Processus 3 — Facturation Client"]
+  subgraph P3["📄 Process 3 — Client Billing"]
     direction LR
-    C1["Phase validée"] --> C2["Saisie lignes facture"]
-    C2 --> C3["Génération PDF (IA)"]
-    C3 --> C4["Envoi client"]
-    C4 --> C5["Encaissement"]
+    C1["Phase validated"] --> C2["Invoice line entry"]
+    C2 --> C3["PDF generation (AI)"]
+    C3 --> C4["Sent to client"]
+    C4 --> C5["Collection"]
 
-    R3A["⚠️ Phase non validée\n→ Facture non générée\n→ Blocage logique"]
-    R3B["⚠️ Budget JH dépassé\n→ Alerte Chef Projet\n→ Facturation à revoir"]
-    R3C["⚠️ Facture non payée\n→ Créance en retard\n→ Visible dans Suivi"]
+    R3A["⚠️ Phase not validated\n→ Invoice not generated\n→ Logical block"]
+    R3B["⚠️ Person-day budget exceeded\n→ Project Manager alerted\n→ Billing to review"]
+    R3C["⚠️ Invoice unpaid\n→ Overdue receivable\n→ Visible in Tracking"]
 
     C1 --- R3A
     C2 --- R3B
     C5 --- R3C
   end
 
-  subgraph P4["🏗️ Processus 4 — Immobilisations CAPEX"]
+  subgraph P4["🏗️ Process 4 — CAPEX Assets"]
     direction LR
-    I1["Facture CAPEX reçue"] --> I2["IA suggère durée amort."]
-    I2 --> I3["Comptable valide durée"]
-    I3 --> I4["Actif créé en DB"]
-    I4 --> I5["Dotation amortissement\nmensuelle (6811/28xx)"]
+    I1["CAPEX invoice received"] --> I2["AI suggests depreciation period"]
+    I2 --> I3["Accountant validates period"]
+    I3 --> I4["Asset created in DB"]
+    I4 --> I5["Monthly depreciation charge\n(6811/28xx)"]
 
-    R4A["⚠️ Durée amort. incorrecte\n→ IA suggère, humain valide\n→ Pas de validation automatique"]
-    R4B["⚠️ Actif non créé\n→ Vérification cohérence\n→ Alerte si CAPEX sans actif"]
-    R4C["⚠️ Compte PCE erroné\n→ 2184 vs 6xxx\n→ Validation classification"]
+    R4A["⚠️ Wrong depreciation period\n→ AI suggests, human validates\n→ No automatic validation"]
+    R4B["⚠️ Asset not created\n→ Consistency check\n→ Alert if CAPEX without asset"]
+    R4C["⚠️ Wrong PCE account\n→ 2184 vs 6xxx\n→ Classification validation"]
 
     I2 --- R4A
     I4 --- R4B
@@ -97,23 +100,23 @@ flowchart TB
   style I1 fill:#1A3A5C,color:#FFFFFF
 ```
 
-## Synthèse des risques par processus
+## Risk summary per process
 
-| Processus | Risque | Criticité | Mitigation |
+| Process | Risk | Criticality | Mitigation |
 |-----------|--------|-----------|------------|
-| Factures | Extraction échoue | ELEVEE | Fallback OCR → EXTRACTION_FAILED |
-| Factures | Compte PCE erroné | MOYENNE | Seuil confiance → révision humaine |
-| Factures | Anomalie détectée | ELEVEE | AnomalyAgent → file de révision |
-| Factures | Écriture déséquilibrée | CRITIQUE | Bloquage auto avant sauvegarde |
-| Factures | Retard paiement | ELEVEE | +10%/30j, alertes nightly |
-| Projets | Retard de jalon | VARIABLE | RiskAgent crée risque DELAI auto |
-| Projets | Budget dépassé | ELEVEE | Alerte ligne rouge dashboard |
-| Projets | Livrable non livré | MOYENNE | Blocage phase, notification |
-| Facturation client | Phase non validée | ELEVEE | Blocage logique — facture impossible |
-| Facturation client | Facture impayée | MOYENNE | Suivi créances, relance |
-| CAPEX | Durée amort. incorrecte | ELEVEE | Validation humaine obligatoire |
-| CAPEX | Actif non créé | CRITIQUE | Contrôle cohérence CAPEX/actifs |
+| Invoices | Extraction fails | HIGH | OCR fallback → EXTRACTION_FAILED |
+| Invoices | Wrong PCE account | MEDIUM | Confidence threshold → human review |
+| Invoices | Anomaly detected | HIGH | AnomalyAgent → review queue |
+| Invoices | Unbalanced entry | CRITICAL | Auto-blocked before save |
+| Invoices | Late payment | HIGH | +10%/30d, nightly alerts |
+| Projects | Milestone delayed | VARIABLE | RiskAgent auto-creates DELAI risk |
+| Projects | Budget exceeded | HIGH | Dashboard red-line alert |
+| Projects | Deliverable not delivered | MEDIUM | Phase blocked, notification |
+| Client billing | Phase not validated | HIGH | Logical block — invoice impossible |
+| Client billing | Invoice unpaid | MEDIUM | Receivables tracking, reminders |
+| CAPEX | Wrong depreciation period | HIGH | Mandatory human validation |
+| CAPEX | Asset not created | CRITICAL | CAPEX/asset consistency check |
 
-> Légende couleurs :
-> 🟡 Amber (#F0A500) = risque ELEVEE — vigilance requise
-> 🔴 Rouge (#E74C3C) = risque CRITIQUE — bloquage ou pénalité automatique
+> Color legend:
+> 🟡 Amber (#F0A500) = HIGH risk — vigilance required
+> 🔴 Red (#E74C3C) = CRITICAL risk — automatic block or penalty

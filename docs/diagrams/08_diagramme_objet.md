@@ -1,9 +1,14 @@
 # Diagram 8 — Object Diagram (CAPEX invoice snapshot)
+
+**Updated 2026-07-16** — translated example values to English. `label:
+"Matériel informatique"` is kept in French where it's a literal
+`config/cost_catalog.yaml` entry, not descriptive prose.
+
 # Paste into Eraser → New Diagram → Entity Relationship (use as Object Diagram)
 
 ```
 // Object Diagram — CAPEX Invoice Processing Snapshot
-// Moment in time: Facture CAPEX serveur, statut JOURNALED
+// Moment in time: CAPEX server invoice, status JOURNALED
 
 invoice_001 [label: "invoice_001 : InvoiceRecord", color: "#1A3A5C"] {
   status: "JOURNALED"
@@ -12,9 +17,9 @@ invoice_001 [label: "invoice_001 : InvoiceRecord", color: "#1A3A5C"] {
   amount_ht: "12 000.000 TND"
   tva_amount: "2 280.000 TND"
   amount_ttc: "14 280.000 TND"
-  payment_term_days: "90 jours"
+  payment_term_days: "90 days"
   cost_catalog_id: "CAPEX-INFRA-01"
-  classification_reason: "Classifié matériel informatique\n(Pass A: fuzzy match 'serveur')"
+  classification_reason: "Classified as IT equipment\n(Pass A: fuzzy match 'serveur')"
   classification_pass: "A"
   human_review_required: "false"
 }
@@ -28,7 +33,7 @@ field_montant [label: "field_montant : ConfidenceField[float]", color: "#2E86C1"
 catalog_entry [label: "catalog_entry : CostCatalogEntry", color: "#2E86C1"] {
   id: "CAPEX-INFRA-01"
   compte: "2184"
-  label: "Matériel informatique"
+  label: "Matériel informatique (IT equipment — literal cost_catalog.yaml label)"
   charge_type: "CAPEX"
   tva_rate: "19.0"
 }
@@ -36,27 +41,27 @@ catalog_entry [label: "catalog_entry : CostCatalogEntry", color: "#2E86C1"] {
 journal_001 [label: "journal_001 : JournalEntry", color: "#1D9E76"] {
   reference: "OD-2026-0142"
   date_ecriture: "2026-07-01"
-  description: "Acquisition matériel informatique — TECHNOVA SOLUTIONS"
-  accounting_explanation: "Selon PCE art.23: immobilisation corporelle\ncomptabilisée en 2184 (acquisition) et 401\n(dette fournisseur TTC)"
+  description: "IT equipment acquisition — TECHNOVA SOLUTIONS"
+  accounting_explanation: "Per PCE art.23: tangible fixed asset\nbooked to 2184 (acquisition) and 401\n(supplier debt, TTC)"
 }
 
 line_debit [label: "line_debit : JournalLine", color: "#1D9E76"] {
   compte: "2184"
-  libelle: "Matériel informatique — Serveur Dell"
+  libelle: "IT equipment — Dell server"
   debit: "12 000.000"
   credit: "0.000"
 }
 
 line_tva [label: "line_tva : JournalLine", color: "#1D9E76"] {
   compte: "4366"
-  libelle: "TVA déductible 19%"
+  libelle: "Deductible VAT 19%"
   debit: "2 280.000"
   credit: "0.000"
 }
 
 line_credit [label: "line_credit : JournalLine", color: "#1D9E76"] {
   compte: "401"
-  libelle: "Fournisseur TECHNOVA SOLUTIONS"
+  libelle: "Supplier TECHNOVA SOLUTIONS"
   debit: "0.000"
   credit: "14 280.000"
 }
@@ -67,7 +72,7 @@ asset_001 [label: "asset_001 : Asset", color: "#F0A500"] {
   compte_amortissement: "28184"
   acquisition_date: "2026-07-01"
   acquisition_cost_ht: "12 000.000 TND"
-  useful_life_years: "5 ans"
+  useful_life_years: "5 years"
   depreciation_method: "linear"
   amortization_source: "AI (Ollama qwen2.5:3b)"
 }
@@ -115,4 +120,4 @@ installment_2 -- invoice_001
 installment_3 -- invoice_001
 ```
 
-> **Balance check**: Σ débits = 12 000 + 2 280 = **14 280 TND** = Σ crédits ✓
+> **Balance check**: Σ debits = 12 000 + 2 280 = **14 280 TND** = Σ credits ✓

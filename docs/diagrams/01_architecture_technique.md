@@ -1,88 +1,79 @@
 # Diagram 1 — Technical Architecture
-# Paste into Eraser → New Diagram → Cloud Architecture
+
+**Updated 2026-07-15** — the previous version didn't mention MongoDB at all
+(it predated the SQLite → MongoDB migration) and listed PostgreSQL as the
+production database even though nothing in the code implements it. This
+version reflects the actual current architecture.
+
+Rendered: [`01_architecture_technique.png`](01_architecture_technique.png) ·
+Live editable source: https://app.eraser.io/workspace/NAh6JeIRqqIfV1Fef6wg?diagram=IdIWER6z9OUfcT9ix9WH
+
+Paste into Eraser → New Diagram → Cloud Architecture
 
 ```
+title: "01 - Technical Architecture"
 direction: right
 
-// ── FRONTEND ──────────────────────────────────────────
 Frontend [icon: monitor, color: "#1A3A5C"] {
   React19 [label: "React 19 + TypeScript", icon: react, color: "#2E86C1"]
   Vite [label: "Vite (bundler)", icon: zap, color: "#2E86C1"]
   TailwindCSS [label: "Tailwind CSS", icon: wind, color: "#2E86C1"]
-  Recharts [label: "Recharts (charts)", icon: bar-chart, color: "#2E86C1"]
-  ReactRouter [label: "React Router v6", icon: navigation, color: "#2E86C1"]
-  Axios [label: "Axios (HTTP)", icon: arrow-right, color: "#2E86C1"]
 }
 
-// ── BACKEND ──────────────────────────────────────────
 Backend [icon: server, color: "#1A3A5C"] {
   FastAPI [label: "FastAPI (Python 3.14)", icon: zap, color: "#2E86C1"]
-  SQLAlchemy [label: "SQLAlchemy ORM", icon: database, color: "#2E86C1"]
-  Alembic [label: "Alembic (migrations)", icon: git-branch, color: "#2E86C1"]
-  APScheduler [label: "APScheduler (nightly jobs)", icon: clock, color: "#F0A500"]
-  SlowAPI [label: "SlowAPI (rate limiting)", icon: shield, color: "#2E86C1"]
-  JWT [label: "JWT + bcrypt (auth)", icon: lock, color: "#2E86C1"]
+  SQLAlchemy [label: "SQLAlchemy + Alembic", icon: database, color: "#2E86C1"]
+  APScheduler [label: "APScheduler (5 nightly jobs)", icon: clock, color: "#2E86C1"]
+  JWT [label: "JWT + argon2id (auth)", icon: lock, color: "#2E86C1"]
 }
 
-// ── AI LAYER ──────────────────────────────────────────
-AI [icon: cpu, color: "#F0A500"] {
-  Orchestrator [label: "Invoice Processing Orchestrator", icon: layers, color: "#F0A500"]
+AIAgents [label: "AI Agents (local only - Ollama)", icon: cpu, color: "#F0A500"] {
+  Orchestrator [label: "InvoiceProcessingOrchestrator", icon: layers, color: "#F0A500"]
   ExtractionAgent [label: "ExtractionAgent", icon: file-text, color: "#F0A500"]
   ClassificationAgent [label: "ClassificationAgent", icon: tag, color: "#F0A500"]
   AnomalyAgent [label: "AnomalyAgent", icon: alert-triangle, color: "#F0A500"]
   AccountingAgent [label: "AccountingAgent", icon: book-open, color: "#F0A500"]
   RiskAgent [label: "RiskAgent", icon: shield-alert, color: "#F0A500"]
   InsightAgent [label: "InsightAgent", icon: sparkles, color: "#F0A500"]
-  Ollama [label: "Ollama\nqwen2.5:3b (LOCAL)", icon: cpu, color: "#F0A500"]
-  TFIDF [label: "TF-IDF + LogisticRegression", icon: trending-up, color: "#F0A500"]
-  ChromaDB [label: "ChromaDB (vector store)", icon: database, color: "#F0A500"]
-  PyMuPDF [label: "PyMuPDF + Tesseract OCR", icon: scan, color: "#F0A500"]
-  SentenceTransformers [label: "sentence-transformers", icon: layers, color: "#F0A500"]
+  AuditAgent [label: "AuditAgent (DAILY/WEEKLY/MONTHLY)", icon: shield-check, color: "#F0A500"]
+  Ollama [label: "Ollama qwen2.5:3b (HOST ONLY)", icon: cpu, color: "#804CD7"]
 }
 
-// ── DATA ──────────────────────────────────────────────
-Data [icon: database, color: "#1A3A5C"] {
-  SQLite [label: "SQLite WAL (dev)", icon: database, color: "#2E86C1"]
-  PostgreSQL [label: "PostgreSQL (prod)", icon: database, color: "#2E86C1"]
-  CostCatalog [label: "cost_catalog.yaml\n33 PCE entries", icon: file-text, color: "#2E86C1"]
-  MLModel [label: "ml_model.joblib", icon: trending-up, color: "#2E86C1"]
-  BudgetYAML [label: "budget_plan.yaml", icon: file-text, color: "#2E86C1"]
+DataLayer [icon: database, color: "#1A3A5C"] {
+  MongoDB [label: "MongoDB (PRIMARY)\ninvoices, journal, users,\nbudget, roadmap, risks,\naudit logs + snapshots, CAPEX", icon: database, color: "#1D9E76"]
+  SQLite [label: "SQLite (SECONDARY, shrinking)\nHMAC audit chain,\nreview-queue fallback,\njournal-completeness fallback", icon: database, color: "#5D6D7E"]
+  ChromaDB [label: "ChromaDB (embedded, local)\npce_catalog, invoice_embeddings,\naudit_incidents", icon: layers, color: "#2E86C1"]
 }
 
-// ── INFRASTRUCTURE ────────────────────────────────────
-Infra [icon: cloud, color: "#1A3A5C"] {
-  Docker [label: "Docker + docker-compose", icon: box, color: "#2E86C1"]
-  GithubActions [label: "GitHub Actions CI/CD", icon: git-branch, color: "#2E86C1"]
-  Mailhog [label: "Mailhog (local email dev)", icon: mail, color: "#2E86C1"]
+DockerCompose [label: "Docker Compose", icon: box, color: "#1A3A5C"] {
+  AppContainer [label: "app (backend + compiled SPA)", icon: package, color: "#2E86C1"]
+  MongoContainer [label: "mongo (MongoDB 7, --auth)", icon: database, color: "#2E86C1"]
 }
 
-// ── CONNECTIONS ───────────────────────────────────────
-React19 -> FastAPI: "HTTP/JSON REST API\nport 8000"
-FastAPI -> SQLAlchemy: ORM
+React19 -> FastAPI: "HTTP/JSON :8000"
 FastAPI -> Orchestrator: "process_invoice()"
-FastAPI -> APScheduler: "nightly jobs"
+FastAPI -> APScheduler
+FastAPI -> SQLAlchemy
 Orchestrator -> ExtractionAgent
 Orchestrator -> ClassificationAgent
 Orchestrator -> AnomalyAgent
 Orchestrator -> AccountingAgent
-Orchestrator -> RiskAgent
-Orchestrator -> InsightAgent
-ExtractionAgent -> PyMuPDF
 ExtractionAgent -> Ollama
-ClassificationAgent -> TFIDF
-ClassificationAgent -> ChromaDB
 ClassificationAgent -> Ollama
+ClassificationAgent -> ChromaDB
 AnomalyAgent -> ChromaDB
 AccountingAgent -> Ollama
 RiskAgent -> Ollama
 InsightAgent -> Ollama
+AuditAgent -> Ollama
+AuditAgent -> ChromaDB
+Orchestrator -> MongoDB: "sync pymongo"
 SQLAlchemy -> SQLite
-SQLAlchemy -> PostgreSQL
-SentenceTransformers -> ChromaDB
-Docker -> Backend
-Docker -> Frontend
-GithubActions -> Docker
+AppContainer -> MongoContainer: "mongodb://mongo:27017"
+AppContainer -> Ollama: "host.docker.internal:11434"
+DockerCompose -> AIAgents
+DockerCompose -> DataLayer
 ```
 
-> **Note: NO cloud services. All AI inference is 100% local via Ollama.**
+> **Note: no cloud services. All AI inference is 100% local via Ollama.**
 > Data residency constraint: invoice data never leaves the machine.

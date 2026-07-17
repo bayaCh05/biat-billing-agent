@@ -1,4 +1,9 @@
 # Diagram 4 — Security Architecture
+
+**Updated 2026-07-16** — Layer 4 said "bcrypt password hashing"; the actual
+code (`backend/api/auth.py`) hashes new passwords with argon2id and only
+uses bcrypt to verify pre-migration legacy hashes.
+
 # Paste into Eraser → New Diagram → Flowchart
 
 ```mermaid
@@ -31,7 +36,7 @@ flowchart TB
   end
 
   subgraph L4["Layer 4 — Data Protection"]
-    Bcrypt["bcrypt password hashing\n(rounds=12)"]
+    Bcrypt["argon2id password hashing\n(bcrypt kept for legacy verification only)"]
     FileVal["File validation\nMIME magic bytes check\nMax size · extension filter"]
     Sanitize["Input sanitization\nLength limits · XSS patterns\nSQL injection via ORM only"]
     NoLeak["No sensitive fields\nin API responses"]

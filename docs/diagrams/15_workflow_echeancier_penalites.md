@@ -1,45 +1,48 @@
-# Diagram 15 — Workflow : Échéancier et Pénalités de Retard (avec colonne risque)
+# Diagram 15 — Workflow: Payment Schedule and Late Penalties (with risk column)
+
+**Updated 2026-07-16** — translated to English.
+
 # Paste into Eraser → New Diagram → Flowchart
 
 ```mermaid
 flowchart TB
 
-  INV["📥 Facture reçue — Jour 0\nMontant TTC : 14 280 TND\nDélai : 90 jours (3 × 30j)"]
+  INV["📥 Invoice received — Day 0\nTTC amount: 14 280 TND\nTerm: 90 days (3 × 30d)"]
 
-  subgraph GEN["Génération de l'échéancier (IA)"]
-    E1["Échéance 1 — Jour 30\n4 760 TND\n🟢 PENDING — À l'heure"]
-    E2["Échéance 2 — Jour 60\n4 760 TND\n🟢 PENDING — À l'heure"]
-    E3["Échéance 3 — Jour 90\n4 760 TND\n🟢 PENDING — À l'heure"]
+  subgraph GEN["Payment schedule generation (AI)"]
+    E1["Installment 1 — Day 30\n4 760 TND\n🟢 PENDING — On time"]
+    E2["Installment 2 — Day 60\n4 760 TND\n🟢 PENDING — On time"]
+    E3["Installment 3 — Day 90\n4 760 TND\n🟢 PENDING — On time"]
   end
 
   INV --> E1
   INV --> E2
   INV --> E3
 
-  subgraph LATE1["Scénario : Échéance 1 non payée"]
-    D31["Jour 31 — Retard détecté\n🔴 LATE\n⚠️ Risque : Pénalité imminente"]
-    D31 -->|"+10% après 30j de retard"| P1["Jour 60 : 4 760 × 1,10\n= 5 236 TND\n🔴 Pénalité +10%"]
-    P1 -->|"+10% après 60j de retard"| P2["Jour 90 : 4 760 × 1,21\n= 5 760 TND\n🔴 Pénalité +21%"]
+  subgraph LATE1["Scenario: Installment 1 unpaid"]
+    D31["Day 31 — Late payment detected\n🔴 LATE\n⚠️ Risk: penalty imminent"]
+    D31 -->|"+10% after 30d late"| P1["Day 60: 4 760 × 1.10\n= 5 236 TND\n🔴 Penalty +10%"]
+    P1 -->|"+10% after 60d late"| P2["Day 90: 4 760 × 1.21\n= 5 760 TND\n🔴 Penalty +21%"]
   end
 
-  subgraph PAID1["Paiement tardif de l'échéance 1"]
-    PAY["Jour 65 : Paiement 5 760 TND\n✅ PAID"]
-    JE["Écriture comptable :\nDébit 401 (Fournisseur) 4 760\nDébit 668 (Pénalités) 1 000\nCrédit 532 (Banque) 5 760"]
+  subgraph PAID1["Late payment of installment 1"]
+    PAY["Day 65: Payment 5 760 TND\n✅ PAID"]
+    JE["Journal entry:\nDebit 401 (Supplier) 4 760\nDebit 668 (Penalties) 1 000\nCredit 532 (Bank) 5 760"]
   end
 
-  E1 -->|"Non payée"| D31
+  E1 -->|"Unpaid"| D31
   P1 --> PAY
   PAY --> JE
 
-  subgraph FORMULA["Formule de pénalité"]
-    F["montant × (1 + taux)^périodes_retard\nTaux = 10% par période de 30j\n\nEx : 4 760 × (1,10)² = 5 759,6 TND"]
+  subgraph FORMULA["Penalty formula"]
+    F["amount × (1 + rate)^late_periods\nRate = 10% per 30-day period\n\nEx: 4 760 × (1.10)² = 5 759.6 TND"]
   end
 
-  subgraph RISK_COL["Niveaux de risque par échéance"]
-    R1["🟢 PENDING — Risque : Nul"]
-    R2["🟡 Échéance dans 7j — Risque : Faible\nPulse jaune dans l'UI"]
-    R3["🔴 1–30j de retard — Risque : ELEVEE\n+10% appliqué"]
-    R4["🔴🔴 > 30j de retard — Risque : CRITIQUE\n+21% ou plus appliqué"]
+  subgraph RISK_COL["Risk levels per installment"]
+    R1["🟢 PENDING — Risk: None"]
+    R2["🟡 Due in 7 days — Risk: Low\nYellow pulse in the UI"]
+    R3["🔴 1–30 days late — Risk: HIGH\n+10% applied"]
+    R4["🔴🔴 > 30 days late — Risk: CRITICAL\n+21% or more applied"]
   end
 
   style INV fill:#1A3A5C,color:#FFFFFF
@@ -55,17 +58,17 @@ flowchart TB
   style R4 fill:#FEE2E2,color:#7F1D1D
 ```
 
-## Tableau récapitulatif des risques par période
+## Risk summary table per period
 
-| Jour | Échéance | Montant | Statut | Niveau de risque | Action système |
+| Day | Installment | Amount | Status | Risk level | System action |
 |------|----------|---------|--------|-----------------|----------------|
-| J+30 | 1 | 4 760 TND | PENDING | 🟢 Nul | — |
-| J+37 | 1 | 4 760 TND | LATE | 🔴 ÉLEVÉ | Alerte comptable |
-| J+60 | 1 | 5 236 TND | LATE +10% | 🔴 CRITIQUE | Pénalité appliquée |
-| J+90 | 1 | 5 760 TND | LATE +21% | 🔴 CRITIQUE | Pénalité compoundée |
-| J+65 | 1 | 5 760 TND | PAID | ✅ Soldée | Écriture 401/668/532 |
-| J+60 | 2 | 4 760 TND | PENDING | 🟢 Nul | — |
-| J+90 | 3 | 4 760 TND | PENDING | 🟢 Nul | — |
+| D+30 | 1 | 4 760 TND | PENDING | 🟢 None | — |
+| D+37 | 1 | 4 760 TND | LATE | 🔴 HIGH | Accountant alert |
+| D+60 | 1 | 5 236 TND | LATE +10% | 🔴 CRITICAL | Penalty applied |
+| D+90 | 1 | 5 760 TND | LATE +21% | 🔴 CRITICAL | Compounded penalty |
+| D+65 | 1 | 5 760 TND | PAID | ✅ Settled | Entry 401/668/532 |
+| D+60 | 2 | 4 760 TND | PENDING | 🟢 None | — |
+| D+90 | 3 | 4 760 TND | PENDING | 🟢 None | — |
 
-> **Règle** : Chaque période de 30 jours de retard = +10% cumulatif sur l'échéance concernée.
-> Recalcul automatique chaque nuit par le scheduler APScheduler.
+> **Rule**: Each 30-day period of delay = +10% cumulative on the affected installment.
+> Recalculated automatically every night by the APScheduler scheduler.
