@@ -41,7 +41,9 @@ class ClassificationCorrectionRequest(BaseModel):
         "Requiert Ollama actif ; retourne un message dégradé sinon."
     ),
 )
-def get_health_summary():
+def get_health_summary(
+    _user=Depends(require_role("Comptable", "Chef de Projet", "Direction", "Admin")),
+):
     from src.ai_agents.insight_agent import InsightAgent
     from src.ai_agents.ollama_client import OllamaClient
     agent = InsightAgent()
@@ -104,7 +106,10 @@ def scan_item_risk(
         "Utilise Ollama local — retourne un plan de secours si Ollama est indisponible."
     ),
 )
-def suggest_mitigation(body: MitigationRequest):
+def suggest_mitigation(
+    body: MitigationRequest,
+    _user=Depends(require_role("Chef de Projet", "Admin")),
+):
     from src.ai_agents.risk_agent import RiskAgent
     result = RiskAgent().run({
         "task": "draft_mitigation",

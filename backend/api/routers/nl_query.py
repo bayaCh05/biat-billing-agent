@@ -1,4 +1,4 @@
-"""Natural-language → SQL query endpoint."""
+"""Natural-language → MongoDB aggregation pipeline query endpoint."""
 from __future__ import annotations
 
 import os
@@ -18,12 +18,14 @@ _COMPTABLE_DIRECTION = Depends(require_role("Comptable", "Direction"))
     response_model=NLQueryResult,
     summary="Requête en langage naturel",
     description=(
-        "Convertit une question en français en SQL et l'exécute localement sur la base de données. "
-        "Le modèle Ollama (qwen2.5:3b) génère le SQL — aucune donnée n'est envoyée vers le cloud. "
-        "Exemple : `Factures Ooredoo du mois de juin` → "
-        "`SELECT COALESCE(SUM(amount_ttc), 0) FROM invoices WHERE issuer_name LIKE '%Ooredoo%'`."
+        "Convertit une question en français en pipeline d'agrégation MongoDB et l'exécute "
+        "localement sur la base de données. Le modèle Ollama (qwen2.5:3b) génère le pipeline "
+        "(JSON) — aucune donnée n'est envoyée vers le cloud. "
+        "Exemple : `Factures Ooredoo du mois de juin` → collection `invoices`, pipeline "
+        "`[{\"$match\": {\"issuer_name\": {\"$regex\": \"Ooredoo\", ...}}}, "
+        "{\"$group\": {\"_id\": null, \"total\": {\"$sum\": \"$amount_ttc\"}}}]`."
     ),
-    response_description="SQL généré, colonnes, lignes de résultat et éventuel message d'erreur",
+    response_description="Pipeline généré (affiché tel quel dans le champ 'sql'), colonnes, lignes de résultat et éventuel message d'erreur",
 )
 def nl_query(
     body: NLQueryRequest,
