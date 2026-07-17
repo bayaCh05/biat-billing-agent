@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   # ── Local SMTP server for development email testing ──────────────────────────
   # Web UI to view sent emails: http://localhost:8025
@@ -31,6 +29,49 @@ services:
     volumes:
       - biat_mongo_data:/data/db
     restart: unless-stopped
+    healthcheck:
+      # `ping` is one of the few commands MongoDB allows pre-auth even with
+      # --auth enabled — deliberately not passing credentials here so they
+      # never show up in `docker inspect`'s healthcheck command history.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── Backend API + compiled React SPA (single combined image) ──────────────────
+  # api/main.py mounts frontend/dist/ as static files + SPA fallback when it
+  # exists — the Dockerfile builds that dist/ in a first stage and copies it
+  # into this image, so there is deliberately no separate frontend service/
+  # image here (no nginx config exists in this repo).
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: biat_app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Overrides for the values in .env that are correct for host-based dev
+      # (localhost) but wrong from inside this container's network namespace.
+      MONGODB_URI: "mongodb://${MONGO_ROOT_USER:-biat_admin}:${MONGO_ROOT_PASSWORD}@mongo:27017/?authSource=admin"
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+    extra_hosts:
+      # Makes host.docker.internal resolve on Linux too (Docker 20.10+) —
+      # Mac/Windows Docker Desktop already provide it natively. Ollama runs
+      # on the host, never containerized — see README.md "Ollama" section.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - biat_data:/app/data          # invoices.db (SQLite, still required), uploads/, chromadb/
+      - biat_exports:/app/exports
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   biat_mongo_data:
+  biat_data:
+  biat_exports:

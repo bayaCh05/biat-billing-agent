@@ -79,6 +79,23 @@ def _startup() -> None:
             "par défaut. Définir AUDIT_HMAC_SECRET séparément dans .env pour isoler les deux secrets."
         )
 
+    # Ollama runs on the host, never in a container (data residency — see
+    # CLAUDE.md). Unreachable here almost always means OLLAMA_BASE_URL still
+    # points at localhost/127.0.0.1 from inside a container's own network
+    # namespace, not the host's — warn with the actual fix, not just "down".
+    try:
+        from src.ai_agents.ollama_client import OllamaClient
+        if not OllamaClient.get().is_available():
+            _log.warning(
+                "⚠️  Ollama injoignable à %s. Si l'API tourne dans un conteneur : Mac/Windows → "
+                "utilisez http://host.docker.internal:11434 comme OLLAMA_BASE_URL ; Linux → ajoutez "
+                "extra_hosts: [\"host.docker.internal:host-gateway\"] (Docker 20.10+) et gardez la même "
+                "URL, ou utilisez network_mode: host, ou l'IP hôte explicite. L'extraction LLM et la "
+                "classification RAG tourneront en mode dégradé tant qu'Ollama reste inaccessible."
+            )
+    except Exception as exc:
+        _log.warning("⚠️  Impossible de vérifier la disponibilité d'Ollama au démarrage : %s", exc)
+
     # Fail fast if LDAP is enabled but LDAP_BIND_PASSWORD is missing — no
     # hardcoded fallback (see src/services/ldap_service.py). Checked here
     # rather than at import time because that module is only imported lazily,
