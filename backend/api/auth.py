@@ -1,7 +1,6 @@
 """JWT authentication utilities + role guard for BIAT IT Billing API."""
 from __future__ import annotations
 
-import os
 import secrets
 import string
 from pathlib import Path

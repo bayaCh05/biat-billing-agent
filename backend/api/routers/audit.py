@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from api.auth import require_role
 from api.deps import get_session
-from api.security.audit_integrity import compute_row_hash, verify_row_hash, verify_row_status
+from api.security.audit_integrity import compute_row_hash, verify_row_status
 from src.models.audit import AuditLogCreate, AuditLogOut
 from src.storage.orm_models_audit import AuditLogORM
 
