@@ -29,6 +29,7 @@ import HabilitationsPage from './pages/admin/HabilitationsPage'
 import Audit from './pages/transversal/Audit'
 import AuditReports from './pages/transversal/AuditReports'
 import Echeancier from './pages/comptabilite/Echeancier'
+import PageSpinner from './components/ui/PageSpinner'
 import { useAuth } from './context/AuthContext'
 import { roleHome } from './config/navigation'
 import { ROLE_PATHS } from './config/roles'
@@ -39,8 +40,12 @@ function HomeRedirect() {
 }
 
 function AuthGuard() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, isBootstrapping } = useAuth()
   const location = useLocation()
+  // Wait for the session-restore attempt (refresh cookie) before deciding to
+  // redirect — otherwise a hard reload always bounces to /login, since
+  // isAuthenticated starts false until that async call resolves.
+  if (isBootstrapping) return <PageSpinner loading error={false} />
   if (!isAuthenticated) return <Navigate to="/login" state={{ from: location }} replace />
   return <Outlet />
 }

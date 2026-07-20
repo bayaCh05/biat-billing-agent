@@ -11,6 +11,7 @@ export interface AuthState {
   notifCount: number
   setNotifCount: (count: number | ((prev: number) => number)) => void
   isAuthenticated: boolean
+  isBootstrapping: boolean
   forcePasswordChange: boolean
   isDemoUser: boolean
   setRole: (r: UserRole) => void

@@ -43,6 +43,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [role, setRoleState] = useState<UserRole>(storedRole)
   const [name, setName] = useState<string>(ROLE_FALLBACK_NAMES[storedRole])
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getToken()))
+  // True while we still have a session to try restoring via the refresh
+  // cookie (stored role, no in-memory token yet — e.g. right after a hard
+  // reload). AuthGuard must wait for this before deciding to redirect to
+  // /login, otherwise it redirects on the very first render, before the
+  // refresh call below even gets a chance to run.
+  const [isBootstrapping, setIsBootstrapping] = useState(
+    () => !getToken() && Boolean(localStorage.getItem(STORAGE_KEY)),
+  )
   const [notifCount, setNotifCount] = useState(0)
   const [forcePasswordChange, setForcePasswordChange] = useState(false)
   const [isDemoUser, setIsDemoUser] = useState(false)
@@ -80,6 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem(STORAGE_KEY)
         window.location.replace('/login')
       })
+      .finally(() => setIsBootstrapping(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -128,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider value={{
       role, setRole, name, initials: initials(name), avatar, setAvatar,
       notifCount, setNotifCount,
-      isAuthenticated, forcePasswordChange, isDemoUser,
+      isAuthenticated, isBootstrapping, forcePasswordChange, isDemoUser,
       loginWithToken, logout, clearForcePasswordChange,
     }}>
       {children}
