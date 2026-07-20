@@ -8,7 +8,8 @@ import type { InvoiceSummary, Invoice, InvoiceDirection } from '../../types'
 import { formatTND, formatDate } from '../../utils/formatters'
 import { useAuth } from '../../context/AuthContext'
 import PageSpinner from '../../components/ui/PageSpinner'
-const API_BASE = import.meta.env.VITE_API_URL as string
+import { getToken } from '../../api/client'
+const API_BASE = `${(import.meta.env.VITE_API_URL as string) ?? ''}/api`
 
 const TERMINAL = new Set(['EXPORTED', 'JOURNALED', 'JOURNALING', 'PAID', 'COLLECTED'])
 const PENDING  = new Set(['RECEIVED', 'EXTRACTING', 'EXTRACTED', 'CLASSIFYING', 'CLASSIFIED', 'VALIDATING', 'VALIDATED', 'FLAGGED', 'EXPORTING'])
@@ -51,7 +52,7 @@ export default function InvoiceDetail() {
 
   async function handleViewPdf() {
     if (!selectedId) return
-    const token = localStorage.getItem('access_token')
+    const token = getToken()
     const url = `${API_BASE}/invoices/${selectedId}/pdf`
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) { setPdfError(true); return }
