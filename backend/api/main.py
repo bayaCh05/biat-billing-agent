@@ -19,6 +19,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from api.auth import get_current_user
 from api.limiter import limiter
+from api.security.auth_middleware import RequireAuthMiddleware
 from api.security.security_headers import SecurityHeadersMiddleware
 from src.storage.mongodb import close_mongodb, init_beanie
 
@@ -196,6 +197,16 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
 # Security headers on all responses
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Baseline auth safety net for every /api/* route — see auth_middleware.py
+# docstring for why this exists alongside the per-router `dependencies=
+# _PROTECTED` mechanism rather than replacing it. Added before CORS below
+# so CORS ends up as the outermost middleware (added-later-wraps-earlier in
+# Starlette) and handles OPTIONS preflight before this ever runs — this
+# middleware also explicitly bypasses OPTIONS itself, so it's correct
+# regardless of ordering, but keeping CORS outermost is still the clearer
+# structure to reason about.
+app.add_middleware(RequireAuthMiddleware)
 
 # CORS: restrict to known frontend origins only
 _CORS_ORIGINS = [

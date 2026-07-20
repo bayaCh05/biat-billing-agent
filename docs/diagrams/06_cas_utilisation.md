@@ -1,8 +1,15 @@
 # Diagram 6 — Use Case Diagram
 
-**Updated 2026-07-16** — translated to English and added the "View audit
-reports" use case (Admin/Direction, AuditAgent), missing from the previous
-version.
+**Updated 2026-07-16/20** — translated to English, added the "View audit
+reports" use case (Admin/Direction, AuditAgent), and fixed two role-mapping
+gaps: "Executive AI summary" (`/ai/health-summary`) is reachable by all 4
+roles, not just Direction; "Suggest mitigation" (`/ai/suggest-mitigation`)
+is reachable by Chef de Projet/Admin directly, not only as an AI-internal
+step. Both routes already required a valid login (via the router-level
+`dependencies=_PROTECTED` in `api/main.py`) but were missing their own
+`require_role(...)` — any authenticated user of any role could call them,
+not the specific roles this diagram now shows — fixed 2026-07-20 (see
+`backend/api/routers/ai.py`).
 
 # Paste into Eraser → New Diagram → Flowchart (use as UML Use Case)
 
@@ -84,9 +91,9 @@ flowchart LR
     end
   end
 
-  ADMIN --> UC_CU & UC_AR & UC_DC & UC_VI & UC_AUDIT
-  COMPTABLE --> UC_SF & UC_VD & UC_AR2 & UC_CJ & UC_GL & UC_EX2 & UC_PAY & UC_DB & UC_NL
-  CHEF --> UC_FC & UC_CP & UC_PH & UC_LIV & UC_JH & UC_CR & UC_RD
+  ADMIN --> UC_CU & UC_AR & UC_DC & UC_VI & UC_AUDIT & UC_AI & UC_MIT
+  COMPTABLE --> UC_SF & UC_VD & UC_AR2 & UC_CJ & UC_GL & UC_EX2 & UC_PAY & UC_DB & UC_NL & UC_AI
+  CHEF --> UC_FC & UC_CP & UC_PH & UC_LIV & UC_JH & UC_CR & UC_RD & UC_AI & UC_MIT
   DIR --> UC_DB & UC_KPI & UC_NL & UC_AI & UC_RD & UC_CJ & UC_AUDIT
   IA --> UC_EX & UC_CL & UC_GE & UC_CI & UC_GES & UC_PEN & UC_PDF & UC_MIT & UC_SCAN & UC_AI & UC_AUDIT
   ADMIN & COMPTABLE & CHEF & DIR --> UC_MP & UC_CPW

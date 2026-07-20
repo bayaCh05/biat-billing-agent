@@ -68,6 +68,9 @@ InsightAgent -> Ollama
 AuditAgent -> Ollama
 AuditAgent -> ChromaDB
 Orchestrator -> MongoDB: "sync pymongo"
+RiskAgent -> MongoDB: "sync pymongo"
+InsightAgent -> MongoDB: "sync pymongo"
+AuditAgent -> MongoDB: "sync pymongo"
 SQLAlchemy -> SQLite
 AppContainer -> MongoContainer: "mongodb://mongo:27017"
 AppContainer -> Ollama: "host.docker.internal:11434"

@@ -1,4 +1,13 @@
 # Diagram 3 — AI Agent Architecture
+
+**Updated 2026-07-16/20** — translated to English, added AuditAgent (7th
+agent) and separated it from InsightAgent/NLQueryEngine (an earlier version
+conflated the two). RiskAgent's and AuditAgent's "Output" labels no longer
+name Beanie Document classes (`RisqueDocument`, `AuditSnapshotDocument`) —
+both actually write via sync pymongo (`sync_mongo_repository.py`), never
+Beanie's async ODM; RiskAgent was migrated off a Beanie/asyncio.run() bridge
+that crashed intermittently (see `risk_agent.py`).
+
 # Paste into Eraser → New Diagram → Cloud Architecture
 
 ```
@@ -19,9 +28,9 @@ Agents [color: "#F0A500"] {
   A2 [label: "② ClassificationAgent\nPass A: Fuzzy CostCatalog\nPass B: TF-IDF / LogReg ML\nPass C: RAG + Ollama\nOutput: PCE account + reason", icon: tag, color: "#F0A500"]
   A3 [label: "③ AnomalyAgent\nMath validation (TVA, TTC)\nDuplicate detection\nEmbedding similarity\nOutput: ValidationFlag[]", icon: alert-triangle, color: "#F0A500"]
   A4 [label: "④ AccountingAgent\nPCE journal (double entry)\nCAPEX asset creation\nPayment schedule\nOllama: explanation + amort.\nOutput: JournalEntry + Asset", icon: book-open, color: "#F0A500"]
-  A5 [label: "⑤ RiskAgent\nScan overdue roadmap items\nDraft mitigation plan\nOutput: RisqueDocument (Mongo) + plan", icon: shield-alert, color: "#F0A500"]
+  A5 [label: "⑤ RiskAgent\nScan overdue roadmap items\nDraft mitigation plan\nOutput: risque record (Mongo, sync pymongo) + plan", icon: shield-alert, color: "#F0A500"]
   A6 [label: "⑥ InsightAgent\nKPI snapshot → 3-sentence summary\n(not NL Query — see NLQueryEngine below)", icon: sparkles, color: "#F0A500"]
-  A7 [label: "⑦ AuditAgent\nDAILY/WEEKLY/MONTHLY cross-entity\nreconciliation + RAG narrative\nOutput: AuditSnapshotDocument (Mongo)", icon: shield-check, color: "#F0A500"]
+  A7 [label: "⑦ AuditAgent\nDAILY/WEEKLY/MONTHLY cross-entity\nreconciliation + RAG narrative\nOutput: audit snapshot (Mongo, sync pymongo)", icon: shield-check, color: "#F0A500"]
 }
 
 // ── NL QUERY (separate module, not an agent) ──────────
