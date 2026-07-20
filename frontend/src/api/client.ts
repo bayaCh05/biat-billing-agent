@@ -41,7 +41,10 @@ async function tryRefresh(): Promise<string | null> {
 }
 
 async function getValidToken(): Promise<string | null> {
-  if (!_accessToken) return null
+  // No in-memory token yet (e.g. fresh page load) — try the refresh cookie
+  // before giving up, so a hard reload doesn't race AuthProvider's own
+  // bootstrap refresh and log the user out from under them.
+  if (!_accessToken) return tryRefresh()
   // Refresh proactively if token expires in < 5 min
   const exp = decodeExp(_accessToken)
   if (exp && exp - Date.now() / 1000 < 300) {
