@@ -133,7 +133,19 @@ API on the same origin, plus a `mongo` service:
 ```bash
 cp .env.example .env   # then fill in real secrets — see "Key configuration" below
 docker compose up -d --build
+docker compose exec app alembic upgrade head   # first boot only — see below
 ```
+
+**The `alembic upgrade head` step is required on first boot and is not run
+automatically.** The container's entrypoint only calls `init_db()`, which is
+a deliberate no-op for a file-based SQLite DB (see the "Important" note under
+"Quick start" above — no auto-migrations on startup in a banking system).
+`/api/health` will still report healthy on a completely empty SQLite file
+(it only checks the connection, not that tables exist) — the gap only
+surfaces as a "no such table" error the first time a SQLite-backed route
+(`audit.py`, `review.py`, `security.py`, `invoices.py::get_pipeline_status`)
+is actually hit. Run the migration once after the first `up -d --build` on
+any new volume; it's a no-op (already at `head`) on subsequent restarts.
 
 `app` waits on Mongo's healthcheck before starting. Ollama is **not**
 containerized (data residency — see "Prerequisites") and must already be
