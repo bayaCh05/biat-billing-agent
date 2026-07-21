@@ -198,7 +198,7 @@ export default function ProjetDetailIT() {
       </PageHeader>
 
       {/* Summary cards */}
-      <div className="px-6 pt-5 grid grid-cols-4 gap-4">
+      <div className="px-6 pt-5 grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: 'Budget JH',      value: `${project.budget_jh} JH`,      color: '#1A3A5C' },
           { label: 'Consommé JH',    value: `${project.consumed_jh} JH`,     color: '#5BA3C9' },
@@ -331,7 +331,7 @@ export default function ProjetDetailIT() {
           <>
             {/* Synthese */}
             {synthese && (
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
                   { label: 'Total prévu',     value: formatTND(synthese.total_prevu),    color: '#1A3A5C' },
                   { label: 'Total consommé',  value: formatTND(synthese.total_consomme), color: '#5BA3C9' },

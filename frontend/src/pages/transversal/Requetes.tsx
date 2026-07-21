@@ -248,6 +248,7 @@ export default function Requetes() {
                   Aucun résultat pour cette requête.
                 </div>
               ) : (
+                <div className="overflow-x-auto">
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: '#F0F4F9' }}>
@@ -275,6 +276,7 @@ export default function Requetes() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </div>
 

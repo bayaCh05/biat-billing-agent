@@ -107,6 +107,7 @@ export default function Direction() {
   const [accounts, setAccounts]   = useState<AccountSpendItem[]>([])
   const [kpis, setKpis]           = useState<AnalyticsKPIs | null>(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(true)
+  const [analyticsError, setAnalyticsError] = useState(false)
 
   // Existing overview data
   const [kpi, setKpi]             = useState<KpiData | null>(null)
@@ -114,12 +115,14 @@ export default function Direction() {
   const [assets, setAssets]       = useState<Asset[]>([])
   const [riskSummary, setRiskSummary] = useState<RiskSummary | null>(null)
   const [overviewLoading, setOverviewLoading] = useState(true)
+  const [overviewError, setOverviewError] = useState(false)
   const [lastRefresh, setLastRefresh] = useState(now)
   const [healthSummary, setHealthSummary] = useState<{ summary: string; status_label: string; generated_at: string; ollama_available: boolean } | null>(null)
   const [healthLoading, setHealthLoading] = useState(false)
 
   const loadAnalytics = useCallback(async () => {
     setAnalyticsLoading(true)
+    setAnalyticsError(false)
     try {
       const [m, s, a, k] = await Promise.all([
         getMonthlySpend(year),
@@ -131,6 +134,8 @@ export default function Direction() {
       setSuppliers(s)
       setAccounts(a)
       setKpis(k)
+    } catch {
+      setAnalyticsError(true)
     } finally {
       setAnalyticsLoading(false)
     }
@@ -138,6 +143,7 @@ export default function Direction() {
 
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true)
+    setOverviewError(false)
     try {
       const [k, b, a, rs] = await Promise.all([
         getKpi(),
@@ -149,6 +155,8 @@ export default function Direction() {
       setBudget(b)
       setAssets(a)
       setRiskSummary(rs)
+    } catch {
+      setOverviewError(true)
     } finally {
       setOverviewLoading(false)
     }
@@ -212,15 +220,15 @@ export default function Direction() {
   const dashOffset = circ * (1 - Math.min(consumedPct, 100) / 100)
 
   return (
-    <div className="p-6 max-w-[1400px] mx-auto flex flex-col gap-5">
+    <div className="p-4 sm:p-6 max-w-[1400px] mx-auto flex flex-col gap-5">
 
       {/* Header */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div>
           <h1 className="text-lg font-bold text-gray-900">Vue Direction — Tableau Exécutif {year}</h1>
           <p className="text-xs text-gray-400">Actualisé à {lastRefresh.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
         </div>
-        <span className="ml-auto text-[11px] font-semibold bg-purple-50 text-purple-700 rounded-full px-3 py-1">● Direction</span>
+        <span className="sm:ml-auto text-[11px] font-semibold bg-purple-50 text-purple-700 rounded-full px-3 py-1">● Direction</span>
         <button
           onClick={refresh}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-600"
@@ -230,8 +238,23 @@ export default function Direction() {
         </button>
       </div>
 
+      {(analyticsError || overviewError) && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border px-4 py-2.5" style={{ borderColor: '#F5C6C0', background: '#FDEDEC' }}>
+          <p className="text-sm" style={{ color: '#C0391B' }}>
+            ⚠ Certaines données n'ont pas pu être chargées — vérifiez que l'API est joignable.
+          </p>
+          <button
+            onClick={refresh}
+            className="text-xs px-3 py-1.5 rounded-lg border shrink-0"
+            style={{ borderColor: '#C0391B', color: '#C0391B' }}
+          >
+            Réessayer
+          </button>
+        </div>
+      )}
+
       {/* ── Analytics KPI cards ────────────────────────────────────────────── */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <KpiCard
           label="Délai moyen de traitement"
           value={analyticsLoading ? '—' : (kpis?.avg_processing_days.toFixed(1) ?? '—')}
@@ -305,7 +328,7 @@ export default function Direction() {
       </div>
 
       {/* ── Suppliers bar + PCE pie ───────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
         {/* Top 10 suppliers — horizontal bar */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
@@ -374,7 +397,7 @@ export default function Direction() {
       </div>
 
       {/* ── Overview row: ageing · budget · alerts ────────────────────────── */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
         {/* Budget donut */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
@@ -492,7 +515,7 @@ export default function Direction() {
               {riskSummary.overdue.length > 0 ? `${riskSummary.overdue.length} en retard` : `${riskSummary.total_active} total`}
             </span>
           </div>
-          <div className="grid grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
             {(['FAIBLE', 'MOYENNE', 'ELEVEE', 'CRITIQUE'] as NiveauCriticite[]).map(c => (
               <div key={c} className="rounded-lg p-3 text-center" style={{ background: CRITICITE_BG[c] }}>
                 <p className="text-xs font-semibold" style={{ color: CRITICITE_COLOR[c] }}>{c}</p>

@@ -52,6 +52,7 @@ function JournalEntryCard({ entry }: { entry: PipelineJournalEntry }) {
           "{entry.accounting_explanation}"
         </p>
       )}
+      <div className="overflow-x-auto">
       <table className="w-full text-xs border-collapse">
         <thead>
           <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #D5E8F5' }}>
@@ -80,6 +81,7 @@ function JournalEntryCard({ entry }: { entry: PipelineJournalEntry }) {
           </tr>
         </tbody>
       </table>
+      </div>
     </Card>
   )
 }

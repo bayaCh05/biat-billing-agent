@@ -99,7 +99,7 @@ export default function AIActivityPage() {
         </div>
 
         {/* Stats cards */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <StatCard
             label="Total appels Ollama"
             value={stats?.total_calls ?? 0}

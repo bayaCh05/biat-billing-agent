@@ -51,7 +51,7 @@ export default function HabilitationsPage() {
       <PageHeader title="Tableau des habilitations" badge="Référentiel des droits d'accès" />
 
       <div className="p-6 space-y-5">
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {COLS.map(c => (
             <div key={c.key} className="rounded-xl border p-4 text-center" style={{ borderColor: '#D5E8F5', background: '#fff' }}>
               <p className="text-xs font-bold tracking-widest" style={{ color: c.color }}>{c.label}</p>

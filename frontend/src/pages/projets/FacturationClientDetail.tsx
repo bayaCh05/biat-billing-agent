@@ -15,23 +15,51 @@ export default function ProjetDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [template, setTemplate] = useState<ClientTemplate | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [notFound, setNotFound] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [genResult, setGenResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
   useEffect(() => {
     if (!id) return
-    listTemplates()
-      .then(templates => {
-        const found = templates.find(t => t.id === id)
-        if (found) setTemplate(found)
-      })
-      .catch(() => {})
+    queueMicrotask(() => {
+      setLoading(true)
+      setLoadError(false)
+      setNotFound(false)
+      listTemplates()
+        .then(templates => {
+          const found = templates.find(t => t.id === id)
+          if (found) setTemplate(found)
+          else setNotFound(true)
+        })
+        .catch(() => setLoadError(true))
+        .finally(() => setLoading(false))
+    })
   }, [id])
 
-  if (!template) {
+  if (loading) {
     return (
       <div className="p-6">
         <p className="text-sm" style={{ color: '#5D6D7E' }}>Chargement…</p>
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="p-6">
+        <p className="text-sm" style={{ color: '#C0391B' }}>
+          ⚠ Impossible de charger ce service — vérifiez votre connexion et réessayez.
+        </p>
+      </div>
+    )
+  }
+
+  if (notFound || !template) {
+    return (
+      <div className="p-6">
+        <p className="text-sm" style={{ color: '#5D6D7E' }}>Service introuvable.</p>
       </div>
     )
   }
@@ -69,7 +97,7 @@ export default function ProjetDetail() {
 
       <div className="p-6 space-y-5">
         {/* Summary cards */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Client',        value: template.client_name,               color: '#1A3A5C' },
             { label: 'Prix HT/mois',  value: template.unit_price_ht > 0 ? formatTND(template.unit_price_ht) : 'Sur devis', color: '#1A3A5C' },

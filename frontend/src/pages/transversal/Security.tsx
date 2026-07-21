@@ -96,7 +96,7 @@ export default function SecurityPage() {
         )}
 
         {/* KPI overview */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard label="Connexions aujourd'hui" value={summary?.total_logins_today ?? 0} color="#2E86C1" />
           <StatCard
             label="Échecs de connexion"
@@ -265,7 +265,7 @@ export default function SecurityPage() {
         )}
 
         {/* Security info */}
-        <div className="p-3 rounded-lg text-xs grid grid-cols-3 gap-3" style={{ background: '#F0F4F9' }}>
+        <div className="p-3 rounded-lg text-xs grid grid-cols-1 sm:grid-cols-3 gap-3" style={{ background: '#F0F4F9' }}>
           <div className="flex items-center gap-2">
             <CheckCircle size={13} className="text-green-500 shrink-0" />
             <span>Mots de passe hachés bcrypt</span>

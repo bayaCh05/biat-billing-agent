@@ -114,7 +114,7 @@ export default function InvoiceDetail() {
 
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
         {/* KPI row */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Total factures',    value: String(invoices.length),    sub: `${byDir('SUPPLIER').length} fournisseurs · ${byDir('CLIENT').length} clients` },
             { label: 'Montant total TTC', value: totalStr,                   sub: 'Toutes directions confondues' },
@@ -168,6 +168,7 @@ export default function InvoiceDetail() {
         <div className="flex gap-4 min-h-0">
           {/* Table */}
           <div className="flex-1 bg-white rounded-xl border overflow-hidden" style={{ borderColor: '#D5E8F5' }}>
+            <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #D5E8F5' }}>
@@ -212,6 +213,7 @@ export default function InvoiceDetail() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
 
           {/* Detail panel */}
@@ -322,6 +324,7 @@ export default function InvoiceDetail() {
                       {journalEntry.reference} — {journalEntry.date_ecriture}
                     </p>
                     <p style={{ color: '#5D6D7E' }}>{journalEntry.description}</p>
+                    <div className="overflow-x-auto">
                     <table className="w-full border-collapse">
                       <thead>
                         <tr style={{ color: '#5D6D7E' }}>
@@ -340,6 +343,7 @@ export default function InvoiceDetail() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                     <button
                       onClick={() => navigate('/journal')}
                       className="text-xs underline"

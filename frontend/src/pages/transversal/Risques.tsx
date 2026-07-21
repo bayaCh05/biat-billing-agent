@@ -216,6 +216,7 @@ function VueParProjet({
 
   return (
     <div className="rounded-xl border overflow-hidden" style={{ borderColor: '#E2EBF3' }}>
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead style={{ background: '#F5F8FC' }}>
           <tr>
@@ -280,6 +281,7 @@ function VueParProjet({
           })}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }
@@ -291,12 +293,13 @@ export default function RisksPage() {
   const [editRisk, setEditRisk]   = useState<Risk | null>(null)
   const [form, setForm]           = useState({ ...EMPTY_FORM })
   const [saving, setSaving]       = useState(false)
+  const [saveError, setSaveError] = useState(false)
   const [filterStatut, setFilterStatut]       = useState('')
   const [filterCriticite, setFilterCriticite] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
   const [suggestingMitigation, setSuggestingMitigation] = useState(false)
 
-  const openCreate = () => { setEditRisk(null); setForm({ ...EMPTY_FORM }); setShowModal(true) }
+  const openCreate = () => { setEditRisk(null); setForm({ ...EMPTY_FORM }); setSaveError(false); setShowModal(true) }
 
   const openEdit = (r: Risk) => {
     setEditRisk(r)
@@ -307,6 +310,7 @@ export default function RisksPage() {
       date_echeance_mitigation: r.date_echeance_mitigation ?? '',
       feuille_route_id: r.feuille_route_id ?? '', projet_id: r.projet_id ?? '',
     })
+    setSaveError(false)
     setShowModal(true)
   }
 
@@ -317,6 +321,7 @@ export default function RisksPage() {
       return
     }
     setSaving(true)
+    setSaveError(false)
     try {
       const payload = {
         titre: form.titre, description: form.description, type_risque: form.type_risque,
@@ -334,6 +339,8 @@ export default function RisksPage() {
       }
       setShowModal(false)
       setReloadKey(k => k + 1)
+    } catch {
+      setSaveError(true)
     } finally {
       setSaving(false)
     }
@@ -564,6 +571,12 @@ export default function RisksPage() {
                 </div>
               </div>
             </div>
+
+            {saveError && (
+              <p className="text-sm" style={{ color: '#C0391B' }}>
+                ⚠ Échec de l'enregistrement — vérifiez votre connexion et réessayez.
+              </p>
+            )}
 
             <div className="flex gap-3 pt-2">
               <button

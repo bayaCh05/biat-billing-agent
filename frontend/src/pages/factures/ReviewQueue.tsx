@@ -149,6 +149,7 @@ export default function ReviewQueue() {
 
         {/* Table */}
         <div className="mx-6 mt-4 bg-white rounded-xl border overflow-hidden" style={{ borderColor: '#D5E8F5' }}>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #D5E8F5' }}>
@@ -237,7 +238,7 @@ export default function ReviewQueue() {
                         <p className="text-sm font-semibold mb-3" style={{ color: '#1A3A5C' }}>
                           Détail — {item.issuer_name} · {item.invoice_number}
                         </p>
-                        <div className="grid grid-cols-5 gap-4 mb-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mb-3">
                           {[
                             { label: 'Montant HT',   value: item.amount_ht != null ? formatTND(item.amount_ht) : '—',   conf: 0.86 },
                             { label: 'TVA (19%)',     value: item.tva_amount != null ? formatTND(item.tva_amount) : '—', conf: 0.72 },
@@ -281,6 +282,7 @@ export default function ReviewQueue() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
         <div className="h-6" />
       </div>

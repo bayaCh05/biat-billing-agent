@@ -98,7 +98,7 @@ function EditModal({ entry, onSave, onClose }: EditModalProps) {
         </div>
 
         {/* Monthly grid */}
-        <div className="px-6 pt-4 grid grid-cols-6 gap-2">
+        <div className="px-6 pt-4 grid grid-cols-3 sm:grid-cols-6 gap-2">
           {MONTH_LABELS.map((m, i) => (
             <div key={m}>
               <p className="text-[10px] font-medium mb-1 text-center" style={{ color: '#5D6D7E' }}>{m}</p>
@@ -343,7 +343,7 @@ export default function Budget() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-4 gap-4 mx-6 my-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mx-6 my-4">
         {[
           { label: 'Budget YTD', value: formatTND(budget.total_budget_ytd, 0), sub: `Jan–${MONTH_LABELS[month - 1]} ${year}`, subColor: '#5D6D7E' },
           { label: 'Réel YTD', value: formatTND(budget.total_actual_ytd, 0), sub: `${formatVariance(budget.variance_pct)} vs budget`, subColor: budget.variance_pct > 0 ? '#C0391B' : '#1D9E76' },

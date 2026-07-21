@@ -67,7 +67,7 @@ export default function Projets() {
       <div className="p-6 space-y-6">
 
         {/* ── KPI row ── */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Projets IT actifs',    value: String(activeProjects),     color: '#1D9E76' },
             { label: 'Services de facturation', value: String(cards.filter(c => c.status === 'ACTIVE').length), color: '#1A3A5C' },

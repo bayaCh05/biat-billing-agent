@@ -150,7 +150,7 @@ export default function GrandLivre() {
             <p className="text-sm" style={{ color: '#5D6D7E' }}>Sélectionnez un compte.</p>
           ) : (
             <>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
                   { label: 'Total Débit',  value: formatTND(totalDebit),  color: '#1D9E76', sub: null },
                   { label: 'Total Crédit', value: formatTND(totalCredit), color: '#F0A600', sub: null },
@@ -177,6 +177,7 @@ export default function GrandLivre() {
                     Compte {activeCompte} — {compte.libelle}
                   </p>
                 </div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{ borderBottom: '1px solid #F0F4F9' }}>
@@ -211,6 +212,7 @@ export default function GrandLivre() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             </>
           )}

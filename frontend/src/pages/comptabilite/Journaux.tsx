@@ -134,7 +134,7 @@ export default function Journaux() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-4 gap-4 mx-6 my-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mx-6 my-4">
         {kpiCards.map(card => (
           <div
             key={card.label}
@@ -181,6 +181,7 @@ export default function Journaux() {
               <div className="px-4 py-2.5 text-sm font-semibold" style={{ background: '#F0F4F9', color: '#1A1A2E' }}>
                 📅 {formatDateFr(date)} — {dayEntries.length} écriture{dayEntries.length > 1 ? 's' : ''}
               </div>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b" style={{ borderColor: '#D5E8F5' }}>
@@ -228,6 +229,7 @@ export default function Journaux() {
                   ))}
                 </tbody>
               </table>
+              </div>
               <div className="flex items-center px-4 py-2.5" style={{ background: '#E8F5F0' }}>
                 <span className="flex-1 text-sm font-medium" style={{ color: '#1D9E76' }}>
                   Total journée {dayBalanced ? '✓ Équilibre respecté' : '✗ Déséquilibre'}

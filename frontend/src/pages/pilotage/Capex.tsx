@@ -150,7 +150,7 @@ export default function CAPEX() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-4 gap-4 mx-6 my-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mx-6 my-4">
         {[
           { label: 'Total actifs', value: String(assets.length), sub: `${categories.length} catégories` },
           { label: 'Valeur brute', value: formatTND(totalBrut, 0), sub: 'Cumulé' },
@@ -167,7 +167,7 @@ export default function CAPEX() {
 
       {/* Asset grid */}
       {activeTab === 0 && (
-        <div className="grid grid-cols-3 gap-4 px-6 pb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 px-6 pb-6">
           {assets.map((asset, i) => {
             const dep = depreciations[i]
             const meta = compteMeta(asset.compte_immobilisation)
@@ -233,6 +233,7 @@ export default function CAPEX() {
                     {formatTND(asset.acquisition_cost_ht, 0)} · {asset.useful_life_years} ans · {formatAcqDate(asset.acquisition_date)}
                   </span>
                 </div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b" style={{ borderColor: '#D5E8F5' }}>
@@ -297,6 +298,7 @@ export default function CAPEX() {
                     </tr>
                   </tfoot>
                 </table>
+                </div>
               </div>
             )
           })}

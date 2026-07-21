@@ -227,7 +227,7 @@ export default function EcheancierPage() {
       <div className="p-6 flex flex-col gap-5">
 
         {/* Summary cards */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <p className="text-xs text-gray-500 mb-1">Total échéances</p>
             <p className="text-2xl font-bold" style={{ color: '#1A3A5C' }}>{summary?.total ?? 0}</p>
@@ -288,6 +288,7 @@ export default function EcheancierPage() {
 
         {/* Main table */}
         <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: '#D5E8F5' }}>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: '#F0F4F9', borderBottom: '1px solid #D5E8F5' }}>
@@ -387,6 +388,7 @@ export default function EcheancierPage() {
               ))}
             </tbody>
           </table>
+          </div>
 
           {/* Penalty legend */}
           {filtered.some(i => i.status === 'LATE') && (

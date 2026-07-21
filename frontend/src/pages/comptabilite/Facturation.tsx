@@ -329,6 +329,7 @@ export default function Facturation() {
                       Aucune phase trouvée pour ce projet.
                     </p>
                   ) : (
+                    <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b" style={{ borderColor: '#D5E8F5', background: '#F0F4F9' }}>
@@ -396,6 +397,7 @@ export default function Facturation() {
                         </tr>
                       </tfoot>
                     </table>
+                    </div>
                   )}
                 </div>
 
@@ -459,6 +461,7 @@ export default function Facturation() {
             </div>
           ) : (
             <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: '#D5E8F5' }}>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b" style={{ borderColor: '#D5E8F5', background: '#F0F4F9' }}>
@@ -512,6 +515,7 @@ export default function Facturation() {
                   </tr>
                 </tfoot>
               </table>
+              </div>
             </div>
           )}
         </div>

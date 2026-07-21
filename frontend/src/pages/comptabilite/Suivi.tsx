@@ -175,6 +175,7 @@ export default function Suivi() {
         </div>
 
         {/* Table */}
+        <div className="overflow-x-auto">
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: '#F0F4F9' }}>
@@ -187,6 +188,7 @@ export default function Suivi() {
             <InvoiceTable rows={activeRows} />
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )

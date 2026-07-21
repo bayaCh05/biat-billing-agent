@@ -339,7 +339,7 @@ export default function AuditReportsPage() {
             <FileBarChart2 className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Rapports d'Audit</h1>
+            <h1 className="text-lg font-bold" style={{ color: '#1A1A2E' }}>Rapports d'Audit</h1>
             <p className="text-xs text-gray-500">
               Audit transversal automatisé — vérifie factures, comptabilité, budget, échéancier,
               risques et roadmap. Généré automatiquement chaque nuit, ou à la demande par un Admin.
@@ -472,7 +472,7 @@ export default function AuditReportsPage() {
                 {/* Domain metrics — colored dot/border shows at a glance which domains are affected above */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-800 mb-3">Détail par domaine</h3>
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <KpiCard
                       label="Factures"
                       status={domainStatus('invoices', detail.alerts)}
