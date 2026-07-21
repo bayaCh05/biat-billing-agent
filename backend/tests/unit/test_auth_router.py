@@ -343,6 +343,21 @@ class TestLoginLdap:
         )
         update_mock.assert_not_called()
 
+    def test_ldap_bind_ok_but_no_group_mapped_denies_login(self):
+        """Valid LDAP credentials but no recognized group and no
+        LDAP_DEFAULT_ROLE configured must deny login, not silently grant
+        the Comptable role (ldap_service.py documents empty
+        LDAP_DEFAULT_ROLE as "refus de connexion")."""
+        create_mock = AsyncMock()
+        with pytest.raises(HTTPException) as exc:
+            self._run(
+                LoginRequest(email="noone@biat.local", password="whatever"),
+                ldap_result={"role": None, "dn": "cn=noone,ou=users,dc=biat,dc=local"},
+                create_user_native=create_mock,
+            )
+        assert exc.value.status_code == 401
+        create_mock.assert_not_called()
+
 
 # ── refresh_token() ──────────────────────────────────────────────────────────
 

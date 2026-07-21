@@ -172,7 +172,21 @@ async def login(
             ))
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Email ou mot de passe incorrect.")
 
-        role = ldap_result.get("role") or "Comptable"
+        role = ldap_result.get("role")
+        if not role:
+            # Bind LDAP réussi mais aucun groupe reconnu et pas de LDAP_DEFAULT_ROLE
+            # configuré — ldap_service.py documente ce cas comme un refus de
+            # connexion, pas un accès par défaut. Ne JAMAIS retomber sur un rôle
+            # applicatif ici (l'ancien code faisait `or "Comptable"`, ce qui
+            # donnait accès à l'appli à n'importe quel compte LDAP valide, même
+            # hors de tout groupe applicatif).
+            await log_audit_event_native(AuditLogCreate(
+                user_email=email, action="LOGIN_FAILURE", resource_type="User",
+                status="FAILURE",
+                detail=f"Authentification LDAP réussie mais aucun rôle mappé (aucun groupe reconnu) depuis {ip}",
+                ip_address=ip, user_agent=ua,
+            ))
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Email ou mot de passe incorrect.")
 
         # Provisioning automatique : crée le compte local si inexistant
         db_user = await get_user_by_email_native(email)
