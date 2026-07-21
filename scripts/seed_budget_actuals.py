@@ -7,10 +7,20 @@ Budget tab shows meaningful bar charts (budget vs réel) with varied states:
   - Well under  : formation_personnel, infogerance_sla
   - No actuals  : CAPEX lines (materiel_informatique already seeded separately)
 
+Also creates one double-entry journal entry per invoice (same shape as
+seed_demo.py::make_journal) — every invoice here is created directly with
+status=JOURNALED, and the real pipeline (InvoiceProcessingOrchestrator)
+guarantees JOURNALED ⟹ a journal entry exists. Before this, that invariant
+was silently broken for every invoice this script created (caught by the
+Audit Agent's JOURNALED_WITHOUT_ENTRY cross-check, see docs/audit_hmac_incident.md
+sibling note in the Audit Agent lot — flagged 77 invoices this way in
+practice on 2026-07-21).
+
 Usage:
     python scripts/seed_budget_actuals.py
 
-Idempotent — skips any (catalog_id, month) pair whose file_hash already exists.
+Idempotent — skips any (catalog_id, month) pair whose file_hash already exists
+(the matching journal entry is skipped too, keyed off the same invoice_number).
 """
 from __future__ import annotations
 
@@ -28,9 +38,37 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # constant at import time.
 import api.auth  # noqa: F401
 from src.storage.mongodb import close_mongodb, init_beanie
-from src.storage.sync_mongo_repository import SyncMongoInvoiceRepository, _get_db
+from src.storage.sync_mongo_repository import (
+    SyncMongoInvoiceRepository, SyncMongoJournalRepository, _get_db,
+)
+from src.cost_catalog.catalog import CostCatalog
 from src.models.invoice import ConfidenceField, InvoiceRecord
+from src.models.journal import JournalEntry, JournalLine
 from src.models.enums import InvoiceDirection, InvoiceStatus
+
+_CATALOG_PATH = Path(__file__).parent.parent / "config" / "cost_catalog.yaml"
+
+
+def make_journal(inv: InvoiceRecord, compte_charge: str) -> JournalEntry:
+    """Same shape as seed_demo.py::make_journal — kept in sync deliberately."""
+    ht  = inv.amount_ht.value
+    tva = inv.tva_amount.value
+    ttc = inv.amount_ttc.value
+    num = inv.invoice_number.value
+    lib = f"Facture {inv.issuer_name.value} — {num}"
+    lines = [
+        JournalLine(compte=compte_charge, libelle=lib, debit=ht),
+    ]
+    if tva and tva > 0:
+        lines.append(JournalLine(compte="4366", libelle=f"TVA déductible {num}", debit=tva))
+    lines.append(JournalLine(compte="401", libelle=f"Fournisseur {inv.issuer_name.value}", credit=ttc or ht))
+    return JournalEntry(
+        reference=num,
+        date_ecriture=inv.invoice_date.value,
+        description=lib,
+        source_invoice_id=inv.id,
+        lines=lines,
+    )
 
 TVA = 0.19
 
@@ -130,11 +168,25 @@ async def main() -> None:
         print("MONGODB_URI non défini ou connexion impossible — abandon.")
         sys.exit(1)
 
+    catalog = CostCatalog.from_yaml(str(_CATALOG_PATH))
     inv_repo = SyncMongoInvoiceRepository()
+    jnl_repo = SyncMongoJournalRepository()
+    db = _get_db()
+
+    def _journal_exists(reference: str) -> bool:
+        return db["journal_entries"].find_one({"reference": reference}) is not None
+
     created = 0
     skipped = 0
+    jnl_created = 0
 
     for catalog_id, issuer, monthly_ht in LINES:
+        entry = catalog.get(catalog_id)
+        if entry is None:
+            print(f"  ! catalog_id inconnu, ignoré : {catalog_id}")
+            continue
+        compte = entry.compte
+
         for i, month in enumerate(MONTHS):
             ht = monthly_ht[i]
             if ht == 0:
@@ -142,8 +194,15 @@ async def main() -> None:
                 continue
 
             h = _hash(catalog_id, month)
-            if inv_repo.get_by_hash(h) is not None:
+            existing = inv_repo.get_by_hash(h)
+            if existing is not None:
+                # Invoice already seeded (e.g. by a previous, pre-fix run of this
+                # script) — still backfill its journal entry if missing, rather
+                # than only fixing the invariant for invoices created from now on.
                 skipped += 1
+                if not _journal_exists(existing.invoice_number.value):
+                    jnl_repo.save(make_journal(existing, compte))
+                    jnl_created += 1
                 continue
 
             inv = InvoiceRecord(
@@ -153,20 +212,30 @@ async def main() -> None:
                 status=InvoiceStatus.JOURNALED,
                 issuer_name=_cf(issuer),
                 invoice_date=_cf(date(2026, month, MONTH_DAY[month])),
-                invoice_number=_cf(f"{catalog_id.upper()[:8]}-2026-{month:02d}"),
+                # Full catalog_id, not truncated: [:8] collided between
+                # assurance_multirisques and assurance_rc_pro (both → "ASSURANC"),
+                # which silently prevented one of the two from ever getting its
+                # own journal entry (make_journal()'s reference is invoice_number).
+                invoice_number=_cf(f"{catalog_id.upper()}-2026-{month:02d}"),
                 amount_ht=_cf(float(ht)),
                 tva_rate=_cf(TVA * 100),
                 tva_amount=_cf(round(ht * TVA, 3)),
                 amount_ttc=_cf(_ttc(ht)),
                 currency="TND",
                 cost_catalog_id=catalog_id,
+                accounting_compte=compte,
                 classification_pass="A",
                 human_review_required=False,
             )
             inv_repo.save(inv)
             created += 1
 
+            if not _journal_exists(inv.invoice_number.value):
+                jnl_repo.save(make_journal(inv, compte))
+                jnl_created += 1
+
     print(f"\n✓ {created} factures créées, {skipped} ignorées (déjà présentes ou montant 0).")
+    print(f"✓ {jnl_created} écritures comptables créées (y compris rattrapage sur factures déjà seedées).")
 
     # Print summary
     db = _get_db()
