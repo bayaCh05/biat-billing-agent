@@ -168,10 +168,32 @@ running on the host; the container reaches it via `host.docker.internal`
 See Diagram 19 (`docs/diagrams/19_deploiement_docker_compose.md`) for the
 full topology.
 
+**Installing Ollama on a fresh Linux server** (no Docker Desktop, so no GUI
+installer): install it once on the host, then pull the model, before running
+`docker compose up`:
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama serve &              # or: systemctl enable --now ollama, if the installer set up a service
+ollama pull qwen2.5:3b
+```
+
 ```bash
 docker compose logs -f app        # tail the API/SPA container
 docker compose down               # stop (add -v to also drop named volumes)
 ```
+
+**`mailhog` (dev-only fake SMTP server) does not start by default.** It's
+gated behind the `dev` Compose profile — `docker compose up -d --build`
+above only starts `mongo` + `app`. Its web UI has no authentication and
+displays every email sent through it, including OTP codes and password
+reset links, so it must never run on anything reachable beyond your own dev
+machine:
+```bash
+docker compose --profile dev up -d mailhog   # local dev only
+```
+For a real deployment, don't use this profile — set `SMTP_HOST`/`SMTP_PORT`
+(and `SMTP_USERNAME`/`SMTP_PASSWORD` if needed) in `.env` to a real mail
+relay instead.
 
 ---
 

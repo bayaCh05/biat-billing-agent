@@ -2,9 +2,16 @@ services:
   # ── Local SMTP server for development email testing ──────────────────────────
   # Web UI to view sent emails: http://localhost:8025
   # SMTP server: localhost:1025
+  # DEV ONLY — gated behind the "dev" profile so plain `docker compose up -d`
+  # does NOT start this by default. Its web UI has no authentication and
+  # shows every email sent through it, including OTP codes and password
+  # reset links — never run this on anything network-reachable beyond your
+  # own dev machine. In a real deployment, set SMTP_HOST/SMTP_PORT (+ auth
+  # vars) in .env to a real mail relay instead, and don't use this profile.
   mailhog:
     image: mailhog/mailhog:latest
     container_name: biat_mailhog
+    profiles: ["dev"]
     ports:
       - "1025:1025"   # SMTP
       - "8025:8025"   # Web UI
