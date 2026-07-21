@@ -187,7 +187,7 @@ shape as `_seed_test_users()` above).
 
 ## Running tests
 
-**Python (~1020 tests):**
+**Python (1211 tests: 1139 unit + 72 integration):**
 ```bash
 source .venv/bin/activate
 .venv/bin/pytest backend/                 # all tests — MUST run from repo root
@@ -240,8 +240,8 @@ internship_biat/
 │   │   ├── budget/           # BudgetTracker (planned vs actual)
 │   │   └── capex/            # depreciation (linear/degressive), AssetRepository
 │   └── tests/
-│       ├── unit/             # 42 files, mocked deps
-│       └── integration/      # real disposable Mongo test DB, mocked LLM
+│       ├── unit/             # 52 files, mocked deps
+│       └── integration/      # 3 files, real disposable Mongo test DB, mocked LLM
 ├── scripts/
 │   ├── seed_demo.py, seed_budget_actuals.py, seed_projects.py,
 │   │   seed_risks.py, seed_roadmap.py  # Mongo-native, idempotent seeders

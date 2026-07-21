@@ -71,7 +71,7 @@ Violating this is a compliance failure for a banking subsidiary.
 source .venv/bin/activate
 
 # Run tests — MUST run from repo root, not backend/ (relative config paths break otherwise)
-.venv/bin/pytest backend/                 # ~1252 tests, 0 skipped
+.venv/bin/pytest backend/                 # 1211 tests, 0 skipped
 .venv/bin/pytest backend/tests/unit/      # unit only
 .venv/bin/pytest backend/tests/integration/  # integration only (needs Tesseract)
 .venv/bin/pytest backend/ --tb=short -q   # compact output
@@ -285,15 +285,19 @@ frontend/                # separate top-level dir, NOT under backend/ — React 
 scripts/
   review_queue.py         # terminal review UI (reads SQLite — see "MongoDB Migration Status")
   make_realistic_invoice.py  # demo PDF generator
-  seed_demo.py, seed_users.py, seed_budget_actuals.py, seed_projects.py,
+  seed_demo.py, seed_budget_actuals.py, seed_projects.py,
   seed_risks.py, seed_roadmap.py  # Mongo-native, idempotent (see "MongoDB Migration Status")
+  generate_demo_invoice_pdfs.py  # renders real fpdf2 PDFs for invoices seeded by seed_demo.py /
+                                  # seed_budget_actuals.py (those two used to leave a fake
+                                  # raw_file_path that 404'd — see the script's own docstring)
   backfill_audit_incidents.py  # one-off: indexes ALL past risks/anomalies into ChromaDB's
                                 # audit_incidents collection — see "Audit Agent" below for why
                                 # this is separate from the nightly audit_daily job
   # run_agent.py (headless daemon) deleted 2026-07 — see Architecture path note above
+  # seed_users.py removed — created hardcoded-password demo Mongo accounts
 
-tests/                    # ~1252 tests total, 0 skipped
-  unit/                   # 51 files, mocked dependencies
+tests/                    # 1211 tests total, 0 skipped
+  unit/                   # 52 files, mocked dependencies
   integration/            # test_api_e2e.py (real Mongo test DB + SQLite for get_session
                            # plumbing), test_orchestrator_audit_trail.py, test_avatar_rate_limit.py
   fixtures/make_invoice_pdf.py
