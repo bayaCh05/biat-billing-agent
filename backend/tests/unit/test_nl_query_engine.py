@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from src.query.nl_query_engine import NLQueryEngine, _build_system_prompt
 

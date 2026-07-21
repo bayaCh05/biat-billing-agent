@@ -1,7 +1,6 @@
 """Integration tests: every cost-catalog category must pass InvoiceValidator."""
 from __future__ import annotations
 
-import yaml
 import pytest
 
 from src.extraction.invoice_validator import InvoiceValidator

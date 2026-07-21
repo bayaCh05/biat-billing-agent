@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.cost_catalog.catalog import CostCatalog, CostCatalogEntry
+from src.cost_catalog.catalog import CostCatalog
 from src.models.enums import ChargeFlux, ChargeNature, ChargeType, Recurrence
 
 CATALOG_PATH = Path("config/cost_catalog.yaml")

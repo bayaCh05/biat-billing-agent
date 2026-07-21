@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import date
 from unittest.mock import AsyncMock, patch
-from uuid import UUID
 
 # Must be set before any api.* imports so the limiter reads it
 os.environ["RATE_LIMIT_ENABLED"] = "false"
@@ -31,7 +29,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.storage.db import build_engine, build_session_factory, init_db
-from src.storage.orm_models_payments import PaymentInstallmentORM
 
 # ── In-memory DB shared across all tests in this module ───────────────────────
 

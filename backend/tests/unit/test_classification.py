@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from pathlib import Path
 
-import pytest
 
 from src.classification.accounting_coder import AccountingCoder
 from src.classification.classifier import Classifier
@@ -15,7 +13,7 @@ from src.classification.matcher import (
     normalise,
 )
 from src.cost_catalog.catalog import CostCatalog
-from src.models.enums import ChargeFlux, ChargeNature, ChargeType, FlagType, InvoiceDirection
+from src.models.enums import ChargeNature, ChargeType, FlagType, InvoiceDirection
 from src.models.invoice import ConfidenceField, InvoiceRecord, LineItem
 
 

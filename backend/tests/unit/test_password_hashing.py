@@ -1,12 +1,12 @@
 """Unit tests — argon2id hashing + bcrypt backward-compatibility + lazy migration."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import bcrypt
 import pytest
 
-from api.auth import _PH, hash_password, needs_rehash, verify_password
+from api.auth import hash_password, needs_rehash, verify_password
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────

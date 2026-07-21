@@ -4,9 +4,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 from unittest.mock import MagicMock
 
-import pytest
 
-from src.models.enums import FlagSeverity, FlagType, InvoiceDirection
+from src.models.enums import FlagSeverity, FlagType
 from src.models.invoice import ConfidenceField, InvoiceRecord, LineItem
 from src.validation.anomaly_detector import AnomalyDetector
 from src.validation.coherence_checker import CoherenceChecker

@@ -20,14 +20,13 @@ from src.extraction.hybrid_extractor import HybridExtractor
 from src.extraction.llm_extractor import (
     ExtractionError,
     LLMExtractor,
-    OllamaBackend,
 )
 from src.extraction.extras_ocr import EasyOCREngine
 from src.extraction.ocr_engine import TesseractEngine
 from src.extraction.ocr_preprocessor import OCRPreprocessor
 from src.extraction.pdf_reader import PDFReader
 from src.models.enums import ExtractionMethod, InvoiceDirection, InvoiceStatus
-from src.models.invoice import ConfidenceField, InvoiceRecord
+from src.models.invoice import InvoiceRecord
 from src.utils.date_parser import parse_date
 
 

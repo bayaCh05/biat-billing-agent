@@ -30,7 +30,6 @@ class TestOllamaClient:
         _reset_ollama_singleton()
 
     def test_complete_success(self):
-        import requests
         from src.ai_agents.ollama_client import OllamaClient
         client = OllamaClient()
         with patch("requests.post") as mock_post:
@@ -55,7 +54,6 @@ class TestOllamaClient:
         assert result is None
 
     def test_complete_increments_call_count(self):
-        import requests
         from src.ai_agents.ollama_client import OllamaClient
         client = OllamaClient()
         with patch("requests.post") as mock_post:

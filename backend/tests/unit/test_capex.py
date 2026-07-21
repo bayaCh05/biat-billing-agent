@@ -9,7 +9,6 @@ import pytest
 
 from src.capex.depreciation_calculator import (
     DepreciationCalculator,
-    DepreciationSchedule,
     _next_month,
 )
 from src.capex.depreciation_entry_generator import DepreciationEntryGenerator, _last_day_of_month

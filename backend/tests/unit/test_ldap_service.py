@@ -4,7 +4,7 @@ Tous les appels ldap3 sont mockés — aucun serveur LDAP réel n'est requis.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 

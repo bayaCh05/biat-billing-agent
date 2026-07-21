@@ -6,7 +6,7 @@ with in-memory fakes, matching test_insight_agent_kpis_mongo.py's pattern.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from src.storage import sync_mongo_repository
 from src.storage.sync_mongo_repository import (
