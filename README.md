@@ -92,6 +92,19 @@ python scripts/seed_demo.py --append   # kept only for CLI compatibility; no eff
 python scripts/seed_demo.py --dry-run  # validate imports only, no writes
 ```
 
+To reset back to a clean demo state (e.g. before a rehearsal/demo, if the
+data has drifted from manual testing) rather than just adding to it:
+```bash
+python scripts/reset_demo.py --dry-run  # preview what would be cleared
+python scripts/reset_demo.py --yes      # clear demo collections + local upload/email
+                                         # artifacts, then re-run all seeders
+```
+Only clears what the seeders themselves own (invoices, journal entries,
+projects, risks, roadmap, budget lines, CAPEX assets, derived audit
+snapshots/notifications) plus `data/uploads/` and `data/email_outbox/` —
+never `users`, `audit_logs`, sessions, or anything else you weren't asked
+to reset.
+
 ### 4. FastAPI backend
 
 ```bash
