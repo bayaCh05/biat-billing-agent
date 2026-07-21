@@ -1,14 +1,20 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useAuth } from '../context/AuthContext'
 import { AuthProvider } from '../context/AuthProvider'
+import { saveToken, clearToken } from '../api/client'
 
 vi.mock('../api/endpoints', () => ({
   getNotificationCount: vi.fn().mockResolvedValue({ count: 5 }),
+  getMe: vi.fn().mockResolvedValue({ profile_picture: null }),
 }))
 
 beforeEach(() => {
   localStorage.clear()
+})
+
+afterEach(() => {
+  clearToken()
 })
 
 describe('AuthContext', () => {
@@ -32,8 +38,8 @@ describe('AuthContext', () => {
 
   it('maps Comptable role to correct name and initials', () => {
     const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider })
-    expect(result.current.name).toBe('Baya C.')
-    expect(result.current.initials).toBe('BC')
+    expect(result.current.name).toBe('Comptable')
+    expect(result.current.initials).toBe('C')
   })
 
   it('maps Direction role to correct name', () => {
@@ -45,11 +51,11 @@ describe('AuthContext', () => {
   it('maps Chef de Projet role to correct name', () => {
     localStorage.setItem('biat_role', 'Chef de Projet')
     const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider })
-    expect(result.current.name).toBe('Karim B.')
+    expect(result.current.name).toBe('Chef de Projet')
   })
 
   it('fetches notifCount from API on mount when authenticated', async () => {
-    localStorage.setItem('biat_token', 'test-token')
+    saveToken('test-token')
     const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider })
     await act(async () => {})
     expect(result.current.notifCount).toBe(5)
