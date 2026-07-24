@@ -45,16 +45,7 @@ def init_db(engine) -> None:
     prevent silent schema drift — Alembic is the single source of truth.
     """
     import src.storage.orm_models               # noqa: F401
-    import src.billing.client_invoice_store     # noqa: F401
-    import src.capex.asset_repository           # noqa: F401
-    import src.storage.orm_models_projects      # noqa: F401
-    import src.storage.orm_models_users         # noqa: F401
-    import src.storage.orm_models_roadmap         # noqa: F401
-    import src.storage.orm_models_notifications # noqa: F401
-    import src.storage.orm_models_auth                     # noqa: F401
-    import src.storage.orm_models_payments                 # noqa: F401
-    import src.storage.orm_models_audit                    # noqa: F401
-    import src.storage.orm_models_password_verification    # noqa: F401
+    import src.storage.orm_models_audit         # noqa: F401
 
     db_url = str(engine.url)
     if ":memory:" in db_url:

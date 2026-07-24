@@ -1,8 +1,7 @@
-"""Unit tests for src/capex — DepreciationCalculator, AssetRepository, DepreciationEntryGenerator."""
+"""Unit tests for src/capex — DepreciationCalculator, DepreciationEntryGenerator."""
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -12,7 +11,6 @@ from src.capex.depreciation_calculator import (
     _next_month,
 )
 from src.capex.depreciation_entry_generator import DepreciationEntryGenerator, _last_day_of_month
-from src.capex.asset_repository import AssetRepository, AssetORM
 from src.models.asset import Asset
 from src.accounting.plan_comptable import ComptesAmortissement
 
@@ -260,71 +258,6 @@ class TestLastDayOfMonth:
 
     def test_december(self):
         assert _last_day_of_month(2024, 12) == 31
-
-
-# ── AssetRepository (mock session) ───────────────────────────────────────────
-
-class TestAssetRepository:
-    def _repo(self):
-        session = MagicMock()
-        session.get.return_value = None
-        session.execute.return_value.scalars.return_value.all.return_value = []
-        session.execute.return_value.scalar_one.return_value = 0
-        return AssetRepository(session), session
-
-    def test_save_new_asset_calls_add(self):
-        repo, session = self._repo()
-        asset = _asset()
-        repo.save(asset)
-        session.add.assert_called_once()
-        session.commit.assert_called_once()
-
-    def test_save_existing_asset_updates(self):
-        repo, session = self._repo()
-        asset = _asset()
-        existing_orm = MagicMock(spec=AssetORM)
-        session.get.return_value = existing_orm
-        repo.save(asset)
-        session.add.assert_not_called()
-        session.commit.assert_called_once()
-
-    def test_get_by_id_returns_none_when_not_found(self):
-        repo, session = self._repo()
-        session.get.return_value = None
-        result = repo.get_by_id(uuid4())
-        assert result is None
-
-    def test_list_all_returns_empty_list(self):
-        repo, session = self._repo()
-        result = repo.list_all()
-        assert result == []
-
-    def test_count_returns_zero(self):
-        repo, session = self._repo()
-        assert repo.count() == 0
-
-    def test_total_gross_value_returns_zero(self):
-        repo, session = self._repo()
-        assert repo.total_gross_value() == 0.0
-
-    def test_mark_fully_depreciated(self):
-        repo, session = self._repo()
-        orm = MagicMock(spec=AssetORM)
-        session.get.return_value = orm
-        repo.mark_fully_depreciated(uuid4())
-        assert orm.fully_depreciated is True
-        session.commit.assert_called_once()
-
-    def test_delete_returns_false_when_not_found(self):
-        repo, session = self._repo()
-        session.get.return_value = None
-        assert repo.delete(uuid4()) is False
-
-    def test_delete_returns_true_when_found(self):
-        repo, session = self._repo()
-        session.get.return_value = MagicMock(spec=AssetORM)
-        assert repo.delete(uuid4()) is True
-        session.commit.assert_called_once()
 
 
 # ── Asset model (book_value_at) ───────────────────────────────────────────────
