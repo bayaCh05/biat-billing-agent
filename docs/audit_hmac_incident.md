@@ -1,9 +1,10 @@
 # Note technique — Incident HMAC sur le journal d'audit (`audit_logs`)
 
 **Date de rédaction :** 2026-07-13 — corrigée et complétée le 2026-07-15,
-étendue à Mongo le 2026-09-07
-**Statut :** rebaselined des deux côtés (SQLite section 6, Mongo section 7) —
-0 ligne/document remonté comme altéré sur SQLite ou MongoDB au 2026-09-07
+étendue à Mongo le 2026-09-07, `AUDIT_HMAC_SECRET` définitivement introduit
+le 2026-09-07 (Option B, section 8)
+**Statut :** clos — `AUDIT_HMAC_SECRET` (gap S5) comblé, `tampered_count` = 0
+sur les 1758 entrées des deux stores au 2026-09-07
 **Périmètre :** table SQLite `audit_logs` (`data/invoices.db`) ET collection
 MongoDB `audit_logs` (depuis la section 7) — mécanisme de vérification
 `api/security/audit_integrity.py::verify_row_status()` /
@@ -255,3 +256,75 @@ lieu côté Mongo.
 
 `tampered_count` = 0 sur les deux stores, confirmé via `compute_integrity_summary()`
 (donc `/audit/verify-integrity` et `/security/summary`).
+
+## 8. `AUDIT_HMAC_SECRET` défini pour de bon — clôture du gap S5 (2026-09-07)
+
+**Décision** : plutôt que de laisser indéfiniment `AUDIT_HMAC_SECRET` vide
+(gap S5, connu depuis le commit `87833be` du 2026-07-06 — voir section 3),
+un secret dédié fort a été généré (`secrets.token_hex(32)`, 64 caractères
+hex, jamais commité dans git) et posé dans `.env`. `_get_secret()`
+(`api/security/audit_integrity.py`) utilise désormais réellement
+`AUDIT_HMAC_SECRET`, plus jamais `JWT_SECRET` en repli — compromettre
+`JWT_SECRET` seul ne permet plus de forger l'audit trail.
+
+**Conséquence immédiate, anticipée** : poser `AUDIT_HMAC_SECRET` est en
+soi une troisième valeur de clé HMAC utilisée dans l'histoire de ce
+journal (après le `JWT_SECRET` d'avant le 2026-07-10, puis celui d'après —
+section 3). Toute ligne/document écrit avant ce changement — y compris
+les 569 lignes SQLite déjà rebaselined une première fois le 2026-07-15 —
+a immédiatement cessé de vérifier contre le nouveau secret.
+
+**Problème évité** : ré-exécuter tel quel `scripts/rebaseline_audit_hmac.py`
+aurait écrasé `rebaseline_hash` sur ces 569 lignes avec la nouvelle valeur,
+détruisant silencieusement la preuve du rebaseline du 2026-07-15 — exactement
+le type de perte que ce mécanisme existe pour éviter (section 4). Pour
+l'empêcher, `AuditLogORM` et `AuditLogDocument` gagnent 3 colonnes/champs
+supplémentaires, purement additifs (migration Alembic `b3c4d5e6f7a8`) :
+`prior_rebaseline_hash`, `prior_rebaselined_at`, `prior_rebaseline_reason`.
+Les deux scripts de rebaseline (`scripts/rebaseline_audit_hmac.py` et
+`scripts/rebaseline_audit_hmac_mongo.py`) archivent désormais l'ancien
+`rebaseline_hash`/`rebaselined_at`/`rebaseline_reason` dans ces 3 champs
+*avant* de les remplacer par la génération 2 — jamais réécrasés une fois
+posés. `row_hash` d'origine reste, comme toujours, intact sur toutes les
+lignes. `verify_row_status()`/`verify_row_status_from_doc()` ne lisent que
+`row_hash` et `rebaseline_hash` (génération courante) — les champs
+`prior_*` sont purement archivistiques, hors chemin de vérification.
+
+**Exécution du 2026-09-07** :
+
+| Store | Lignes/documents rebaselinés (génération 2) | ... dont génération 1 archivée dans `prior_*` |
+|---|---|---|
+| SQLite (`data/invoices.db`) | 708 | 569 |
+| MongoDB (`audit_logs`) | 1046 | 0 (aucun rebaseline Mongo n'existait avant la section 7) |
+
+Les 4 documents Mongo `row_hash = None` (section 7) restent inchangés —
+non éligibles au rebaseline (aucun `row_hash` à comparer), décision déjà
+actée en section 7.
+
+**Limite connue** : ce mécanisme à 2 générations (`rebaseline_hash` +
+`prior_rebaseline_hash`) suffit à l'historique connu de ce projet (2
+rotations : 2026-07-10 puis 2026-09-07) mais ne s'étend pas automatiquement
+à une 3ᵉ rotation future — une nouvelle rotation écraserait `prior_*` sans
+archivage supplémentaire. Si `AUDIT_HMAC_SECRET` doit être re-tourné un
+jour, prévoir soit un historique en profondeur (liste plutôt que 2 champs
+fixes), soit accepter explicitement la perte de la génération 1 à ce
+moment-là — décision à documenter le moment venu, pas anticipée ici.
+
+**État vérifié en direct après l'exécution (2026-09-07)** — via
+`compute_integrity_summary()` (le code réel derrière `/audit/verify-integrity`
+et `/security/summary`), Beanie correctement initialisé :
+
+```
+total_checked      = 1758   (708 SQLite + 1050 Mongo)
+valid              = 4      (les 4 documents Mongo pré-HMAC, section 7)
+null_hash_count    = 4
+rebaselined_count  = 1754
+tampered_count     = 0
+integrity_score    = 100.0 %
+```
+
+`tampered_count` = 0 sur les deux stores, comme avant ce changement — le
+score d'intégrité affiché ne change pas pour un opérateur consultant le
+tableau de bord, mais le gap de sécurité S5 (audit trail signé sous
+`JWT_SECRET`, une clé qui sert aussi à l'authentification) est clos pour
+de bon.

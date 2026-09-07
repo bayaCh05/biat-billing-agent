@@ -64,6 +64,7 @@ class TestAuditLogDocument:
             "before_value", "after_value", "ip_address", "user_agent",
             "status", "detail", "row_hash",
             "rebaseline_hash", "rebaselined_at", "rebaseline_reason",
+            "prior_rebaseline_hash", "prior_rebaselined_at", "prior_rebaseline_reason",
         })
 
     def test_defaults(self):

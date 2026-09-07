@@ -92,5 +92,13 @@ class AuditLogDocument(Document):
     rebaselined_at:    datetime | None = None
     rebaseline_reason: str | None = None
 
+    # ── Rebaseline, generation 2 (post-2026-09-07 AUDIT_HMAC_SECRET
+    # introduction — see docs/audit_hmac_incident.md section 8). Archives
+    # the generation-1 values above before they get overwritten under the
+    # new secret, so no rebaseline record is ever silently lost.
+    prior_rebaseline_hash:   str | None = None
+    prior_rebaselined_at:    datetime | None = None
+    prior_rebaseline_reason: str | None = None
+
     class Settings:
         name = "audit_logs"

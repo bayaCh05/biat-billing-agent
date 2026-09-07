@@ -63,3 +63,11 @@ class AuditLogORM(Base):
     rebaseline_hash:   Mapped[str | None] = mapped_column(String(64),  nullable=True)
     rebaselined_at:    Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rebaseline_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # ── HMAC rebaseline, generation 2 (post-2026-09-07 AUDIT_HMAC_SECRET
+    # introduction — see docs/audit_hmac_incident.md section 8). Archives
+    # the generation-1 values above before they get overwritten under the
+    # new secret, so the 2026-07-15 rebaseline record is never lost. ──
+    prior_rebaseline_hash:   Mapped[str | None] = mapped_column(String(64),  nullable=True)
+    prior_rebaselined_at:    Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    prior_rebaseline_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
