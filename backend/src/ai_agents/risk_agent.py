@@ -6,7 +6,6 @@ Capability B: On-demand mitigation plan drafting.
 from __future__ import annotations
 
 import logging
-import time
 from datetime import date
 
 from src.ai_agents.base_agent import BaseAgent
@@ -162,7 +161,6 @@ class RiskAgent(BaseAgent):
     # ── Capability B — mitigation drafter ────────────────────────────────────
 
     def _draft_mitigation(self, context: dict) -> AgentResult:
-        start = time.monotonic()
         titre = context.get("titre", "")
         type_risque = context.get("type_risque", "AUTRE")
         probabilite = context.get("probabilite", "MOYENNE")
@@ -174,28 +172,19 @@ class RiskAgent(BaseAgent):
             "3. Escalader si aucune amélioration dans 2 semaines"
         )
 
-        if not OllamaClient.get().is_available():
-            return AgentResult(
-                agent_name=self.name, success=True,
-                duration_ms=(time.monotonic() - start) * 1000,
-                output={"suggestion": fallback},
-                ollama_calls_made=0,
+        def _do() -> dict:
+            if not OllamaClient.get().is_available():
+                return dict(output={"suggestion": fallback})
+
+            prompt = (
+                f"Risque IT à mitiger:\n"
+                f"Type: {type_risque} | Probabilité: {probabilite} | Impact: {impact}\n"
+                f"Description: {titre}\n\n"
+                f"Propose exactement 3 actions de mitigation concrètes et actionnables en français.\n"
+                f"Format:\n1. [action]\n2. [action]\n3. [action]\nMaximum 150 mots total."
             )
+            raw = self._call_ollama(prompt, temperature=0.3, max_tokens=200)
+            suggestion = (raw or fallback).strip()
+            return dict(output={"suggestion": suggestion})
 
-        prompt = (
-            f"Risque IT à mitiger:\n"
-            f"Type: {type_risque} | Probabilité: {probabilite} | Impact: {impact}\n"
-            f"Description: {titre}\n\n"
-            f"Propose exactement 3 actions de mitigation concrètes et actionnables en français.\n"
-            f"Format:\n1. [action]\n2. [action]\n3. [action]\nMaximum 150 mots total."
-        )
-        raw = self._call_ollama(prompt, temperature=0.3, max_tokens=200)
-        suggestion = (raw or fallback).strip()
-
-        return AgentResult(
-            agent_name=self.name,
-            success=True,
-            duration_ms=(time.monotonic() - start) * 1000,
-            output={"suggestion": suggestion},
-            ollama_calls_made=self._call_count,
-        )
+        return self._run_safely(_do)

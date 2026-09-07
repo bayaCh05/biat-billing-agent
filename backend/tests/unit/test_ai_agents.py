@@ -196,6 +196,23 @@ class TestRiskAgentMitigation:
             })
         assert result.duration_ms >= 0
 
+    def test_ollama_exception_returns_failure_not_raise(self, risk_agent):
+        """_draft_mitigation now goes through _run_safely() like every other
+        agent capability — a raised exception must become success=False,
+        never propagate to the caller."""
+        broken = _mock_ollama(available=True)
+        broken.complete.side_effect = RuntimeError("ollama boom")
+        with patch("src.ai_agents.risk_agent.OllamaClient.get", return_value=broken):
+            result = risk_agent.run({
+                "task": "draft_mitigation",
+                "titre": "Test",
+                "type_risque": "AUTRE",
+                "probabilite": "FAIBLE",
+                "impact": "FAIBLE",
+            })
+        assert result.success is False
+        assert "ollama boom" in result.error
+
 
 def _overdue_item(projet_id: str = "proj-1"):
     """Shape returned by sync_mongo_repository.overdue_roadmap_items_sync() —
@@ -385,6 +402,18 @@ class TestInsightAgentHealthSummary:
                    return_value=_mock_ollama(available=False)):
             result = insight_agent.run({"task": "health_summary"})
         assert result.success is True
+
+    def test_ollama_exception_returns_failure_not_raise(self, insight_agent):
+        """_health_summary now goes through _run_safely() like every other
+        agent capability — a raised exception must become success=False,
+        never propagate to the caller."""
+        broken = _mock_ollama(available=True)
+        broken.complete.side_effect = RuntimeError("ollama boom")
+        with self._patched_kpis(insight_agent), \
+             patch("src.ai_agents.insight_agent.OllamaClient.get", return_value=broken):
+            result = insight_agent.run({"task": "health_summary"})
+        assert result.success is False
+        assert "ollama boom" in result.error
 
     def test_gather_kpis_survives_partial_mongo_failure(self, insight_agent):
         """If one KPI collector raises, the others still populate the dict."""

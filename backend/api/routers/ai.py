@@ -48,6 +48,8 @@ def get_health_summary(
     from src.ai_agents.ollama_client import OllamaClient
     agent = InsightAgent()
     result = agent.run({"task": "health_summary"})
+    if not result.success:
+        raise HTTPException(500, detail=result.error or "Échec de la génération du résumé.")
     return {
         **result.output,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -118,6 +120,8 @@ def suggest_mitigation(
         "probabilite": body.probabilite,
         "impact": body.impact,
     })
+    if not result.success:
+        raise HTTPException(500, detail=result.error or "Échec de la génération du plan de mitigation.")
     return {"suggestion": result.output.get("suggestion", ""), "duration_ms": result.duration_ms}
 
 
