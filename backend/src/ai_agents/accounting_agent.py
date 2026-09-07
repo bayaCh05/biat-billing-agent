@@ -164,7 +164,7 @@ class AccountingAgent(BaseAgent):
             SyncMongoAssetRepository().save(asset)
             return str(asset.id), amortization_years, source
         except Exception as exc:
-            logger.warning("capex_asset_error: %s", exc)
+            logger.warning("capex_asset_error: %s", exc, exc_info=True)
             return None, amortization_years, source
 
     def _get_amortization_duration(self, description: str, catalog_entry) -> tuple[int, str]:
@@ -233,7 +233,7 @@ class AccountingAgent(BaseAgent):
             ids = save_payment_installments_sync(rows)
             logger.info("payment_schedule_created invoice=%s installments=%d", invoice.id, total)
         except Exception as exc:
-            logger.warning("payment_schedule_error: %s", exc)
+            logger.warning("payment_schedule_error: %s", exc, exc_info=True)
 
         return ids
 

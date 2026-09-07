@@ -101,7 +101,7 @@ class AnomalyAgent(BaseAgent):
                     ),
                 ))
         except Exception as exc:
-            logger.debug("category_price_check_error: %s", exc)
+            logger.warning("category_price_check_error: %s", exc, exc_info=True)
 
     def _check_payment_term(self, invoice: InvoiceRecord) -> None:
         term = getattr(invoice, "payment_term_days", None)
@@ -132,7 +132,7 @@ class AnomalyAgent(BaseAgent):
                     ),
                 ))
         except Exception as exc:
-            logger.debug("payment_term_check_error: %s", exc)
+            logger.warning("payment_term_check_error: %s", exc, exc_info=True)
 
     def _check_semantic_duplicate(self, invoice: InvoiceRecord) -> None:
         try:
@@ -162,4 +162,4 @@ class AnomalyAgent(BaseAgent):
                     ))
                     break
         except Exception as exc:
-            logger.debug("semantic_duplicate_check_error: %s", exc)
+            logger.warning("semantic_duplicate_check_error: %s", exc, exc_info=True)

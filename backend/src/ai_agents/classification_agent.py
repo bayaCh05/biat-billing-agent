@@ -108,7 +108,7 @@ class ClassificationAgent(BaseAgent):
                     invoice.charge_nature = entry.nature
                     return "RAG_LLM"
         except Exception as exc:
-            logger.warning("rag_pass_error: %s", exc)
+            logger.warning("rag_pass_error: %s", exc, exc_info=True)
         return "NONE"
 
     def _generate_explanation(self, invoice) -> str:

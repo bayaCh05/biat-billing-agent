@@ -132,7 +132,7 @@ class RiskAgent(BaseAgent):
                 detail=f"Risque créé (scan roadmap): {titre}",
             ))
         except Exception as exc:
-            logger.warning("risk_audit_failed: %s", exc)
+            logger.warning("risk_audit_failed: %s", exc, exc_info=True)
 
     def _generate_risk_for_overdue(self, item: dict, days_overdue: int) -> dict | None:
         if not OllamaClient.get().is_available():
