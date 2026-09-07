@@ -15,13 +15,21 @@ from __future__ import annotations
 import logging
 import os
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 # Must be set before any api.* imports so the limiter reads it
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 # Isolated Mongo database for this test module — never touches the dev DB.
 # Mongo-native write paths (Lot 3+) require Beanie to actually be initialized
 # (see lifespan handling below), so tests run against a real, disposable DB.
-os.environ["MONGODB_DB"] = "biat_billing_test"
+# Random suffix per process so two runs (CI + local, or two devs) can never
+# collide on the same database — see the setup-time drop below and
+# docs/audit_hmac_incident.md-adjacent history: this module used to hardcode
+# "biat_billing_test" and only drop at teardown, so a run interrupted before
+# its teardown fixture executed (Ctrl-C, timeout, crash) left stale data that
+# made "fresh DB" tests like TestKpi::test_empty_db_returns_zeros flaky
+# depending on what ran before them in the full suite.
+os.environ["MONGODB_DB"] = f"biat_billing_test_{uuid4().hex[:8]}"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -51,6 +59,21 @@ from api.main import app          # noqa: E402  (after env var set)
 from api.deps import get_session  # noqa: E402
 
 app.dependency_overrides[get_session] = _override_session
+
+# Drop at setup too, not just teardown — belt-and-braces alongside the random
+# suffix above. Placed after the api.main import (so .env / MONGODB_URI is
+# guaranteed loaded — src.storage.mongodb reads MONGODB_URI at import time,
+# not dynamically) and before the TestClient lifespan starts, so Beanie's
+# first interaction with this database is always with a clean slate.
+try:
+    import pymongo as _pymongo
+
+    from src.storage.mongodb import MONGODB_DB as _MONGODB_DB
+    from src.storage.mongodb import MONGODB_URI as _MONGODB_URI
+    if _MONGODB_URI:
+        _pymongo.MongoClient(_MONGODB_URI, serverSelectionTimeoutMS=2_000).drop_database(_MONGODB_DB)
+except Exception:
+    pass
 
 # Entered eagerly (not via `with`) so the ASGI lifespan runs for the whole
 # module: Mongo-native routes (Lot 3+) need `init_beanie()` to have actually

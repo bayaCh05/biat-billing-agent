@@ -705,11 +705,21 @@ storage:
 - Unit tests: mock the repository and all external deps with `MagicMock`
 - Integration tests (`backend/tests/integration/`): `test_api_e2e.py` and
   `test_orchestrator_audit_trail.py` run against a real, disposable Mongo test
-  database (`MONGODB_DB=biat_billing_test*`, dropped in a session-scoped
-  fixture teardown) plus `sqlite:///:memory:` only for the `Depends(get_session)`
+  database (`MONGODB_DB=biat_billing_test_<random 8-hex suffix>` /
+  `biat_billing_test_orchestrator_<random 8-hex suffix>`, one `uuid4().hex[:8]`
+  per pytest process — fixed 2026-09-07, previously a hardcoded name with no
+  suffix, see below) plus `sqlite:///:memory:` only for the `Depends(get_session)`
   plumbing still wired into a few routers (`audit.py`, `review.py`,
   `security.py`, ...) — not for the invoice-processing path itself, which is
-  Mongo-only. Only the LLM backend is mocked.
+  Mongo-only. Only the LLM backend is mocked. Both databases are dropped at
+  **both** setup and teardown (`test_api_e2e.py`: explicit drop before the
+  `TestClient` lifespan starts, then a session-scoped teardown fixture;
+  `test_orchestrator_audit_trail.py`: its `mongo_test_db` fixture drops
+  before and after every test) — previously `test_api_e2e.py` only dropped
+  at teardown with a fixed name, so a run interrupted before that fixture
+  ran (Ctrl-C, timeout, crash) left stale data that made "fresh DB" tests
+  like `TestKpi::test_empty_db_returns_zeros` order-dependent/flaky
+  depending on what had run before them earlier in the same process.
 - 5 PyMuPDF C-library `DeprecationWarning`s in test output are harmless — ignore
 - The SQLAlchemy `InvoiceRepository` (`storage/repository.py`) is imported
   by `api/routers/review.py` (a deliberately-kept, live exception — see

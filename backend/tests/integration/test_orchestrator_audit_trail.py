@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from uuid import uuid4
 
 from dotenv import load_dotenv
 
@@ -26,7 +27,11 @@ for _env_path in (_ROOT_DIR / ".env", _ROOT_DIR / "backend" / ".env"):
         load_dotenv(_env_path, override=False)
 
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
-os.environ["MONGODB_DB"] = "biat_billing_test_orchestrator"
+# Random suffix — different base name from test_api_e2e.py already avoided
+# collision between the two test modules, but not between two concurrent
+# runs (CI + local, two devs) sharing the same base name. The mongo_test_db
+# fixture below already drops at both setup and teardown per-test.
+os.environ["MONGODB_DB"] = f"biat_billing_test_orchestrator_{uuid4().hex[:8]}"
 
 from unittest.mock import MagicMock, patch
 
