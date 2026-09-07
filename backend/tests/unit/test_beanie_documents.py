@@ -63,6 +63,7 @@ class TestAuditLogDocument:
             "action", "resource_type", "resource_id", "entity_id",
             "before_value", "after_value", "ip_address", "user_agent",
             "status", "detail", "row_hash",
+            "rebaseline_hash", "rebaselined_at", "rebaseline_reason",
         })
 
     def test_defaults(self):

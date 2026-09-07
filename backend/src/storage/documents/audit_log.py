@@ -82,5 +82,15 @@ class AuditLogDocument(Document):
     # ── Intégrité HMAC ────────────────────────────────────────────────────────
     row_hash: str | None = None   # calculé par compute_row_hash() après flush
 
+    # ── Rebaseline (rotation de secret) ─────────────────────────────────────────
+    # Miroir des 3 colonnes ajoutées côté SQLite par la migration Alembic
+    # a1b2c3d4e5f7 (2026-07-15) — voir docs/audit_hmac_incident.md section 7.
+    # row_hash n'est JAMAIS recalculé ; rebaseline_hash est stocké à côté,
+    # calculé une fois sous le secret courant, pour les documents dont
+    # row_hash ne vérifie plus après une rotation de AUDIT_HMAC_SECRET/JWT_SECRET.
+    rebaseline_hash:   str | None = None
+    rebaselined_at:    datetime | None = None
+    rebaseline_reason: str | None = None
+
     class Settings:
         name = "audit_logs"

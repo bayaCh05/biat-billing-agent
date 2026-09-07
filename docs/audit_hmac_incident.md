@@ -1,11 +1,13 @@
 # Note technique — Incident HMAC sur le journal d'audit (`audit_logs`)
 
-**Date de rédaction :** 2026-07-13 — corrigée et complétée le 2026-07-15
-**Statut :** rebaselined (voir section 6) — la cause (rotation de secret) reste
-documentée comme un incident réel, mais les lignes affectées ne sont plus
-comptées comme « tampered »
-**Périmètre :** table SQLite `audit_logs` (`data/invoices.db`), mécanisme de
-vérification `api/security/audit_integrity.py::verify_row_hash()`
+**Date de rédaction :** 2026-07-13 — corrigée et complétée le 2026-07-15,
+étendue à Mongo le 2026-09-07
+**Statut :** rebaselined des deux côtés (SQLite section 6, Mongo section 7) —
+0 ligne/document remonté comme altéré sur SQLite ou MongoDB au 2026-09-07
+**Périmètre :** table SQLite `audit_logs` (`data/invoices.db`) ET collection
+MongoDB `audit_logs` (depuis la section 7) — mécanisme de vérification
+`api/security/audit_integrity.py::verify_row_status()` /
+`verify_row_status_from_doc()`
 
 > **Correction du 2026-07-15** : le chiffre « 708/708 (100 %) » de la
 > section 1 ci-dessous, daté du 2026-07-13, était lui-même inexact — une
@@ -176,6 +178,80 @@ présente aucune ligne en échec — cohérent avec le fait que l'écriture
 Mongo-native de l'audit trail a démarré après la fenêtre d'incident
 (2026-06-28 → 2026-07-07).
 
+> **Mise à jour du 2026-09-07** : ce constat (0 ligne en échec côté Mongo)
+> reste vrai, mais la portée « SQLite uniquement » du mécanisme de
+> rebaseline lui-même a créé un angle mort distinct, sans lien avec la
+> rotation de secret — voir section 7.
+
 **Reproductibilité** : `python scripts/rebaseline_audit_hmac.py --dry-run`
 affiche le compte sans rien écrire ; le script est idempotent (une ligne
 déjà rebaselined ou déjà valide est laissée intacte).
+
+## 7. Gap de couverture HMAC côté Mongo — découvert et clos le 2026-09-07
+
+**Constat** : 4 documents `audit_logs` côté Mongo ont `row_hash = None`
+(jamais calculé) — pas un `row_hash` qui ne correspond plus au secret
+courant. Ce ne sont **ni des lignes altérées, ni des victimes de la
+rotation de secret du 2026-07-10** (section 3) : ce sont des entrées
+« pré-HMAC », exactement la même nature que les `null_hash_entries` déjà
+connues côté SQLite (section 1). Elles n'ont jamais été comptées comme
+`tampered` — `tampered_count` est et a toujours été **0 sur les deux
+stores** (voir tableau en fin de section).
+
+**Cause racine**, identifiée précisément via l'historique git : le commit
+`f6679b2` (2026-07-10 02:16:52, « complète le Lot 9 ») est celui qui a
+ajouté le calcul de `row_hash` à `log_audit_event_native()` (l'écrivain
+Mongo-natif de l'audit trail utilisé pour les événements de login). Les 4
+documents ci-dessous ont tous été écrits **avant** ce commit, donc avant
+que ce chemin de code ne calcule un HMAC — une brève fenêtre de quelques
+heures, la veille de la rotation de secret elle-même, sans lien avec elle :
+
+| Date (`created_at`) | Action | `_id` |
+|---|---|---|
+| 2026-07-09 17:44:22 | LOGIN_SUCCESS | `67774e16-851d-42e9-8425-e5a3f79b4adb` |
+| 2026-07-09 17:44:38 | LOGIN_SUCCESS | `c4c99f24-8bef-4110-b44b-51e670ccb85e` |
+| 2026-07-10 00:26:42 | LOGIN_SUCCESS | `b04e7c64-0fb9-4dd2-897c-4571129ec69d` |
+| 2026-07-10 00:26:53 | LOGIN_SUCCESS | `459acf10-f4e6-44d2-8729-5271aba0c257` |
+
+Le code réel de `verify_integrity_native()`
+(`src/storage/documents/service_bridge.py`) avait déjà, avant toute
+modification de ce jour, la branche `if not stored:
+null_hash_entries.append(...); valid += 1; continue` — ces 4 documents
+étaient donc déjà exclus de `tampered_entries` et n'ont jamais été
+remontés comme altérés par `/audit/verify-integrity` ni
+`/security/summary`.
+
+**Décision prise le 2026-09-07** : laisser ces 4 documents tels quels
+(`row_hash` toujours `None`, non rétro-calculé) plutôt que de leur
+appliquer un `row_hash` a posteriori — cohérent avec le principe déjà posé
+en section 4 (ne pas signer après coup une donnée dont l'historique
+d'écriture n'est plus garanti). Aucune ligne de ce lot n'a donc été
+modifiée.
+
+**Ce qui a quand même été ajouté, en prévision d'une vraie rotation
+future** : `AuditLogDocument` (`src/storage/documents/audit_log.py`) gagne
+les 3 mêmes champs que la table SQLite (`rebaseline_hash`,
+`rebaselined_at`, `rebaseline_reason`) — purement additif, aucun document
+existant modifié par ce changement de schéma seul. `verify_row_status_from_doc()`
+(`api/security/audit_integrity.py`) est l'équivalent Mongo-natif de
+`verify_row_status()`, et `verify_integrity_native()` distingue désormais
+`"rebaselined"` de `"tampered"` exactement comme `compute_integrity_summary()`
+le fait côté SQLite. `scripts/rebaseline_audit_hmac_mongo.py` est le
+miroir Mongo de `scripts/rebaseline_audit_hmac.py` (mêmes garanties :
+`row_hash` jamais recalculé, idempotent, `--dry-run` disponible) — exécuté
+en dry-run le 2026-09-07, il confirme qu'il n'y a **rien à rebaseliner
+aujourd'hui** (les 4 documents ci-dessus n'ont pas de `row_hash` à
+comparer, donc ne sont pas candidats). Ce mécanisme ne sert à rien tant
+que `AUDIT_HMAC_SECRET` reste vide (voir Option B, non encore mise en
+œuvre) — il devient nécessaire dès qu'une vraie rotation de secret aura
+lieu côté Mongo.
+
+**État vérifié en direct le 2026-09-07** :
+
+| Store | Total | Valides | Rebaselined | Pré-HMAC (`null_hash`) | Altérées |
+|---|---|---|---|---|---|
+| SQLite (`data/invoices.db`) | 708 | 139 | 569 | 0 | **0** |
+| MongoDB (`audit_logs`) | 1050 | 1046 | 0 | 4 | **0** |
+
+`tampered_count` = 0 sur les deux stores, confirmé via `compute_integrity_summary()`
+(donc `/audit/verify-integrity` et `/security/summary`).

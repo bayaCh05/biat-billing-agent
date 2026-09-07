@@ -92,6 +92,8 @@ class TestComputeIntegritySummary:
             "total_checked": 1,
             "valid": 0,
             "null_hash_count": 0,
+            "rebaselined_count": 0,
+            "rebaselined_entries": [],
             "tampered_count": 1,
             "tampered_entries": [{"id": "mongo-log-1", "created_at": "", "action": "AI_EXTRACT"}],
         }

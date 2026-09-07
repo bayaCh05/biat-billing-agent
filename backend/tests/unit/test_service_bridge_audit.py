@@ -212,6 +212,25 @@ class TestVerifyIntegrityNative:
         assert result["tampered_count"] == 1
         assert result["tampered_entries"][0]["id"] == "log-1"
 
+    def test_rebaselined_entry_is_not_counted_as_tampered(self):
+        """Mirrors SQLite's verify_row_status() 'rebaselined' bucket — see
+        scripts/rebaseline_audit_hmac_mongo.py and docs/audit_hmac_incident.md
+        section 7."""
+        doc = self._doc("LOGIN_SUCCESS", "stale-pre-rotation-hash")
+        doc["rebaseline_hash"] = compute_row_hash_from_doc(doc)
+        doc["rebaselined_at"] = datetime(2026, 9, 7, tzinfo=timezone.utc)
+        coll = self._coll_with_docs([doc])
+
+        with patch(
+            "src.storage.documents.audit_log.AuditLogDocument.get_pymongo_collection",
+            return_value=coll,
+        ):
+            result = _run(verify_integrity_native())
+
+        assert result["tampered_count"] == 0
+        assert result["rebaselined_count"] == 1
+        assert result["rebaselined_entries"][0]["id"] == "log-1"
+
     def test_null_hash_entry_counts_as_valid_but_tracked_separately(self):
         legacy_doc = self._doc("LEGACY_ACTION", None)
         coll = self._coll_with_docs([legacy_doc])

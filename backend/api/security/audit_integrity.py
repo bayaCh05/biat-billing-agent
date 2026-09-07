@@ -109,3 +109,20 @@ def verify_row_hash_from_doc(doc: dict) -> bool:
     expected = compute_row_hash_from_doc(doc)
     stored = doc.get("row_hash") or ""
     return hmac.compare_digest(expected, stored)
+
+
+def verify_row_status_from_doc(doc: dict) -> str:
+    """Mongo-native equivalent of verify_row_status() for a raw audit_logs dict.
+
+    Same three-way semantics ("original" / "rebaselined" / "failed") — see
+    verify_row_status() above. Added 2026-09 once the Mongo side of
+    audit_logs was found to have the same pre-2026-07-10 secret-rotation gap
+    as SQLite but no rebaseline mechanism yet — see
+    docs/audit_hmac_incident.md section 7.
+    """
+    if verify_row_hash_from_doc(doc):
+        return "original"
+    rebaseline_hash = doc.get("rebaseline_hash")
+    if rebaseline_hash and hmac.compare_digest(compute_row_hash_from_doc(doc), rebaseline_hash):
+        return "rebaselined"
+    return "failed"

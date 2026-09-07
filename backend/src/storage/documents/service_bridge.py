@@ -15,7 +15,6 @@ Usage dans une route FastAPI :
 """
 from __future__ import annotations
 
-import hmac
 import logging
 import os
 import re
@@ -1748,7 +1747,7 @@ async def verify_integrity_native(limit: int = 5000) -> dict | None:
     audit_integrity.py pour le détail de cette décision de conception).
     """
     try:
-        from api.security.audit_integrity import compute_row_hash_from_doc
+        from api.security.audit_integrity import verify_row_status_from_doc
         from src.storage.documents.audit_log import AuditLogDocument
 
         coll = AuditLogDocument.get_pymongo_collection()
@@ -1759,6 +1758,7 @@ async def verify_integrity_native(limit: int = 5000) -> dict | None:
 
     valid = 0
     null_hash_entries: list[dict] = []
+    rebaselined: list[dict] = []
     tampered: list[dict] = []
     for doc in rows:
         stored = doc.get("row_hash")
@@ -1772,9 +1772,17 @@ async def verify_integrity_native(limit: int = 5000) -> dict | None:
             null_hash_entries.append(entry_summary)
             valid += 1
             continue
-        expected = compute_row_hash_from_doc(doc)
-        if hmac.compare_digest(expected, stored):
+        status = verify_row_status_from_doc(doc)
+        if status == "original":
             valid += 1
+        elif status == "rebaselined":
+            # Same on-record exception as SQLite's rebaselined bucket — see
+            # docs/audit_hmac_incident.md section 7. Not counted as tampered.
+            rebaselined_at = doc.get("rebaselined_at")
+            rebaselined.append({
+                **entry_summary,
+                "rebaselined_at": rebaselined_at.isoformat() if rebaselined_at else None,
+            })
         else:
             tampered.append(entry_summary)
 
@@ -1783,6 +1791,8 @@ async def verify_integrity_native(limit: int = 5000) -> dict | None:
         "total_checked": total,
         "valid": valid,
         "null_hash_count": len(null_hash_entries),
+        "rebaselined_count": len(rebaselined),
+        "rebaselined_entries": rebaselined,
         "tampered_count": len(tampered),
         "tampered_entries": tampered,
     }

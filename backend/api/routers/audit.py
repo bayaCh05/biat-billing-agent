@@ -201,6 +201,7 @@ async def compute_integrity_summary(session: Session, limit: int = 5000) -> dict
         total += mongo_result["total_checked"]
         total_valid += mongo_result["valid"]
         total_null += mongo_result["null_hash_count"]
+        total_rebaselined_entries += mongo_result["rebaselined_entries"]
         total_tampered_entries += mongo_result["tampered_entries"]
 
     tampered_count = len(total_tampered_entries)
