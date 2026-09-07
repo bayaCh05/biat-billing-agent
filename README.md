@@ -222,7 +222,7 @@ shape as `_seed_test_users()` above).
 
 ## Running tests
 
-**Python (1211 tests: 1139 unit + 72 integration):**
+**Python (1203 tests: 1131 unit + 72 integration):**
 ```bash
 source .venv/bin/activate
 .venv/bin/pytest backend/                 # all tests — MUST run from repo root

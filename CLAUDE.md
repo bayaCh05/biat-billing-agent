@@ -71,7 +71,7 @@ Violating this is a compliance failure for a banking subsidiary.
 source .venv/bin/activate
 
 # Run tests — MUST run from repo root, not backend/ (relative config paths break otherwise)
-.venv/bin/pytest backend/                 # 1211 tests, 0 skipped
+.venv/bin/pytest backend/                 # 1203 tests, 0 skipped
 .venv/bin/pytest backend/tests/unit/      # unit only
 .venv/bin/pytest backend/tests/integration/  # integration only (needs Tesseract)
 .venv/bin/pytest backend/ --tb=short -q   # compact output
@@ -296,7 +296,7 @@ scripts/
   # run_agent.py (headless daemon) deleted 2026-07 — see Architecture path note above
   # seed_users.py removed — created hardcoded-password demo Mongo accounts
 
-tests/                    # 1211 tests total, 0 skipped
+tests/                    # 1203 tests total, 0 skipped
   unit/                   # 52 files, mocked dependencies
   integration/            # test_api_e2e.py (real Mongo test DB + SQLite for get_session
                            # plumbing), test_orchestrator_audit_trail.py, test_avatar_rate_limit.py
