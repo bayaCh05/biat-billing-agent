@@ -52,7 +52,7 @@ function resizeImage(file: File): Promise<string> {
 
 export default function Profile() {
   const navigate = useNavigate()
-  const { name, initials, role, avatar, setAvatar, logout, isDemoUser } = useAuth()
+  const { name, initials, role, avatar, setAvatar, logout } = useAuth()
 
   const avatarBg  = ROLE_COLOR[role] ?? '#1A3A5C'
   const badgeCls  = ROLE_BADGE[role]  ?? 'bg-blue-100 text-blue-700'
@@ -81,10 +81,6 @@ export default function Profile() {
     }
     if (file.size > MAX_FILE_MB * 1024 * 1024) {
       return flashMsg('err', `Fichier trop grand (max ${MAX_FILE_MB} Mo).`)
-    }
-
-    if (isDemoUser) {
-      return flashMsg('err', 'Photo non disponible pour les comptes de démonstration.')
     }
 
     setUploading(true)
@@ -236,9 +232,7 @@ export default function Profile() {
             </div>
           )}
           <p className="text-[11px] text-gray-400 mt-1">
-            {isDemoUser
-              ? 'Photo de profil non disponible pour les comptes de démonstration.'
-              : `Cliquez sur la photo pour la modifier · max ${MAX_FILE_MB} Mo · redimensionné à 300×300`}
+            Cliquez sur la photo pour la modifier · max {MAX_FILE_MB} Mo · redimensionné à 300×300
           </p>
         </div>
       </div>

@@ -51,11 +51,8 @@ function AuthGuard() {
 }
 
 function PasswordChangeGuard() {
-  const { forcePasswordChange, isDemoUser, role } = useAuth()
+  const { forcePasswordChange } = useAuth()
   const location = useLocation()
-  if (isDemoUser && location.pathname === '/changer-mot-de-passe') {
-    return <Navigate to={roleHome(role)} replace />
-  }
   if (forcePasswordChange && location.pathname !== '/changer-mot-de-passe') {
     return <Navigate to="/changer-mot-de-passe" replace />
   }

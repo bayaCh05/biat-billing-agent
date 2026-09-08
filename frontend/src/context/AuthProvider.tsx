@@ -19,11 +19,6 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
   }
 }
 
-function isDemoToken(token: string): boolean {
-  const payload = decodeJwtPayload(token)
-  return typeof payload.sub === 'string' && payload.sub.startsWith('demo:')
-}
-
 function nameFromToken(token: string, role: UserRole): string {
   const payload = decodeJwtPayload(token)
   const prenom = typeof payload.prenom === 'string' ? payload.prenom : ''
@@ -53,7 +48,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
   const [notifCount, setNotifCount] = useState(0)
   const [forcePasswordChange, setForcePasswordChange] = useState(false)
-  const [isDemoUser, setIsDemoUser] = useState(false)
   const [avatar, setAvatar] = useState<string | null>(null)
 
   // On mount: try to restore session via refresh cookie only if the user had a previous session.
@@ -80,7 +74,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.setItem(STORAGE_KEY, r)
           setRoleState(r)
           setName(nameFromToken(data.access_token, r))
-          setIsDemoUser(isDemoToken(data.access_token))
           setIsAuthenticated(true)
         }
       })
@@ -101,7 +94,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     saveToken(token)
     setRole(r)
     setName(nameFromToken(token, r))
-    setIsDemoUser(isDemoToken(token))
     setIsAuthenticated(true)
     setForcePasswordChange(fpc)
   }
@@ -110,7 +102,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearToken()
     setIsAuthenticated(false)
     setForcePasswordChange(false)
-    setIsDemoUser(false)
     setAvatar(null)
   }
 
@@ -137,7 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider value={{
       role, setRole, name, initials: initials(name), avatar, setAvatar,
       notifCount, setNotifCount,
-      isAuthenticated, isBootstrapping, forcePasswordChange, isDemoUser,
+      isAuthenticated, isBootstrapping, forcePasswordChange,
       loginWithToken, logout, clearForcePasswordChange,
     }}>
       {children}

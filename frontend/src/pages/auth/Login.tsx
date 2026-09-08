@@ -18,11 +18,9 @@ export default function Login() {
     if (!email.trim() || !password) return setError('Veuillez remplir tous les champs.')
     setLoading(true)
     try {
-      const { access_token, role, force_password_change, user_id } = await apiLogin(email.trim(), password)
-      const isDemoUser = typeof user_id === 'string' && user_id.startsWith('demo:')
-      const shouldForcePasswordChange = force_password_change && !isDemoUser
-      loginWithToken(access_token, role as UserRole, shouldForcePasswordChange)
-      if (shouldForcePasswordChange) {
+      const { access_token, role, force_password_change } = await apiLogin(email.trim(), password)
+      loginWithToken(access_token, role as UserRole, force_password_change)
+      if (force_password_change) {
         navigate('/changer-mot-de-passe')
       } else {
         navigate(roleHome(role as UserRole))

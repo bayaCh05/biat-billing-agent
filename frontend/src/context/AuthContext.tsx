@@ -13,7 +13,6 @@ export interface AuthState {
   isAuthenticated: boolean
   isBootstrapping: boolean
   forcePasswordChange: boolean
-  isDemoUser: boolean
   setRole: (r: UserRole) => void
   loginWithToken: (token: string, role: UserRole, forcePasswordChange?: boolean) => void
   logout: () => void

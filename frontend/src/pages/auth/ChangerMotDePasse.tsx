@@ -50,7 +50,7 @@ function fmt(sec: number) {
 
 export default function ChangerMotDePassePage() {
   const navigate  = useNavigate()
-  const { role, forcePasswordChange, clearForcePasswordChange, isDemoUser } = useAuth()
+  const { role, forcePasswordChange, clearForcePasswordChange } = useAuth()
 
   const [step, setStep]             = useState<Step>('request')
   const [maskedEmail, setMaskedEmail] = useState(() => maskEmail(getEmailFromToken()))
@@ -74,12 +74,6 @@ export default function ChangerMotDePassePage() {
 
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState('')
-
-  useEffect(() => {
-    if (isDemoUser) {
-      navigate(roleHome(role), { replace: true })
-    }
-  }, [isDemoUser, navigate, role])
 
   // Tick down the OTP countdown while on that step
   useEffect(() => {
