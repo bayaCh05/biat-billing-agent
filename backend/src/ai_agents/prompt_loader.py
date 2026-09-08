@@ -40,9 +40,3 @@ class PromptLoader:
     def format(self, key: str, **kwargs: Any) -> str:
         """Return a formatted prompt with the given variables."""
         return self.template(key).format(**kwargs)
-
-    def temperature(self, key: str) -> float:
-        return float(self._prompts.get(key, {}).get("temperature", 0.0))
-
-    def max_tokens(self, key: str) -> int:
-        return int(self._prompts.get(key, {}).get("max_tokens", 200))
