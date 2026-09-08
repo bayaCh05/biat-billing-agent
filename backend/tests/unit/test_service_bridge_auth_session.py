@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.storage.documents.service_bridge import (
+    _hash_otp_code,
     check_locked_native,
     generate_reset_link_native,
     get_user_by_email_mongo,
@@ -387,9 +388,18 @@ class TestRevokeTokenNative:
 
 
 class TestVerifyOtpNative:
+    """verify_otp_native() iterates candidates (async for coll.find(...))
+    instead of a single find_one — the salt is per-record so the hash can't
+    be queried directly, see _hash_otp_code's docstring in service_bridge.py."""
+
     def test_valid_code_marks_used_and_returns_true(self):
+        salt = "abc123"
+
+        async def _candidates(*_a, **_kw):
+            yield {"_id": "pv-1", "salt": salt, "code_hash": _hash_otp_code("123456", salt)}
+
         coll = MagicMock()
-        coll.find_one = AsyncMock(return_value={"_id": "pv-1"})
+        coll.find = _candidates
         coll.update_one = AsyncMock()
         with patch(
             "src.storage.documents.password_verification.PasswordVerificationDocument.get_pymongo_collection",
@@ -399,9 +409,30 @@ class TestVerifyOtpNative:
         assert result is True
         coll.update_one.assert_awaited_once_with({"_id": "pv-1"}, {"$set": {"used": True}})
 
-    def test_invalid_or_expired_code_returns_false(self):
+    def test_wrong_code_against_real_candidate_returns_false(self):
+        salt = "abc123"
+
+        async def _candidates(*_a, **_kw):
+            yield {"_id": "pv-1", "salt": salt, "code_hash": _hash_otp_code("123456", salt)}
+
         coll = MagicMock()
-        coll.find_one = AsyncMock(return_value=None)
+        coll.find = _candidates
+        coll.update_one = AsyncMock()
+        with patch(
+            "src.storage.documents.password_verification.PasswordVerificationDocument.get_pymongo_collection",
+            return_value=coll,
+        ):
+            result = _run(verify_otp_native("user-1", "000000"))
+        assert result is False
+        coll.update_one.assert_not_awaited()
+
+    def test_no_candidates_returns_false(self):
+        async def _candidates(*_a, **_kw):
+            return
+            yield  # pragma: no cover — makes this an async generator with 0 items
+
+        coll = MagicMock()
+        coll.find = _candidates
         coll.update_one = AsyncMock()
         with patch(
             "src.storage.documents.password_verification.PasswordVerificationDocument.get_pymongo_collection",

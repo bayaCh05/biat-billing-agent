@@ -2455,8 +2455,22 @@ async def revoke_token_native(jti: str, reason: str, user_id: str | None) -> Non
         })
 
 
+def _hash_otp_code(code: str, salt: str) -> str:
+    """SHA-256, pas bcrypt — un OTP à 6 chiffres n'a que 10^6 combinaisons ;
+    même un hash lent ne protégerait pas contre un brute-force hors ligne
+    dédié, donc le coût de calcul n'apporte rien ici. La vraie protection
+    vient de l'expiration à 10 min et de la limitation de débit sur
+    /change-password/confirm (voir api/routers/auth.py), pas du hash.
+    Un sel par enregistrement empêche seulement une table précalculée
+    unique réutilisable contre tous les OTP jamais émis — c'est le seul
+    but de ce hachage : ne pas garder le code en clair en base."""
+    import hashlib
+    return hashlib.sha256(f"{salt}{code}".encode()).hexdigest()
+
+
 async def generate_otp_native(user_doc, purpose: str) -> str:
-    """Génère et envoie un OTP à 6 chiffres. Retourne le code généré."""
+    """Génère et envoie un OTP à 6 chiffres. Retourne le code en clair —
+    seulement pour l'email, jamais stocké tel quel (voir _hash_otp_code)."""
     import secrets
     import string
     from src.storage.documents.password_verification import PasswordVerificationDocument
@@ -2471,10 +2485,11 @@ async def generate_otp_native(user_doc, purpose: str) -> str:
     # secrets.choice (CSPRNG) — random.choices() is a non-cryptographic PRNG
     # and must never be used for OTP codes (predictable/brute-forceable seed).
     code = "".join(secrets.choice(string.digits) for _ in range(6))
+    salt = secrets.token_hex(16)
     now = datetime.now(timezone.utc)
     await coll.insert_one({
         "_id": str(uuid4()), "user_id": str(user_doc.id), "verification_type": "OTP",
-        "code_or_token": code, "purpose": purpose,
+        "code_hash": _hash_otp_code(code, salt), "salt": salt, "purpose": purpose,
         "expires_at": now + timedelta(minutes=10), "used": False, "created_at": now,
     })
     send_otp_email(user_doc.email, code, _OTP_PURPOSE_LABELS.get(purpose, purpose))
@@ -2482,19 +2497,27 @@ async def generate_otp_native(user_doc, purpose: str) -> str:
 
 
 async def verify_otp_native(user_id: str, code: str) -> bool:
-    """Retourne True et marque le code utilisé s'il est valide et non expiré."""
+    """Retourne True et marque le code utilisé s'il est valide et non expiré.
+
+    Comparaison en mémoire, pas de requête directe sur code_hash : le sel
+    est propre à chaque enregistrement donc le hash ne peut pas être
+    cherché tel quel — l'ensemble de candidats reste minuscule (au plus un
+    par purpose actif pour cet utilisateur, generate_otp_native invalide
+    déjà tout OTP précédent de même purpose)."""
+    import hmac
+
     from src.storage.documents.password_verification import PasswordVerificationDocument
 
     now = datetime.now(timezone.utc)
     coll = PasswordVerificationDocument.get_pymongo_collection()
-    pv = await coll.find_one({
-        "user_id": str(user_id), "verification_type": "OTP", "code_or_token": code,
+    async for pv in coll.find({
+        "user_id": str(user_id), "verification_type": "OTP",
         "used": False, "expires_at": {"$gt": now},
-    })
-    if pv is None:
-        return False
-    await coll.update_one({"_id": pv["_id"]}, {"$set": {"used": True}})
-    return True
+    }):
+        if hmac.compare_digest(_hash_otp_code(code, pv["salt"]), pv["code_hash"]):
+            await coll.update_one({"_id": pv["_id"]}, {"$set": {"used": True}})
+            return True
+    return False
 
 
 async def generate_reset_link_native(user_doc, purpose: str) -> str:

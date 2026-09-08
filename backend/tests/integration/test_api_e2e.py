@@ -826,7 +826,10 @@ class TestSessionRevocationOnPasswordChange:
 
     def _get_password_verification_secret(self, user_id: str, verification_type: str) -> str:
         """Test-only backdoor: the API never returns OTP codes/reset tokens
-        directly (by design), so fetch the just-generated one straight from Mongo."""
+        directly (by design), so fetch the just-generated one straight from
+        Mongo. LINK only — OTP documents store code_hash+salt, not the
+        plaintext code (see _hash_otp_code in service_bridge.py); use
+        _request_otp_capturing_code() for OTP tests instead."""
         import pymongo
 
         from src.storage.mongodb import MONGODB_DB, MONGODB_URI
@@ -838,6 +841,18 @@ class TestSessionRevocationOnPasswordChange:
         )
         assert doc is not None, f"No {verification_type} verification found for user {user_id}"
         return doc["code_or_token"]
+
+    def _request_otp_capturing_code(self, token: str):
+        """OTP codes are hashed at rest (see _hash_otp_code) — the only place
+        the plaintext code exists is the email send call, so intercept it
+        there instead of reading it back from Mongo."""
+        captured: dict[str, str] = {}
+        with patch(
+            "src.services.email_service.send_otp_email",
+            side_effect=lambda to, code, purpose_label: captured.update(code=code),
+        ):
+            r = client.post("/api/auth/change-password/request-otp", headers=_auth(token))
+        return r, captured.get("code")
 
     def test_direct_change_password_revokes_other_sessions_keeps_current(self):
         _, email, password = self._create_real_user()
@@ -852,14 +867,14 @@ class TestSessionRevocationOnPasswordChange:
         assert not self._still_valid(token_b), "other session must be revoked"
 
     def test_otp_confirm_revokes_other_sessions_keeps_current(self):
-        user_id, email, password = self._create_real_user()
+        _, email, password = self._create_real_user()
         token_a = _login(email, password)
         token_b = _login(email, password)
 
-        r = client.post("/api/auth/change-password/request-otp", headers=_auth(token_a))
+        r, otp_code = self._request_otp_capturing_code(token_a)
         assert r.status_code == 200, r.text
+        assert otp_code is not None
 
-        otp_code = self._get_password_verification_secret(user_id, "OTP")
         r2 = client.post("/api/auth/change-password/confirm", headers=_auth(token_a), json={
             "otp_code": otp_code, "current_password": password, "new_password": "NouveauPass99!",
         })

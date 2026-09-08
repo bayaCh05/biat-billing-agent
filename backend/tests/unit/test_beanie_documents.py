@@ -579,7 +579,7 @@ class TestPasswordVerificationDocument:
         from src.storage.documents.password_verification import PasswordVerificationDocument
         _check_fields(PasswordVerificationDocument, {
             "id",
-            "user_id", "verification_type", "code_or_token",
+            "user_id", "verification_type", "code_or_token", "code_hash", "salt",
             "purpose", "expires_at", "used", "created_at",
         })
 

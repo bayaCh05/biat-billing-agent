@@ -25,7 +25,17 @@ class PasswordVerificationDocument(Document):
     id: UUID = Field(default_factory=uuid4)
     user_id: Annotated[UUID, Indexed()]   # soft ref vers users._id
     verification_type: str    # "OTP" | "LINK"
-    code_or_token: str
+    # LINK (reset password) : code_or_token en clair — c'est un bearer token
+    # à haute entropie (secrets.token_urlsafe(48)), déjà conçu pour être
+    # transmis tel quel dans l'URL emailée, donc le hacher n'apporterait rien.
+    # OTP : code_hash + salt à la place — un code à 6 chiffres (10^6
+    # combinaisons) ne doit pas rester lisible en clair en base même si son
+    # entropie ne justifie pas un hash lent type bcrypt (voir
+    # service_bridge.py::_hash_otp_code). Un seul des deux couples est
+    # rempli selon verification_type — jamais les deux à la fois.
+    code_or_token: str | None = None
+    code_hash: str | None = None
+    salt: str | None = None
     purpose: str              # "FIRST_LOGIN" | "VOLUNTARY_CHANGE" | "FORGOT_PASSWORD"
     expires_at: datetime      # requis — calculé à la création
     used: bool = False
