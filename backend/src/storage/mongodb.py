@@ -92,6 +92,7 @@ def _all_document_models() -> list:
     from src.storage.documents.audit_log               import AuditLogDocument
     from src.storage.documents.revoked_token           import RevokedTokenDocument
     from src.storage.documents.active_token            import ActiveTokenDocument
+    from src.storage.documents.refresh_token           import RefreshTokenDocument
     from src.storage.documents.invoice                 import InvoiceDocument
     from src.storage.documents.payment                 import PaymentDocument
     from src.storage.documents.journal_entry           import JournalEntryDocument
@@ -116,6 +117,7 @@ def _all_document_models() -> list:
         AuditLogDocument,
         RevokedTokenDocument,
         ActiveTokenDocument,
+        RefreshTokenDocument,
         InvoiceDocument,
         PaymentDocument,
         JournalEntryDocument,

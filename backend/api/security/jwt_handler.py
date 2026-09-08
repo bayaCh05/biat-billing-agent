@@ -76,14 +76,28 @@ def create_access_token(user_id: str, role: str, email: str, extra: dict | None 
     return jwt.encode(payload, SECRET, algorithm=ALGORITHM)
 
 
-def create_refresh_token(user_id: str) -> str:
+def create_refresh_token(
+    user_id: str,
+    family_id: str | None = None,
+    expires_at: datetime | None = None,
+) -> str:
+    """Émet un refresh token JWT.
+
+    `expires_at`, si fourni, est le plafond ABSOLU de la famille (fixé à la
+    connexion) — une rotation le repasse tel quel, jamais repoussé, pour que
+    le `exp` du JWT ne prétende jamais être valide plus longtemps que ce que
+    RefreshTokenDocument honorera réellement (voir ce module).
+    """
     now = datetime.now(timezone.utc)
+    family_id = family_id or str(uuid4())
+    exp = expires_at or (now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     payload = {
         "sub": user_id,
         "type": "refresh",
         "iat": now,
-        "exp": now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        "exp": exp,
         "jti": str(uuid4()),
+        "family_id": family_id,
     }
     return jwt.encode(payload, SECRET, algorithm=ALGORITHM)
 

@@ -183,6 +183,48 @@ class TestActiveTokenDocument:
         assert ActiveTokenDocument.Settings.name == "active_tokens"
 
 
+# ── RefreshTokenDocument ------------------------------------------------------
+
+class TestRefreshTokenDocument:
+    def test_fields(self):
+        from src.storage.documents.refresh_token import RefreshTokenDocument
+        _check_fields(RefreshTokenDocument, {
+            "id", "family_id", "user_id", "created_at", "expires_at",
+            "used", "used_at", "replaced_by", "revoked",
+        })
+
+    def test_id_is_str(self):
+        from src.storage.documents.refresh_token import RefreshTokenDocument
+        exp = datetime.datetime(2026, 7, 9, tzinfo=datetime.timezone.utc)
+        doc = RefreshTokenDocument.model_construct(
+            id="jti-xyz", family_id="fam-1", user_id="u1", expires_at=exp,
+        )
+        assert isinstance(doc.id, str)
+
+    def test_used_and_revoked_default_false(self):
+        from src.storage.documents.refresh_token import RefreshTokenDocument
+        exp = datetime.datetime(2026, 7, 9, tzinfo=datetime.timezone.utc)
+        doc = RefreshTokenDocument.model_construct(
+            id="jti-xyz", family_id="fam-1", user_id="u1", expires_at=exp,
+        )
+        assert doc.used is False
+        assert doc.revoked is False
+        assert doc.used_at is None
+        assert doc.replaced_by is None
+
+    def test_ttl_index(self):
+        from src.storage.documents.refresh_token import RefreshTokenDocument
+        indexes = RefreshTokenDocument.Settings.indexes
+        assert any(
+            isinstance(i, IndexModel) and i.document.get("expireAfterSeconds") == 0
+            for i in indexes
+        )
+
+    def test_collection_name(self):
+        from src.storage.documents.refresh_token import RefreshTokenDocument
+        assert RefreshTokenDocument.Settings.name == "refresh_tokens"
+
+
 # ── InvoiceDocument ---------------------------------------------------------
 
 class TestInvoiceDocument:
@@ -615,13 +657,13 @@ class TestPaymentDocument:
 # ── Cohérence globale -------------------------------------------------------
 
 class TestGlobalCohérence:
-    def test_all_22_documents_importable(self):
-        """Tous les 22 documents Beanie s'importent sans erreur."""
+    def test_all_23_documents_importable(self):
+        """Tous les 23 documents Beanie s'importent sans erreur."""
         import sys
         sys.path.insert(0, "backend")
         from src.storage.mongodb import _all_document_models
         models = _all_document_models()
-        assert len(models) == 22
+        assert len(models) == 23
 
     def test_no_duplicate_collection_names(self):
         """Chaque document utilise un nom de collection unique."""
@@ -632,7 +674,10 @@ class TestGlobalCohérence:
     def test_uuid_documents_have_uuid4_factory(self):
         """Les documents avec UUID primary key ont un default_factory=uuid4."""
         from src.storage.mongodb import _all_document_models
-        str_pk_docs = {"revoked_tokens", "active_tokens", "chartes_projet", "phases", "fiches_mensuelles"}
+        str_pk_docs = {
+            "revoked_tokens", "active_tokens", "refresh_tokens",
+            "chartes_projet", "phases", "fiches_mensuelles",
+        }
         for doc_class in _all_document_models():
             if doc_class.Settings.name in str_pk_docs:
                 continue

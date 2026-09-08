@@ -5,6 +5,7 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
@@ -155,7 +156,8 @@ async def login(
     from src.storage.documents.service_bridge import (
         check_locked_native, create_user_native, get_user_by_email_native,
         log_audit_event_native, record_login_failure_native, record_login_success_native,
-        register_active_token_native, update_user_password_native, update_user_role_native,
+        register_active_token_native, register_refresh_token_native,
+        update_user_password_native, update_user_role_native,
     )
 
     email = body.email.lower().strip()
@@ -229,7 +231,17 @@ async def login(
                 "auth_method": "ldap",
             },
         )
-        refresh_token = jwt_handler.create_refresh_token(user_id=str(db_user.id))
+        refresh_family_id = str(uuid4())
+        refresh_expires_at = datetime.now(timezone.utc) + timedelta(
+            days=jwt_handler.REFRESH_TOKEN_EXPIRE_DAYS,
+        )
+        refresh_token = jwt_handler.create_refresh_token(
+            user_id=str(db_user.id), family_id=refresh_family_id, expires_at=refresh_expires_at,
+        )
+        ref_payload = jwt_handler.decode_token_raw(refresh_token) or {}
+        await register_refresh_token_native(
+            ref_payload.get("jti", ""), refresh_family_id, str(db_user.id), refresh_expires_at,
+        )
 
         acc_payload = jwt_handler.decode_token_raw(access_token) or {}
         expires_at = datetime.now(timezone.utc) + timedelta(hours=jwt_handler.ACCESS_TOKEN_EXPIRE_HOURS)
@@ -310,7 +322,17 @@ async def login(
                 "force_password_change": db_user.is_first_login,
             },
         )
-        refresh_token = jwt_handler.create_refresh_token(user_id=str(db_user.id))
+        refresh_family_id = str(uuid4())
+        refresh_expires_at = datetime.now(timezone.utc) + timedelta(
+            days=jwt_handler.REFRESH_TOKEN_EXPIRE_DAYS,
+        )
+        refresh_token = jwt_handler.create_refresh_token(
+            user_id=str(db_user.id), family_id=refresh_family_id, expires_at=refresh_expires_at,
+        )
+        ref_payload = jwt_handler.decode_token_raw(refresh_token) or {}
+        await register_refresh_token_native(
+            ref_payload.get("jti", ""), refresh_family_id, str(db_user.id), refresh_expires_at,
+        )
 
         # Decode jti for tracking
         acc_payload = jwt_handler.decode_token_raw(access_token) or {}

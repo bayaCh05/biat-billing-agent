@@ -151,6 +151,7 @@ class TestLoginLocal:
             record_login_failure_native=AsyncMock(return_value=1),
             record_login_success_native=AsyncMock(),
             register_active_token_native=AsyncMock(),
+            register_refresh_token_native=AsyncMock(),
             update_user_password_native=AsyncMock(),
             update_user_role_native=AsyncMock(),
         )
@@ -261,6 +262,7 @@ class TestLoginLdap:
             log_audit_event_native=AsyncMock(),
             record_login_success_native=AsyncMock(),
             register_active_token_native=AsyncMock(),
+            register_refresh_token_native=AsyncMock(),
             update_user_role_native=AsyncMock(),
         )
         patches.update(overrides)

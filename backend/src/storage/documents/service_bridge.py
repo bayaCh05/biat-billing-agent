@@ -2442,6 +2442,26 @@ async def revoke_active_tokens_by_prefix_native(jti_prefix: str, user_id: str | 
     return len(rows)
 
 
+async def register_refresh_token_native(jti: str, family_id: str, user_id: str,
+                                         expires_at: datetime) -> None:
+    """Enregistre un refresh token émis (connexion ou rotation).
+
+    `expires_at` est le plafond ABSOLU de la famille — voir
+    RefreshTokenDocument. Un seul document par jti ; jamais de eviction ici
+    (contrairement à register_active_token_native) car un refresh token est
+    single-use par conception, pas une session concurrente à limiter.
+    """
+    from src.storage.documents.refresh_token import RefreshTokenDocument
+
+    coll = RefreshTokenDocument.get_pymongo_collection()
+    doc = {
+        "_id": jti, "family_id": family_id, "user_id": str(user_id),
+        "created_at": datetime.now(timezone.utc), "expires_at": expires_at,
+        "used": False, "used_at": None, "replaced_by": None, "revoked": False,
+    }
+    await coll.replace_one({"_id": jti}, doc, upsert=True)
+
+
 async def revoke_token_native(jti: str, reason: str, user_id: str | None) -> None:
     from src.storage.documents.revoked_token import RevokedTokenDocument
     existing = await RevokedTokenDocument.get(jti)
