@@ -388,6 +388,8 @@ async def refresh_token(
         pass
 
     token = cookie_refresh or body_token
+    ip = _ip(request)
+    ua = _ua(request)
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token manquant.")
 
@@ -396,6 +398,43 @@ async def refresh_token(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token invalide ou expiré.")
 
     user_id = payload.get("sub", "")
+    jti = payload.get("jti", "")
+    family_id = payload.get("family_id")
+
+    from src.storage.documents.service_bridge import (
+        get_refresh_token_native, log_audit_event_native, mark_refresh_token_used_native,
+        register_active_token_native, register_refresh_token_native, revoke_refresh_family_native,
+    )
+
+    # Fail-closed pour la migration : un refresh token émis avant l'introduction
+    # du family_id/RefreshTokenDocument n'a pas de trace en base — on ne peut
+    # ni vérifier son état single-use ni détecter un rejeu, donc on le rejette
+    # plutôt que de faire confiance au JWT seul.
+    doc = await get_refresh_token_native(jti) if (jti and family_id) else None
+    if not family_id or not jti or doc is None:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token invalide — reconnectez-vous.",
+        )
+
+    if doc.revoked:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session révoquée — reconnectez-vous.")
+
+    if doc.used:
+        # Rejeu détecté : ce jti a déjà été échangé contre un nouveau token —
+        # présenté à nouveau, c'est le signe d'un vol probable. On révoque
+        # toute la famille, pas seulement ce jti.
+        await revoke_refresh_family_native(family_id, "reuse_detected")
+        await log_audit_event_native(AuditLogCreate(
+            user_id=user_id, action="REFRESH_TOKEN_REUSE_DETECTED", resource_type="User",
+            status="FAILURE",
+            detail=f"Rejeu détecté (jti={jti}) — famille {family_id} révoquée depuis {ip}",
+            ip_address=ip, user_agent=ua,
+        ))
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token déjà utilisé — session révoquée par sécurité.",
+        )
 
     # Look up DB user for fresh role/email
     role = "Comptable"
@@ -415,13 +454,21 @@ async def refresh_token(
         pass
 
     new_access = jwt_handler.create_access_token(user_id=user_id, role=role, email=email, extra=extra or None)
+    # Rotation : nouveau refresh token, même family_id, même plafond ABSOLU
+    # (doc.expires_at — jamais repoussé par une rotation).
+    new_refresh = jwt_handler.create_refresh_token(
+        user_id=user_id, family_id=family_id, expires_at=doc.expires_at,
+    )
+    new_ref_payload = jwt_handler.decode_token_raw(new_refresh) or {}
+    new_jti = new_ref_payload.get("jti", "")
 
     acc_payload = jwt_handler.decode_token_raw(new_access) or {}
     expires_at = datetime.now(timezone.utc) + timedelta(hours=jwt_handler.ACCESS_TOKEN_EXPIRE_HOURS)
-    ip = _ip(request)
-    ua = _ua(request)
-    from src.storage.documents.service_bridge import log_audit_event_native, register_active_token_native
     await register_active_token_native(acc_payload.get("jti", ""), user_id, expires_at, ip, ua)
+    await register_refresh_token_native(new_jti, family_id, user_id, doc.expires_at)
+    await mark_refresh_token_used_native(jti, replaced_by=new_jti)
+
+    _set_refresh_cookie(response, new_refresh)
 
     await log_audit_event_native(AuditLogCreate(
         user_id=user_id, action="TOKEN_REFRESHED", resource_type="User",

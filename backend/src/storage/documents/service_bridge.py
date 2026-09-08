@@ -2462,6 +2462,50 @@ async def register_refresh_token_native(jti: str, family_id: str, user_id: str,
     await coll.replace_one({"_id": jti}, doc, upsert=True)
 
 
+async def get_refresh_token_native(jti: str):
+    """Retrouve le document RefreshTokenDocument pour un jti donné, ou None."""
+    from src.storage.documents.refresh_token import RefreshTokenDocument
+    return await RefreshTokenDocument.find_one({"_id": jti})
+
+
+async def mark_refresh_token_used_native(jti: str, replaced_by: str) -> None:
+    """Marque un refresh token comme consommé par une rotation réussie.
+
+    `replaced_by` est le jti du nouveau refresh token émis — permet de
+    retracer la chaîne complète d'une famille a posteriori."""
+    from src.storage.documents.refresh_token import RefreshTokenDocument
+    coll = RefreshTokenDocument.get_pymongo_collection()
+    await coll.update_one(
+        {"_id": jti},
+        {"$set": {
+            "used": True, "used_at": datetime.now(timezone.utc), "replaced_by": replaced_by,
+        }},
+    )
+
+
+async def revoke_refresh_family_native(family_id: str, reason: str) -> int:
+    """Révoque toute la famille de refresh tokens (déconnexion, rejeu détecté,
+    changement de mot de passe) — pas seulement le jti courant.
+
+    Marque tous les documents non révoqués de la famille comme revoked=True
+    ET pousse chaque jti dans le blocklist générique (RevokedTokenDocument),
+    pour que verify_refresh_token() les rejette même si le document Mongo
+    venait à disparaître (TTL) avant que le JWT lui-même n'expire. Retourne
+    le nombre de tokens révoqués.
+    """
+    from src.storage.documents.refresh_token import RefreshTokenDocument
+
+    rows = await RefreshTokenDocument.find({"family_id": family_id, "revoked": False}).to_list()
+    if not rows:
+        return 0
+
+    coll = RefreshTokenDocument.get_pymongo_collection()
+    await coll.update_many({"_id": {"$in": [r.id for r in rows]}}, {"$set": {"revoked": True}})
+    for r in rows:
+        await revoke_token_native(r.id, reason, r.user_id)
+    return len(rows)
+
+
 async def revoke_token_native(jti: str, reason: str, user_id: str | None) -> None:
     from src.storage.documents.revoked_token import RevokedTokenDocument
     existing = await RevokedTokenDocument.get(jti)

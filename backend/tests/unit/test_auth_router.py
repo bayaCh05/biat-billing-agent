@@ -8,6 +8,7 @@ and any live Request/ASGI machinery — see api/limiter.py.
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -67,6 +68,21 @@ def _make_db_user(**overrides) -> SimpleNamespace:
         is_active=True,
         is_first_login=False,
         hashed_password=hash_password("CurrentPass1!"),
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def _make_refresh_doc(**overrides) -> SimpleNamespace:
+    defaults = dict(
+        id="jti-refresh-1",
+        family_id="fam-1",
+        user_id="user-1",
+        expires_at=datetime.now(UTC) + timedelta(days=5),
+        used=False,
+        used_at=None,
+        replaced_by=None,
+        revoked=False,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -364,10 +380,15 @@ class TestLoginLdap:
 # ── refresh_token() ──────────────────────────────────────────────────────────
 
 class TestRefreshToken:
-    def _run(self, cookie_refresh=None, verify_result=None, body: bytes = b"", **sb_overrides):
+    def _run(self, cookie_refresh=None, verify_result=None, body: bytes = b"",
+             refresh_doc=None, **sb_overrides):
         patches = dict(
             log_audit_event_native=AsyncMock(),
             register_active_token_native=AsyncMock(),
+            register_refresh_token_native=AsyncMock(),
+            mark_refresh_token_used_native=AsyncMock(),
+            revoke_refresh_family_native=AsyncMock(),
+            get_refresh_token_native=AsyncMock(return_value=refresh_doc),
             get_user_by_id_native=AsyncMock(return_value=None),
         )
         patches.update(sb_overrides)
@@ -395,9 +416,10 @@ class TestRefreshToken:
         user = _make_db_user()
         result = self._run(
             cookie_refresh=None,
-            verify_result={"sub": str(user.id)},
+            verify_result={"sub": str(user.id), "jti": "jti-1", "family_id": "fam-1"},
             body=b'{"refresh_token": "from-body"}',
             get_user_by_id_native=AsyncMock(return_value=user),
+            refresh_doc=_make_refresh_doc(id="jti-1", family_id="fam-1", user_id=str(user.id)),
         )
         assert result.access_token
 
@@ -411,8 +433,9 @@ class TestRefreshToken:
         user = _make_db_user(role="Direction")
         result = self._run(
             cookie_refresh="good-token",
-            verify_result={"sub": str(user.id)},
+            verify_result={"sub": str(user.id), "jti": "jti-1", "family_id": "fam-1"},
             get_user_by_id_native=AsyncMock(return_value=user),
+            refresh_doc=_make_refresh_doc(id="jti-1", family_id="fam-1", user_id=str(user.id)),
         )
         assert result.access_token
 
@@ -420,7 +443,12 @@ class TestRefreshToken:
         # "demo:foo@bar.tn" is not a valid UUID -> ValueError is caught silently.
         result = self._run(
             cookie_refresh="good-token",
-            verify_result={"sub": "demo:comptable@biat-it.tn"},
+            verify_result={
+                "sub": "demo:comptable@biat-it.tn", "jti": "jti-1", "family_id": "fam-1",
+            },
+            refresh_doc=_make_refresh_doc(
+                id="jti-1", family_id="fam-1", user_id="demo:comptable@biat-it.tn",
+            ),
         )
         assert result.access_token
 
@@ -428,10 +456,127 @@ class TestRefreshToken:
         user = _make_db_user(is_active=False)
         result = self._run(
             cookie_refresh="good-token",
-            verify_result={"sub": str(user.id)},
+            verify_result={"sub": str(user.id), "jti": "jti-1", "family_id": "fam-1"},
             get_user_by_id_native=AsyncMock(return_value=user),
+            refresh_doc=_make_refresh_doc(id="jti-1", family_id="fam-1", user_id=str(user.id)),
         )
         assert result.access_token
+
+    # ── migration fail-closed ────────────────────────────────────────────────
+
+    def test_legacy_token_without_family_id_fails_closed(self):
+        with pytest.raises(HTTPException) as exc:
+            self._run(
+                cookie_refresh="pre-migration-token",
+                verify_result={"sub": "user-1", "jti": "jti-1"},  # no family_id
+            )
+        assert exc.value.status_code == 401
+
+    def test_no_matching_refresh_doc_fails_closed(self):
+        with pytest.raises(HTTPException) as exc:
+            self._run(
+                cookie_refresh="tok",
+                verify_result={"sub": "user-1", "jti": "jti-1", "family_id": "fam-1"},
+                refresh_doc=None,
+            )
+        assert exc.value.status_code == 401
+
+    # ── revocation / reuse detection (security-critical path) ──────────────────
+
+    def test_revoked_family_raises_401_without_re_revoking(self):
+        revoke_mock = AsyncMock()
+        with pytest.raises(HTTPException) as exc:
+            self._run(
+                cookie_refresh="tok",
+                verify_result={"sub": "user-1", "jti": "jti-1", "family_id": "fam-1"},
+                refresh_doc=_make_refresh_doc(
+                    id="jti-1", family_id="fam-1", user_id="user-1", revoked=True,
+                ),
+                revoke_refresh_family_native=revoke_mock,
+            )
+        assert exc.value.status_code == 401
+        assert "révoqué" in exc.value.detail
+        revoke_mock.assert_not_called()
+
+    def test_reused_token_revokes_whole_family(self):
+        revoke_mock = AsyncMock(return_value=2)
+        with pytest.raises(HTTPException) as exc:
+            self._run(
+                cookie_refresh="stolen-token",
+                verify_result={"sub": "user-1", "jti": "jti-old", "family_id": "fam-1"},
+                refresh_doc=_make_refresh_doc(
+                    id="jti-old", family_id="fam-1", user_id="user-1", used=True,
+                ),
+                revoke_refresh_family_native=revoke_mock,
+            )
+        assert exc.value.status_code == 401
+        assert "utilisé" in exc.value.detail
+        revoke_mock.assert_called_once_with("fam-1", "reuse_detected")
+
+    def test_reused_token_logs_reuse_detected_audit_event(self):
+        audit_mock = AsyncMock()
+        with pytest.raises(HTTPException):
+            self._run(
+                cookie_refresh="stolen-token",
+                verify_result={"sub": "user-1", "jti": "jti-old", "family_id": "fam-1"},
+                refresh_doc=_make_refresh_doc(
+                    id="jti-old", family_id="fam-1", user_id="user-1", used=True,
+                ),
+                log_audit_event_native=audit_mock,
+            )
+        audit_mock.assert_called_once()
+        logged = audit_mock.call_args.args[0]
+        assert logged.action == "REFRESH_TOKEN_REUSE_DETECTED"
+        assert logged.status == "FAILURE"
+        assert logged.user_id == "user-1"
+
+    def test_reused_token_does_not_mint_new_tokens(self):
+        register_active = AsyncMock()
+        register_refresh = AsyncMock()
+        with pytest.raises(HTTPException):
+            self._run(
+                cookie_refresh="stolen-token",
+                verify_result={"sub": "user-1", "jti": "jti-old", "family_id": "fam-1"},
+                refresh_doc=_make_refresh_doc(
+                    id="jti-old", family_id="fam-1", user_id="user-1", used=True,
+                ),
+                register_active_token_native=register_active,
+                register_refresh_token_native=register_refresh,
+            )
+        register_active.assert_not_called()
+        register_refresh.assert_not_called()
+
+    # ── successful rotation ──────────────────────────────────────────────────
+
+    def test_successful_rotation_marks_old_token_used(self):
+        mark_mock = AsyncMock()
+        result = self._run(
+            cookie_refresh="good-token",
+            verify_result={"sub": "user-1", "jti": "jti-old", "family_id": "fam-1"},
+            refresh_doc=_make_refresh_doc(id="jti-old", family_id="fam-1", user_id="user-1"),
+            mark_refresh_token_used_native=mark_mock,
+        )
+        assert result.access_token
+        mark_mock.assert_called_once()
+        assert mark_mock.call_args.args[0] == "jti-old"
+        assert mark_mock.call_args.kwargs["replaced_by"] != "jti-old"
+
+    def test_successful_rotation_registers_new_token_with_same_family_and_ceiling(self):
+        register_mock = AsyncMock()
+        doc = _make_refresh_doc(id="jti-old", family_id="fam-1", user_id="user-1")
+        result = self._run(
+            cookie_refresh="good-token",
+            verify_result={"sub": "user-1", "jti": "jti-old", "family_id": "fam-1"},
+            refresh_doc=doc,
+            register_refresh_token_native=register_mock,
+        )
+        assert result.access_token
+        register_mock.assert_called_once()
+        new_jti, family_id, user_id, expires_at = register_mock.call_args.args
+        assert new_jti != "jti-old"
+        assert family_id == "fam-1"
+        assert user_id == "user-1"
+        assert expires_at == doc.expires_at  # plafond absolu inchangé, pas prolongé
 
 
 # ── logout() ─────────────────────────────────────────────────────────────────
