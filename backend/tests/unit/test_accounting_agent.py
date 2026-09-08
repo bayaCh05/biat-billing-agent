@@ -308,7 +308,11 @@ class TestCreateCapexAsset:
         assert years == 5
         assert source == "DEFAULT"
 
-    def test_short_compte_falls_back_to_default_amortissement(self, agent_parts):
+    def test_short_but_valid_compte_applies_same_pce_rule(self, agent_parts):
+        """compte="21" still starts with "2" — the general PCE rule (28 +
+        digits after the leading 2) applies defensively, producing "281"
+        rather than fabricating the unrelated "28184" the old hardcoded
+        fallback used to silently produce for any code <= 2 chars."""
         agent, *_ = agent_parts
         invoice = _make_invoice(line_items=[])
         catalog_entry = _make_catalog_entry(compte="21", type_charge=ChargeType.CAPEX)
@@ -323,7 +327,28 @@ class TestCreateCapexAsset:
             agent._create_capex_asset(invoice, catalog_entry)
 
         saved_asset = mock_repo.save.call_args[0][0]
-        assert saved_asset.compte_amortissement == "28184"
+        assert saved_asset.compte_amortissement == "281"
+
+    def test_compte_not_starting_with_2_logs_warning(self, agent_parts, caplog):
+        """A catalog entry whose compte doesn't start with "2" (the CAPEX
+        immobilisation prefix) breaks the PCE derivation rule's assumption —
+        must be logged loudly instead of silently absorbed, so a malformed
+        catalog entry gets noticed."""
+        agent, *_ = agent_parts
+        invoice = _make_invoice(line_items=[])
+        catalog_entry = _make_catalog_entry(compte="6112", type_charge=ChargeType.CAPEX)
+        mock_repo = MagicMock()
+
+        with (
+            patch("src.ai_agents.accounting_agent.OllamaClient.get",
+                  return_value=_mock_ollama(available=False)),
+            patch("src.storage.sync_mongo_repository.SyncMongoAssetRepository",
+                  return_value=mock_repo),
+            caplog.at_level("WARNING"),
+        ):
+            agent._create_capex_asset(invoice, catalog_entry)
+
+        assert "amortization_account_unexpected_format" in caplog.text
 
     def test_description_uses_first_line_item_when_present(self, agent_parts):
         agent, *_ = agent_parts
@@ -419,6 +444,35 @@ class TestGetAmortizationDuration:
             years, source = agent._get_amortization_duration("Mobilier", catalog_entry)
 
         assert (years, source) == (5, "DEFAULT")
+
+    def test_single_value_in_catalog_notes_used_without_calling_llm(self, agent_parts):
+        agent, *_ = agent_parts
+        catalog_entry = _make_catalog_entry(notes="Durée d'amortissement standard : 3 ans")
+
+        with patch("src.ai_agents.accounting_agent.OllamaClient.get",
+                   return_value=_mock_ollama(available=True, response="99")) as mock_get:
+            years, source = agent._get_amortization_duration("Logiciel", catalog_entry)
+
+        assert (years, source) == (3, "CATALOG")
+        mock_get.assert_not_called()
+
+    def test_range_in_catalog_notes_resolves_to_lower_bound(self, agent_parts):
+        agent, *_ = agent_parts
+        catalog_entry = _make_catalog_entry(notes="Durée d'amortissement standard : 5-10 ans")
+
+        years, source = agent._get_amortization_duration("Mobilier", catalog_entry)
+
+        assert (years, source) == (5, "CATALOG")
+
+    def test_notes_without_duration_hint_falls_back_to_llm(self, agent_parts):
+        agent, *_ = agent_parts
+        catalog_entry = _make_catalog_entry(notes="Voir la politique interne d'amortissement.")
+
+        with patch("src.ai_agents.accounting_agent.OllamaClient.get",
+                   return_value=_mock_ollama(available=True, response="4")):
+            years, source = agent._get_amortization_duration("Matériel", catalog_entry)
+
+        assert (years, source) == (4, "AI")
 
 
 # ── _create_payment_schedule ─────────────────────────────────────────────────

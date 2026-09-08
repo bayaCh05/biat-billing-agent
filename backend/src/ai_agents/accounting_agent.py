@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import date, timedelta
 
 from src.ai_agents.base_agent import BaseAgent
@@ -140,7 +141,7 @@ class AccountingAgent(BaseAgent):
         amortization_years, source = self._get_amortization_duration(description, catalog_entry)
 
         compte_immob = catalog_entry.compte
-        compte_amort = "28" + compte_immob[1:] if len(compte_immob) > 2 else "28184"
+        compte_amort = self._amortization_account_for(compte_immob)
 
         acquisition_cost = invoice.amount_ht.value or 0.0
         acquisition_date = invoice.invoice_date.value or date.today()
@@ -166,8 +167,59 @@ class AccountingAgent(BaseAgent):
             logger.warning("capex_asset_error: %s", exc, exc_info=True)
             return None, amortization_years, source
 
+    @staticmethod
+    def _amortization_account_for(compte_immob: str) -> str:
+        """Dérive le compte d'amortissement cumulé (28xx) depuis le compte
+        d'immobilisation (2xxx) — règle PCE standard (tunisien/PCG) : le
+        compte d'amortissement cumulé reprend les chiffres du compte
+        d'immobilisation après le "2" initial, préfixés par "28". Vérifié
+        exact sur les 3 entrées CAPEX actuelles de cost_catalog.yaml :
+        "2183"→"28183", "2284"→"28284", "2184"→"28184".
+
+        Auparavant : un code non conforme (ne commençant pas par "2", ou
+        trop court) retombait silencieusement sur "28184" en dur — une
+        valeur plausible mais potentiellement fausse pour ce compte-là,
+        sans aucun signal. Ici, la même règle générale est appliquée
+        défensivement (dégrade proprement plutôt que de fabriquer un compte
+        plausible), et un WARNING visible est loggé pour qu'un compte
+        catalogue mal formé soit repéré, pas absorbé silencieusement.
+        """
+        if not compte_immob.startswith("2") or len(compte_immob) < 2:
+            logger.warning(
+                "amortization_account_unexpected_format compte_immob=%r — "
+                "règle PCE 2xxx→28xxx non applicable telle quelle, vérifier manuellement.",
+                compte_immob,
+            )
+        return "28" + compte_immob[1:]
+
+    @staticmethod
+    def _duration_from_catalog_notes(catalog_entry) -> int | None:
+        """Parse a duration hint out of the catalog entry's free-text `notes`
+        (e.g. "Durée d'amortissement standard : 3-5 ans", "... : 3 ans") —
+        these were previously pure comments, never read by any code, so
+        every CAPEX invoice always asked the LLM to guess a duration even
+        for the 3 catalog entries that already state one explicitly.
+
+        A range ("3-5 ans") resolves to its lower bound — the more
+        conservative (faster write-off) choice per standard accounting
+        prudence, and a defensible single value without per-asset judgment
+        this parser can't make.
+        """
+        notes = getattr(catalog_entry, "notes", "") or ""
+        m = re.search(r"(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*ans?\b", notes, re.IGNORECASE)
+        if not m:
+            return None
+        years = int(m.group(1))
+        return years if 1 <= years <= 20 else None
+
     def _get_amortization_duration(self, description: str, catalog_entry) -> tuple[int, str]:
-        """Ask Ollama for the PCE amortization duration. Falls back to 5 years."""
+        """Durée d'amortissement PCE : notes du catalogue en priorité
+        (déterministe, intention métier déjà déclarée), sinon Ollama, sinon
+        5 ans par défaut."""
+        from_notes = self._duration_from_catalog_notes(catalog_entry)
+        if from_notes is not None:
+            return from_notes, "CATALOG"
+
         if not OllamaClient.get().is_available():
             return 5, "DEFAULT"
 
@@ -181,7 +233,6 @@ class AccountingAgent(BaseAgent):
         )
         raw = self._call_ollama(prompt, temperature=0.0, max_tokens=5)
         if raw:
-            import re
             # D'abord: réponse idéale = entier seul sur la ligne
             m = re.search(r"^\s*(\d{1,2})\s*$", raw.strip())
             if not m:
