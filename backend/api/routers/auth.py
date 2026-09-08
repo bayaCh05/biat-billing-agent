@@ -488,7 +488,9 @@ async def logout(
     current_user: dict = Depends(get_current_user),
     cookie_refresh: str | None = Cookie(default=None, alias=_REFRESH_COOKIE),
 ):
-    from src.storage.documents.service_bridge import log_audit_event_native, revoke_active_token_native
+    from src.storage.documents.service_bridge import (
+        log_audit_event_native, revoke_active_token_native, revoke_refresh_family_native,
+    )
 
     ip = _ip(request)
     ua = _ua(request)
@@ -500,11 +502,17 @@ async def logout(
         await jwt_handler.revoke_token(jti, "logout", user_id)
         await revoke_active_token_native(jti)
 
-    # Revoke refresh token cookie
+    # Revoke refresh token cookie — toute la famille, pas seulement ce jti.
     if cookie_refresh:
         ref_payload = await jwt_handler.verify_refresh_token(cookie_refresh)
         if ref_payload:
-            await jwt_handler.revoke_token(ref_payload["jti"], "logout", user_id)
+            family_id = ref_payload.get("family_id")
+            if family_id:
+                await revoke_refresh_family_native(family_id, "logout")
+            else:
+                # Token pré-migration, sans family_id — fallback single-jti
+                # pour rester robuste à tout vintage de token.
+                await jwt_handler.revoke_token(ref_payload["jti"], "logout", user_id)
 
     await log_audit_event_native(AuditLogCreate(
         user_id=user_id, user_email=current_user.get("email"),

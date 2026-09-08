@@ -587,6 +587,7 @@ class TestLogout:
         patches = dict(
             log_audit_event_native=AsyncMock(),
             revoke_active_token_native=AsyncMock(),
+            revoke_refresh_family_native=AsyncMock(),
         )
         patches.update(sb_overrides)
         ctxs = [patch(f"{_SB}.{name}", new=val) for name, val in patches.items()]
@@ -605,18 +606,37 @@ class TestLogout:
             for c in ctxs:
                 c.stop()
 
-    def test_logout_with_jti_and_cookie_revokes_both(self):
+    def test_logout_with_jti_and_legacy_cookie_revokes_both(self):
+        # Cookie sans family_id (pré-migration) -> fallback single-jti pour le refresh.
         current_user = {"sub": "user-1", "jti": "jti-access", "email": "a@b.tn", "role": "Comptable"}
         revoke_mock = AsyncMock()
         result = self._run(current_user, cookie_refresh="refresh-tok",
                             verify_result={"jti": "jti-refresh"}, revoke_token_mock=revoke_mock)
         assert result == {"message": "Déconnexion réussie."}
-        assert revoke_mock.await_count == 2
+        assert revoke_mock.await_count == 2  # access jti + refresh jti (fallback)
 
     def test_logout_without_jti_or_cookie_still_succeeds(self):
         current_user = {"sub": "user-1", "email": "a@b.tn", "role": "Comptable"}
         result = self._run(current_user, cookie_refresh=None, verify_result=None)
         assert result == {"message": "Déconnexion réussie."}
+
+    def test_logout_with_family_id_revokes_whole_family(self):
+        current_user = {
+            "sub": "user-1", "jti": "jti-access", "email": "a@b.tn", "role": "Comptable",
+        }
+        revoke_token_mock = AsyncMock()
+        revoke_family_mock = AsyncMock()
+        result = self._run(
+            current_user, cookie_refresh="refresh-tok",
+            verify_result={"jti": "jti-refresh", "family_id": "fam-1"},
+            revoke_token_mock=revoke_token_mock,
+            revoke_refresh_family_native=revoke_family_mock,
+        )
+        assert result == {"message": "Déconnexion réussie."}
+        revoke_family_mock.assert_awaited_once_with("fam-1", "logout")
+        # jwt_handler.revoke_token n'est appelé qu'une fois — pour l'access
+        # token — pas pour le refresh, qui passe par la famille.
+        assert revoke_token_mock.await_count == 1
 
 
 # ── list_sessions() ──────────────────────────────────────────────────────────

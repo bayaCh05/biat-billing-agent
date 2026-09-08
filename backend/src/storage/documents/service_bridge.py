@@ -1514,9 +1514,23 @@ async def revoke_all_user_tokens_native(
     mirror_revoke_all_user_tokens() qu'elle remplace (jamais appelée, erreurs
     Mongo avalées en silence), cette fonction est authoritative — comme les
     autres *_native de ce module — et ne doit pas avaler ses erreurs.
+
+    Révoque aussi toutes les familles de refresh tokens de l'utilisateur (via
+    revoke_refresh_family_native) — fermait un vrai trou : avant cet ajout, un
+    refresh token volé restait valide après un changement de mot de passe,
+    tant que sa famille n'était pas explicitement révoquée via /logout.
+    Contrairement aux access tokens, `except_jti` n'est PAS appliqué aux
+    familles de refresh tokens : il n'existe pas de correspondance propre
+    entre le jti d'un access token et la famille de refresh token de la même
+    session sans plomberie supplémentaire (il faudrait faire transiter le
+    refresh cookie dans change_password/confirm_otp/le reset admin, qui ne
+    l'acceptent pas aujourd'hui) — toutes les familles sont donc révoquées
+    sans exception, y compris celle de la session courante. La valeur
+    retournée combine les deux compteurs (access + refresh tokens révoqués).
     """
     from api.security import jwt_handler
     from src.storage.documents.active_token import ActiveTokenDocument
+    from src.storage.documents.refresh_token import RefreshTokenDocument
 
     now = datetime.now(timezone.utc)
     query: dict[str, Any] = {
@@ -1534,7 +1548,16 @@ async def revoke_all_user_tokens_native(
         await coll.update_many(
             {"_id": {"$in": [t.id for t in active]}}, {"$set": {"revoked": True}},
         )
-    return len(active)
+
+    refresh_rows = await RefreshTokenDocument.find(
+        {"user_id": str(user_id), "revoked": False},
+    ).to_list()
+    family_ids = {r.family_id for r in refresh_rows}
+    revoked_refresh_count = 0
+    for family_id in family_ids:
+        revoked_refresh_count += await revoke_refresh_family_native(family_id, reason)
+
+    return len(active) + revoked_refresh_count
 
 
 # ══════════════════════════════════════════════════════════════════════════════

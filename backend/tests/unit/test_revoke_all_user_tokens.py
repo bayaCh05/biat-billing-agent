@@ -38,6 +38,10 @@ class TestRevokeAllUserTokensNative:
                 "src.storage.documents.active_token.ActiveTokenDocument.get_pymongo_collection",
                 return_value=coll,
             ),
+            patch(
+                "src.storage.documents.refresh_token.RefreshTokenDocument.find",
+                return_value=_fake_find([]),
+            ),
             patch("api.security.jwt_handler.revoke_token", new=AsyncMock()) as mock_revoke,
         ):
             count = asyncio.run(revoke_all_user_tokens_native("user-1", reason="test_reason"))
@@ -60,6 +64,10 @@ class TestRevokeAllUserTokensNative:
                 "src.storage.documents.active_token.ActiveTokenDocument.find",
                 return_value=_fake_find([]),
             ) as mock_find,
+            patch(
+                "src.storage.documents.refresh_token.RefreshTokenDocument.find",
+                return_value=_fake_find([]),
+            ),
             patch("api.security.jwt_handler.revoke_token", new=AsyncMock()),
         ):
             asyncio.run(revoke_all_user_tokens_native("user-1", except_jti="jti-keep-me"))
@@ -76,6 +84,10 @@ class TestRevokeAllUserTokensNative:
             patch(
                 "src.storage.documents.active_token.ActiveTokenDocument.get_pymongo_collection",
             ) as mock_get_coll,
+            patch(
+                "src.storage.documents.refresh_token.RefreshTokenDocument.find",
+                return_value=_fake_find([]),
+            ),
             patch("api.security.jwt_handler.revoke_token", new=AsyncMock()) as mock_revoke,
         ):
             count = asyncio.run(revoke_all_user_tokens_native("user-1"))
@@ -83,6 +95,65 @@ class TestRevokeAllUserTokensNative:
         assert count == 0
         mock_revoke.assert_not_awaited()
         mock_get_coll.assert_not_called()  # nothing to bulk-update
+
+    def test_revokes_every_distinct_refresh_family_and_adds_to_count(self):
+        refresh_rows = [
+            SimpleNamespace(family_id="fam-1"),
+            SimpleNamespace(family_id="fam-1"),
+            SimpleNamespace(family_id="fam-2"),
+        ]
+        with (
+            patch(
+                "src.storage.documents.active_token.ActiveTokenDocument.find",
+                return_value=_fake_find([]),
+            ),
+            patch(
+                "src.storage.documents.refresh_token.RefreshTokenDocument.find",
+                return_value=_fake_find(refresh_rows),
+            ) as mock_refresh_find,
+            patch(
+                "src.storage.documents.service_bridge.revoke_refresh_family_native",
+                new=AsyncMock(return_value=2),
+            ) as mock_revoke_family,
+        ):
+            count = asyncio.run(revoke_all_user_tokens_native("user-1", reason="password_change"))
+
+        # Deux familles distinctes malgré 3 lignes -> une seule révocation par famille.
+        assert mock_revoke_family.await_count == 2
+        called_families = {c.args[0] for c in mock_revoke_family.await_args_list}
+        assert called_families == {"fam-1", "fam-2"}
+        for c in mock_revoke_family.await_args_list:
+            assert c.args[1] == "password_change"
+        assert count == 4  # 0 access + 2 familles * 2 (valeur mockée par appel)
+
+        query = mock_refresh_find.call_args[0][0]
+        assert query["user_id"] == "user-1"
+
+    def test_except_jti_does_not_exclude_refresh_families(self):
+        """`except_jti` ne s'applique qu'aux access tokens — il n'existe pas de
+        correspondance propre entre le jti d'un access token et une famille
+        de refresh token sans plomberie supplémentaire (voir docstring de
+        revoke_all_user_tokens_native)."""
+        refresh_rows = [SimpleNamespace(family_id="fam-keep")]
+        with (
+            patch(
+                "src.storage.documents.active_token.ActiveTokenDocument.find",
+                return_value=_fake_find([]),
+            ),
+            patch(
+                "src.storage.documents.refresh_token.RefreshTokenDocument.find",
+                return_value=_fake_find(refresh_rows),
+            ) as mock_refresh_find,
+            patch(
+                "src.storage.documents.service_bridge.revoke_refresh_family_native",
+                new=AsyncMock(return_value=1),
+            ) as mock_revoke_family,
+        ):
+            asyncio.run(revoke_all_user_tokens_native("user-1", except_jti="jti-keep-me"))
+
+        query = mock_refresh_find.call_args[0][0]
+        assert "_id" not in query  # pas de filtre par jti pour les refresh tokens
+        mock_revoke_family.assert_awaited_once_with("fam-keep", "password_change")
 
 
 class TestJwtHandlerRevokeToken:
