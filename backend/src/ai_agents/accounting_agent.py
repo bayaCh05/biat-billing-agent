@@ -18,7 +18,6 @@ from src.models.invoice import InvoiceRecord
 logger = logging.getLogger(__name__)
 
 _INSTALL_PERIOD = int(os.getenv("PAYMENT_INSTALLMENT_PERIOD_DAYS", "30"))
-_LATE_PENALTY_RATE = float(os.getenv("LATE_PAYMENT_PENALTY_RATE", "0.10"))
 
 
 class AccountingAgent(BaseAgent):

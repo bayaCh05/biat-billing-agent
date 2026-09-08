@@ -8,7 +8,6 @@ Wraps the existing anomaly/duplicate detectors and adds:
 from __future__ import annotations
 
 import logging
-import re
 
 from src.ai_agents.base_agent import BaseAgent
 from src.ai_agents.agent_schemas import AgentResult
@@ -18,8 +17,6 @@ from src.models.invoice import InvoiceRecord, ValidationFlag
 logger = logging.getLogger(__name__)
 
 _CATEGORY_PCT = int(__import__("os").getenv("ANOMALY_CATEGORY_PERCENTILE_THRESHOLD", "90"))
-
-_TN_MF_RE = re.compile(r"^\d{7}[A-Z]/[A-Z]/[A-Z]/\d{3}$", re.IGNORECASE)
 
 
 class AnomalyAgent(BaseAgent):
