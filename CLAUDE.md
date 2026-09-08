@@ -293,6 +293,15 @@ scripts/
   backfill_audit_incidents.py  # one-off: indexes ALL past risks/anomalies into ChromaDB's
                                 # audit_incidents collection — see "Audit Agent" below for why
                                 # this is separate from the nightly audit_daily job
+  seed_payment_installments.py  # one-off demo seed (2026-09-08): picks 2 real JOURNALED
+                                # invoices with no payment_term_days (0/102 had one at the
+                                # time — payment_installments was empty, échéancier/AuditAgent
+                                # cross-checks had nothing to show live) and creates a real
+                                # échéancier for each — one left PENDING/overdue on purpose,
+                                # one marked fully PAID. Idempotent (query-excludes invoices
+                                # that already have payment_term_days) but not stable across
+                                # reruns — a second run seeds 2 *different* invoices, not a
+                                # no-op, since it always picks the next eligible pair
   # run_agent.py (headless daemon) deleted 2026-07 — see Architecture path note above
   # seed_users.py removed — created hardcoded-password demo Mongo accounts
 
