@@ -29,7 +29,5 @@ class OrchestratorResult(BaseModel):
     final_status: str
     pipeline_steps: list[PipelineStep] = Field(default_factory=list)
     total_duration_ms: float = 0.0
-    ollama_total_calls: int = 0
     degraded_mode: bool = False
     human_review_required: bool = False
-    error: str | None = None
