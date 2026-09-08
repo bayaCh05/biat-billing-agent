@@ -40,6 +40,7 @@ Perception/Décision/Action (Russell-Norvig, voir design validé) :
 from __future__ import annotations
 
 import logging
+import os
 from datetime import date, datetime, timedelta, timezone
 
 from src.ai_agents.agent_schemas import AgentResult
@@ -50,9 +51,12 @@ logger = logging.getLogger(__name__)
 _VALID_GRANULARITIES = {"DAILY", "WEEKLY", "MONTHLY"}
 
 # Seuils d'alerte déterministes — aucun LLM impliqué dans leur évaluation.
-_REJECTION_RATE_WARNING_PCT = 15.0
-_BUDGET_VARIANCE_WARNING_PCT = 10.0
-_JOURNAL_CONSISTENCY_SCORE_CRITICAL = 0.99
+# Configurables par env var, comme les seuils équivalents des autres agents
+# (CLASSIFICATION_CONFIDENCE_THRESHOLD, ANOMALY_CATEGORY_PERCENTILE_THRESHOLD,
+# PAYMENT_INSTALLMENT_PERIOD_DAYS) — auparavant en dur ici uniquement.
+_REJECTION_RATE_WARNING_PCT = float(os.getenv("AUDIT_REJECTION_RATE_WARNING_PCT", "15.0"))
+_BUDGET_VARIANCE_WARNING_PCT = float(os.getenv("AUDIT_BUDGET_VARIANCE_WARNING_PCT", "10.0"))
+_JOURNAL_CONSISTENCY_SCORE_CRITICAL = float(os.getenv("AUDIT_JOURNAL_CONSISTENCY_SCORE_CRITICAL", "0.99"))
 
 
 class AuditAgent(BaseAgent):

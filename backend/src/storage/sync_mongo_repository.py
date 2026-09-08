@@ -452,7 +452,9 @@ def journal_consistency_check_sync() -> dict:
     coll = _get_db()["journal_entries"]
     issues: list[dict] = []
     total_checked = 0
+    unbalanced_count = 0
     try:
+        total_checked = coll.count_documents({})
         rows = list(coll.aggregate([
             {"$addFields": {
                 "total_debit": {"$sum": "$lines.debit"},
@@ -464,18 +466,22 @@ def journal_consistency_check_sync() -> dict:
             {"$match": {"diff": {"$gt": 0.005}}},
             {"$project": {"reference": 1}},
         ]))
-        total_checked += 1
         if rows:
+            unbalanced_count = len(rows)
             issues.append({
                 "type": "UNBALANCED_ENTRIES",
-                "count": len(rows),
+                "count": unbalanced_count,
                 "detail": [{"id": r["_id"], "reference": r.get("reference")} for r in rows[:5]],
             })
     except Exception as exc:
-        logger.warning("journal_consistency_check_sync_error: %s", exc)
+        logger.warning("journal_consistency_check_sync_error: %s", exc, exc_info=True)
 
+    # Proportionnel au nombre réel d'écritures, pas binaire — total_checked
+    # comptait auparavant les exécutions de la requête (toujours 1), pas les
+    # écritures, donc le score ne pouvait valoir que 1.0 ou 0.0 quel que soit
+    # le nombre réel d'écritures déséquilibrées.
     return {
-        "consistency_score": round(1 - len(issues) / max(total_checked, 1), 3),
+        "consistency_score": round(1 - unbalanced_count / max(total_checked, 1), 3),
         "total_checked": total_checked,
         "issues": issues,
     }

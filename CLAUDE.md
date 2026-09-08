@@ -475,15 +475,19 @@ deliberate, per-router removal pass and explicit confirmation each time.
 
 ### Scheduled Jobs Status (`api/scheduler.py`)
 
-All 5 jobs are Mongo-native as of 2026-07.
+All 7 jobs are Mongo-native. Table corrected 2026-09-08 — previously listed
+only 5, missing the 2 audit jobs below (`_job_audit_weekly`/`_job_audit_monthly`
+are both registered in `scheduler.py`, not a stale/aspirational entry).
 
 | Job | Cadence | Data source |
 |-----|---------|--------------|
 | `_job_accounting_consistency` | weekly (Mon 6am) | Mongo (`journal_consistency_check_sync`) |
-| `_job_retrain_classifier` | weekly | Mongo (`SyncMongoInvoiceRepository`) |
-| `_job_recalculate_installments` | nightly | Mongo (`recalculate_late_installments_sync`) |
+| `_job_retrain_classifier` | weekly (Sun 3am) | Mongo (`SyncMongoInvoiceRepository`) |
+| `_job_recalculate_installments` | nightly (00:01) | Mongo (`recalculate_late_installments_sync`) |
 | `_job_scan_roadmap_risks` | nightly (8am) | Mongo (`RiskAgent._scan_roadmap_async`, bridged via `asyncio.run()`) |
 | `_job_audit_daily` | nightly (2am) | Mongo (`AuditAgent.run({"granularity": "DAILY"})` — see "Audit Agent" below) |
+| `_job_audit_weekly` | weekly (Mon 7am) | Mongo (`AuditAgent.run({"granularity": "WEEKLY"})`) |
+| `_job_audit_monthly` | monthly (day 1, 3am) | Mongo (`AuditAgent.run({"granularity": "MONTHLY"})`) |
 
 ### Audit Agent (`src/ai_agents/audit_agent.py` — Lot 4, 2026-07, in progress)
 
@@ -535,24 +539,30 @@ inventing any number — same pattern as `InsightAgent._health_summary`.
 ChromaDB is unavailable, and this now also sets `status = "DEGRADED"` (by
 design — a missing narrative is a real degradation, not a silent no-op).
 
-**Lot 4 (this state)**: `api/routers/audit_reports.py`, prefix
+**Lot 4**: `api/routers/audit_reports.py`, prefix
 `/audit-reports` — deliberately distinct from `/audit`
 (`api/routers/audit.py`, HMAC log integrity) to avoid confusion between the
 two domains. `GET /audit-reports` (paginated list, filterable by
-granularity), `GET /audit-reports/{id}` (full report), `POST
-/audit-reports/run` (manual trigger, Admin-only — synchronous, meant for
-demos alongside the scheduled jobs). All 3 endpoints are plain `def` (not
-`async def`), reading via 3 new sync helpers
-(`list_audit_snapshots_sync`/`count_audit_snapshots_sync`/
+granularity), `GET /audit-reports/{id}` (full report), `GET
+/audit-reports/{id}/pdf` (rendered PDF via `AuditReportPDFGenerator`,
+`src/ai_agents/audit_report_pdf.py`, fpdf2 — same conventions as
+`billing/pdf_generator.py`), `POST /audit-reports/run` (manual trigger,
+Admin-only — synchronous, meant for demos alongside the scheduled jobs).
+All 4 endpoints are plain `def` (not `async def`), reading via 3 sync
+helpers (`list_audit_snapshots_sync`/`count_audit_snapshots_sync`/
 `get_audit_snapshot_by_id_sync`) — same reasoning as `ai.py`'s sync routes
 for sync-only agents (`RiskAgent`, `InsightAgent`): the whole
 `audit_snapshots` domain is written by a sync agent (`AuditAgent`) via raw
 pymongo, so it's read the same way, no Beanie/async involved anywhere in
 this router.
 
-Only `_job_audit_daily` is wired into `scheduler.py`; `WEEKLY`/`MONTHLY`
-scheduled jobs and PDF export are not yet implemented (Lot 5, scope to be
-confirmed separately).
+**Corrected 2026-09-08** (previously said only `_job_audit_daily` was wired
+and WEEKLY/MONTHLY/PDF export were "not yet implemented" — verified stale
+by reading the current code, not just trusting this doc): all 3
+granularities are registered in `scheduler.py` (`_job_audit_daily`,
+`_job_audit_weekly`, `_job_audit_monthly`, `add_job` calls), and PDF export
+is implemented and live (`GET /audit-reports/{id}/pdf`, see above). Lot 5
+scope, if any remains, is narrower than previously documented here.
 
 ### Conventions — read before writing any Mongo code
 
