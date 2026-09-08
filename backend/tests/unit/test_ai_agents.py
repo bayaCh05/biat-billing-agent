@@ -439,6 +439,136 @@ def _make_invoice():
     return InvoiceRecord(file_hash="a" * 64, raw_file_path="/tmp/test.pdf")
 
 
+# ── ClassificationAgent ──────────────────────────────────────────────────────
+# No coverage existed for this agent before — added alongside the fix that
+# wires AccountingCoder.last_match_confidence/.last_match_pass into real
+# conf/pass_used instead of the old hardcoded 1.0/0.5/0.0 (see
+# classification_agent.py, accounting_coder.py, catalog.py, rag_classifier.py).
+
+@pytest.fixture
+def classification_agent():
+    _reset_ollama_singleton()
+    with patch("src.ai_agents.base_agent.OllamaClient.get", return_value=_mock_ollama(available=False)), \
+         patch("src.ai_agents.classification_agent.OllamaClient.get", return_value=_mock_ollama(available=False)):
+        from src.ai_agents.classification_agent import ClassificationAgent
+        inv = _make_invoice()
+        coder = MagicMock()
+        coder.last_match_confidence = None
+        coder.last_match_pass = None
+        classifier = MagicMock()
+        classifier.classify.return_value = inv
+        catalog = MagicMock()
+        yield ClassificationAgent(coder, classifier, catalog), inv, coder, classifier, catalog
+
+
+class TestClassificationAgent:
+    def test_rules_match_uses_real_confidence(self, classification_agent):
+        agent, invoice, coder, classifier, catalog = classification_agent
+        invoice.cost_catalog_id = "logiciels_acquis"
+        coder.assign.return_value = invoice
+        coder.last_match_pass = "RULES"
+        coder.last_match_confidence = 0.85
+
+        result = agent.run({"invoice": invoice})
+
+        assert result.success is True
+        assert result.output["pass_used"] == "CATALOG_RULES"
+        assert result.output["classification_confidence"] == pytest.approx(0.85)
+        assert result.confidence == pytest.approx(0.85)
+
+    def test_ml_match_tagged_distinctly_from_rules(self, classification_agent):
+        agent, invoice, coder, classifier, catalog = classification_agent
+        invoice.cost_catalog_id = "logiciels_acquis"
+        coder.assign.return_value = invoice
+        coder.last_match_pass = "ML"
+        coder.last_match_confidence = 0.65
+
+        result = agent.run({"invoice": invoice})
+
+        assert result.output["pass_used"] == "CATALOG_ML"
+        assert result.output["classification_confidence"] == pytest.approx(0.65)
+
+    def test_low_confidence_rules_match_requires_human_review(self, classification_agent):
+        """A borderline Pass A match (e.g. score 70) must now actually trigger
+        human review under CLASSIFICATION_CONFIDENCE_THRESHOLD (default 0.80) —
+        this used to be impossible since conf was hardcoded to 1.0."""
+        agent, invoice, coder, classifier, catalog = classification_agent
+        invoice.cost_catalog_id = "logiciels_acquis"
+        coder.assign.return_value = invoice
+        coder.last_match_pass = "RULES"
+        coder.last_match_confidence = 0.70
+
+        result = agent.run({"invoice": invoice})
+
+        assert invoice.human_review_required is True
+        assert result.output["classification_confidence"] == pytest.approx(0.70)
+
+    def test_no_match_and_rag_disabled_in_degraded_mode(self, classification_agent):
+        agent, invoice, coder, classifier, catalog = classification_agent
+        invoice.cost_catalog_id = None
+        coder.assign.return_value = invoice
+
+        result = agent.run({"invoice": invoice, "degraded_mode": True})
+
+        assert result.output["pass_used"] == "NONE"
+        assert result.output["classification_confidence"] == 0.0
+        assert invoice.human_review_required is True
+
+    def test_rag_llm_confirmed_is_tagged_rag_llm(self, classification_agent):
+        agent, invoice, coder, classifier, catalog = classification_agent
+        invoice.cost_catalog_id = None
+        coder.assign.return_value = invoice
+        entry = MagicMock(id="licences_saas", compte="6133", label="Licences", type_charge=None, nature=None)
+        catalog.get.return_value = entry
+
+        fake_rag = MagicMock()
+        fake_rag.classify.return_value = {"id": "licences_saas", "pass_used": "RAG_LLM"}
+        with patch("src.ai_agents.rag.rag_classifier.RAGClassifier", return_value=fake_rag):
+            result = agent.run({"invoice": invoice, "degraded_mode": False})
+
+        assert result.output["pass_used"] == "RAG_LLM"
+        assert result.output["classification_confidence"] == pytest.approx(0.5)
+
+    def test_rag_without_llm_confirmation_is_not_tagged_rag_llm(self, classification_agent):
+        """The bug this fix closes: RAGClassifier falling back to the raw
+        embedding match (no LLM confirmation) must NOT be reported as RAG_LLM."""
+        agent, invoice, coder, classifier, catalog = classification_agent
+        invoice.cost_catalog_id = None
+        coder.assign.return_value = invoice
+        entry = MagicMock(id="licences_saas", compte="6133", label="Licences", type_charge=None, nature=None)
+        catalog.get.return_value = entry
+
+        fake_rag = MagicMock()
+        fake_rag.classify.return_value = {"id": "licences_saas", "pass_used": "RAG_TOP_MATCH"}
+        with patch("src.ai_agents.rag.rag_classifier.RAGClassifier", return_value=fake_rag):
+            result = agent.run({"invoice": invoice, "degraded_mode": False})
+
+        assert result.output["pass_used"] == "RAG_TOP_MATCH"
+        assert result.output["pass_used"] != "RAG_LLM"
+
+    def test_rag_finds_nothing_falls_back_to_none_with_zero_confidence(self, classification_agent):
+        agent, invoice, coder, classifier, catalog = classification_agent
+        invoice.cost_catalog_id = None
+        coder.assign.return_value = invoice
+
+        fake_rag = MagicMock()
+        fake_rag.classify.return_value = None
+        with patch("src.ai_agents.rag.rag_classifier.RAGClassifier", return_value=fake_rag):
+            result = agent.run({"invoice": invoice, "degraded_mode": False})
+
+        assert result.output["pass_used"] == "NONE"
+        assert result.output["classification_confidence"] == 0.0
+
+    def test_coder_exception_returns_failure_not_raise(self, classification_agent):
+        agent, invoice, coder, classifier, catalog = classification_agent
+        coder.assign.side_effect = RuntimeError("coder boom")
+
+        result = agent.run({"invoice": invoice})
+
+        assert result.success is False
+        assert "coder boom" in result.error
+
+
 def _make_validators(invoice):
     """Each validator simply returns the invoice unchanged."""
     fv = MagicMock()

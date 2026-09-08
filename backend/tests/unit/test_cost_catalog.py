@@ -168,6 +168,39 @@ class TestCatalogMatch:
         assert entry.type_charge == ChargeType.CAPEX
 
 
+# ── Correspondance avec score (match_with_score) ───────────────────────────────
+
+class TestCatalogMatchWithScore:
+    """match_with_score() est le nouveau chemin utilisé par AccountingCoder pour
+    obtenir la vraie confiance au lieu d'une valeur fixe — voir
+    classification_agent.py et accounting_coder.py."""
+
+    def test_exact_match_returns_max_score(self, catalog):
+        entry, score = catalog.match_with_score("Facture maintenance informatique serveurs")
+        assert entry is not None
+        assert entry.id == "maintenance_informatique"
+        assert score == 100
+
+    def test_empty_text_returns_none_and_zero(self, catalog):
+        entry, score = catalog.match_with_score("")
+        assert entry is None
+        assert score == 0
+
+    def test_no_match_returns_none_and_zero(self, catalog):
+        entry, score = catalog.match_with_score("xyzzy foobar qux", min_score=70)
+        assert entry is None
+        assert score == 0
+
+    def test_match_consistent_with_plain_match(self, catalog):
+        """match() est maintenant un simple wrapper autour de match_with_score() —
+        les deux doivent toujours retourner la même entrée."""
+        text = "LICENCE Microsoft Office 365 annuelle"
+        entry_plain = catalog.match(text)
+        entry_scored, score = catalog.match_with_score(text)
+        assert entry_plain is entry_scored
+        assert score >= 70
+
+
 # ── Accesseurs ────────────────────────────────────────────────────────────────
 
 class TestCatalogAccessors:

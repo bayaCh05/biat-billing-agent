@@ -297,4 +297,61 @@ class TestAccountingCoder:
         inv = coder.assign(inv)
         assert inv.accounting_compte == "2284"
 
+    # ── last_match_confidence / last_match_pass ─────────────────────────────
+
+    def test_rules_match_sets_confidence_and_pass(self, mini_catalog):
+        """Passe A (règles) — la confiance doit refléter le vrai score du
+        catalogue, pas une valeur fixe (voir classification_agent.py)."""
+        coder = AccountingCoder(catalog=mini_catalog)
+        inv = self._supplier_invoice("Licence logiciel ERP annuelle")
+        coder.assign(inv)
+        assert coder.last_match_pass == "RULES"
+        assert coder.last_match_confidence == pytest.approx(1.0)
+
+    def test_no_match_leaves_confidence_and_pass_none(self, mini_catalog):
+        coder = AccountingCoder(catalog=mini_catalog)
+        inv = self._supplier_invoice("xyzzy foobar qux incompréhensible", hash_="ac6")
+        coder.assign(inv)
+        assert coder.last_match_pass is None
+        assert coder.last_match_confidence is None
+
+    def test_unknown_direction_leaves_confidence_and_pass_none(self, mini_catalog):
+        coder = AccountingCoder(catalog=mini_catalog)
+        inv = _invoice(file_hash="ac7", raw_file_path="/f")
+        inv.direction = InvoiceDirection.UNKNOWN
+        coder.assign(inv)
+        assert coder.last_match_pass is None
+        assert coder.last_match_confidence is None
+
+    def test_ml_fallback_sets_confidence_and_pass(self, mini_catalog):
+        """Passe B (ML) — utilisée seulement si la passe A ne trouve rien."""
+        from unittest.mock import MagicMock
+
+        ml = MagicMock()
+        ml.is_trained.return_value = True
+        ml.predict.return_value = ("logiciels_acquis", 0.73)
+        coder = AccountingCoder(catalog=mini_catalog, ml_classifier=ml, ml_confidence_threshold=0.60)
+
+        inv = self._supplier_invoice("xyzzy foobar qux incompréhensible", hash_="ac8")
+        inv = coder.assign(inv)
+
+        assert inv.cost_catalog_id == "logiciels_acquis"
+        assert coder.last_match_pass == "ML"
+        assert coder.last_match_confidence == pytest.approx(0.73)
+
+    def test_ml_below_threshold_is_not_used(self, mini_catalog):
+        from unittest.mock import MagicMock
+
+        ml = MagicMock()
+        ml.is_trained.return_value = True
+        ml.predict.return_value = ("logiciels_acquis", 0.40)
+        coder = AccountingCoder(catalog=mini_catalog, ml_classifier=ml, ml_confidence_threshold=0.60)
+
+        inv = self._supplier_invoice("xyzzy foobar qux incompréhensible", hash_="ac9")
+        inv = coder.assign(inv)
+
+        assert inv.cost_catalog_id is None
+        assert coder.last_match_pass is None
+        assert coder.last_match_confidence is None
+
 

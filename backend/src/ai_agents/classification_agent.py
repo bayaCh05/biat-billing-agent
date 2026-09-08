@@ -38,24 +38,28 @@ class ClassificationAgent(BaseAgent):
             # Direction classification (rule-based, always)
             invoice = self._classifier.classify(invoice)
 
-            # Pass A + B via existing AccountingCoder
+            # Pass A + B via existing AccountingCoder — real confidence/pass
+            # read back from the coder instead of guessed, see
+            # AccountingCoder.last_match_confidence/.last_match_pass.
             invoice = self._coder.assign(invoice)
 
-            pass_used = "CATALOG_FUZZY"
-            conf = 1.0
-
-            # Determine which pass was actually used and its confidence
             if invoice.cost_catalog_id:
-                # Try to detect pass B usage (no direct marker, but ML classifier logs it)
-                pass_used = "CATALOG_FUZZY"
+                is_rules = self._coder.last_match_pass == "RULES"
+                pass_used = "CATALOG_RULES" if is_rules else "CATALOG_ML"
+                conf = self._coder.last_match_confidence
+                if conf is None:
+                    conf = 1.0
             else:
                 pass_used = "NONE"
                 conf = 0.0
 
-            # Pass C: RAG if no match found and not degraded
+            # Pass C: RAG if no match found and not degraded — pass_used comes
+            # from the RAG classifier itself (RAG_LLM only if the LLM actually
+            # confirmed a choice; RAG_TOP_MATCH if it fell back to the raw
+            # embedding match without confirmation).
             if not invoice.cost_catalog_id and not degraded:
                 pass_used = self._try_rag_pass(invoice)
-                conf = 0.5  # RAG result is lower confidence
+                conf = 0.5 if invoice.cost_catalog_id else 0.0
 
             # Revue humaine si la confiance est sous le seuil configurable
             if conf < _CONF_THRESHOLD:
@@ -106,7 +110,7 @@ class ClassificationAgent(BaseAgent):
                     invoice.accounting_label = entry.label
                     invoice.charge_type = entry.type_charge
                     invoice.charge_nature = entry.nature
-                    return "RAG_LLM"
+                    return result.get("pass_used", "RAG_TOP_MATCH")
         except Exception as exc:
             logger.warning("rag_pass_error: %s", exc, exc_info=True)
         return "NONE"

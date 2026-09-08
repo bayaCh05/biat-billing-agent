@@ -40,8 +40,17 @@ class AccountingCoder:
         self.min_score = min_score
         self.ml_classifier = ml_classifier
         self.ml_confidence_threshold = ml_confidence_threshold
+        # Real confidence/pass from the last assign() call — both computed
+        # internally (catalog match score, ML confidence) but previously
+        # discarded by assign()'s InvoiceRecord-only return type. Read these
+        # right after calling assign() (e.g. ClassificationAgent does).
+        self.last_match_confidence: float | None = None
+        self.last_match_pass: str | None = None  # "RULES" | "ML" | None
 
     def assign(self, invoice: InvoiceRecord) -> InvoiceRecord:
+        self.last_match_confidence = None
+        self.last_match_pass = None
+
         flux = self._direction_to_flux(invoice.direction)
         if flux is None:
             return invoice  # UNKNOWN direction — classifier aura déjà flaggé
@@ -49,9 +58,13 @@ class AccountingCoder:
         corpus = self._build_corpus(invoice)
 
         # Passe A : règles par mots-clés
-        entry: CostCatalogEntry | None = self.catalog.match(
+        entry: CostCatalogEntry | None
+        entry, score = self.catalog.match_with_score(
             corpus, flux=flux, min_score=self.min_score
         )
+        if entry:
+            self.last_match_confidence = score / 100.0
+            self.last_match_pass = "RULES"
 
         # Passe B : classificateur ML si la passe A échoue
         if entry is None and self.ml_classifier and self.ml_classifier.is_trained():
@@ -59,6 +72,8 @@ class AccountingCoder:
             if catalog_id and confidence >= self.ml_confidence_threshold:
                 entry = self.catalog.get(catalog_id)
                 if entry:
+                    self.last_match_confidence = confidence
+                    self.last_match_pass = "ML"
                     logger.info(
                         "ml_fallback_used",
                         invoice_id=str(invoice.id),

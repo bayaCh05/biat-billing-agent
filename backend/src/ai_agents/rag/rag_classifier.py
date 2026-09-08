@@ -55,7 +55,10 @@ class RAGClassifier:
 
         raw = OllamaClient.get().complete(prompt, temperature=0.0, max_tokens=80)
         if not raw:
-            return candidates[0] if candidates else None
+            # No LLM confirmation at all — caller must not tag this as RAG_LLM.
+            result = dict(candidates[0])
+            result["pass_used"] = "RAG_TOP_MATCH"
+            return result
 
         import json, re
         try:
@@ -68,5 +71,9 @@ class RAGClassifier:
             result["pass_used"] = "RAG_LLM"
             return result
         except Exception as exc:
-            logger.warning("rag_classifier_parse_error: %s", exc)
-            return candidates[0] if candidates else None
+            # LLM responded but couldn't be parsed — same reasoning, no real
+            # LLM confirmation was actually applied to the chosen entry.
+            logger.warning("rag_classifier_parse_error: %s", exc, exc_info=True)
+            result = dict(candidates[0])
+            result["pass_used"] = "RAG_TOP_MATCH"
+            return result

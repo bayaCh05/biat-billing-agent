@@ -94,8 +94,21 @@ class CostCatalog:
             flux:      restrict candidates to this flux direction
             min_score: minimum score (0-100) to accept a match; below this → None
         """
+        entry, _ = self.match_with_score(text, flux=flux, min_score=min_score)
+        return entry
+
+    def match_with_score(
+        self,
+        text: str,
+        flux: Optional[ChargeFlux] = None,
+        min_score: int = 70,
+    ) -> tuple[Optional[CostCatalogEntry], int]:
+        """Same matching logic as match(), but also returns the winning score
+        (0-100, or 0 if nothing reached min_score) — for callers that need the
+        real confidence, not just the entry (e.g. ClassificationAgent, which
+        used to hardcode a flat confidence instead of using this score)."""
         if not text.strip():
-            return None
+            return None, 0
 
         norm_text = normalise(text)
         candidates = [
@@ -114,7 +127,9 @@ class CostCatalog:
                 best_match_count = match_count
                 best_entry = entry
 
-        return best_entry if best_score >= min_score else None
+        if best_score >= min_score:
+            return best_entry, best_score
+        return None, 0
 
     @staticmethod
     def _score(norm_text: str, entry: CostCatalogEntry) -> tuple[int, int]:
