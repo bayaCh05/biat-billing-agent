@@ -74,7 +74,7 @@ def scan_roadmap_risks(
     from src.ai_agents.risk_agent import RiskAgent
     result = RiskAgent().run({"task": "scan_roadmap"})
     if not result.success:
-        raise HTTPException(500, detail=result.error or "Scan failed")
+        raise HTTPException(500, detail=result.error or "Échec du scan.")
     return result.output
 
 
@@ -94,7 +94,7 @@ def scan_item_risk(
     from src.ai_agents.risk_agent import RiskAgent
     result = RiskAgent().run({"task": "scan_roadmap", "item_id": item_id})
     if not result.success:
-        raise HTTPException(500, detail=result.error or "Scan failed")
+        raise HTTPException(500, detail=result.error or "Échec du scan.")
     return result.output
 
 
@@ -226,11 +226,11 @@ def correct_classification(
     try:
         uid = UUID(invoice_id)
     except ValueError:
-        raise HTTPException(400, "Invalid UUID")
+        raise HTTPException(400, "UUID de facture invalide.")
 
     inv = repo.get_by_id(uid)
     if not inv:
-        raise HTTPException(404, "Invoice not found")
+        raise HTTPException(404, "Facture introuvable.")
 
     original_compte = inv.accounting_compte or ""
     save_classification_feedback_sync(
