@@ -1,6 +1,17 @@
 # Rules to determine invoice direction (CLIENT or SUPPLIER).
 # Rules are evaluated top-to-bottom; first match wins.
-# ASSUMPTION: BIAT IT's own matricule fiscal must be confirmed and filled in below.
+#
+# ⚠️  UNCONFIRMED PLACEHOLDER — NOT VALIDATED FOR PRODUCTION (2026-09-08) ⚠️
+# The prefix "0000217" used below for BIAT IT's own matricule fiscal has
+# never been confirmed as correct — it is a placeholder value, not a
+# verified one. Direction classification for every invoice depends on it
+# (see biat_it_as_recipient / biat_it_as_issuer below): a wrong prefix here
+# would silently misroute SUPPLIER vs CLIENT classification upstream of
+# everything else, with no error raised (a mismatch just falls through to
+# the name-based fallback rules, or to UNKNOWN). Do not treat "0000217" as
+# a confirmed value without checking it against BIAT IT's real matricule
+# fiscal first — this has been raised, not guessed or fixed here, since the
+# real value isn't available to whoever last edited this file.
 
 direction_rules:
   - name: biat_it_as_recipient
