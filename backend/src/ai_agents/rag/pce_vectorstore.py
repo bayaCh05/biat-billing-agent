@@ -51,7 +51,16 @@ class PCEVectorStore:
         try:
             import chromadb
             os.makedirs(_CHROMADB_PATH, exist_ok=True)
-            self._client = chromadb.PersistentClient(path=_CHROMADB_PATH)
+            # anonymized_telemetry defaults to True in chromadb's own Settings —
+            # currently a no-op only because this chromadb version's posthog
+            # integration is a stub and the posthog package isn't installed,
+            # not because it's disabled here. Explicit opt-out so a future
+            # chromadb upgrade can't silently start phoning home — data
+            # residency requirement, see CLAUDE.md.
+            self._client = chromadb.PersistentClient(
+                path=_CHROMADB_PATH,
+                settings=chromadb.Settings(anonymized_telemetry=False),
+            )
             self._pce_col = self._client.get_or_create_collection(
                 name=_PCE_COLLECTION,
                 metadata={"hnsw:space": "cosine"},

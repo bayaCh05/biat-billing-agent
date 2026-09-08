@@ -72,6 +72,15 @@ class TestSingletonAndInitClient:
             store = PCEVectorStore()
         assert store.available is False
 
+    def test_telemetry_explicitly_disabled(self):
+        """Data residency (CLAUDE.md) — chromadb's anonymized_telemetry
+        defaults to True; must be explicitly opted out, not left to
+        incidental non-network-calling behavior of the installed version."""
+        with patch("chromadb.PersistentClient") as mock_client:
+            PCEVectorStore()
+        _, kwargs = mock_client.call_args
+        assert kwargs["settings"].anonymized_telemetry is False
+
 
 class TestInitializePCE:
     def test_unavailable_store_is_noop(self):
