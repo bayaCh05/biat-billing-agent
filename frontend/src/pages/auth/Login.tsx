@@ -71,31 +71,6 @@ export default function Login() {
           <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.55)', maxWidth: 280 }}>
             Traitement automatisé des factures fournisseurs et facturation client pour BIAT IT, Tunisie.
           </p>
-
-          {/* Demo hint */}
-          <div className="rounded-xl p-4 mt-2" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <p className="text-xs font-semibold mb-2" style={{ color: '#F0A600' }}>Comptes démo</p>
-            {[
-              { role: 'Comptable',      email: 'comptable@biat-it.tn' },
-              { role: 'Chef de Projet', email: 'chef@biat-it.tn' },
-              { role: 'Direction',      email: 'directeur@biat-it.tn' },
-              { role: 'Admin',          email: 'admin@biat-it.tn' },
-            ].map(d => (
-              <button
-                key={d.role}
-                type="button"
-                onClick={() => setEmail(d.email)}
-                className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-white/10 transition-all"
-                style={{ color: 'rgba(255,255,255,0.7)' }}
-              >
-                <span style={{ color: '#5BA3C9' }}>{d.role}</span>
-                {' — '}{d.email}
-              </button>
-            ))}
-            <p className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.4)' }}>
-              Mot de passe défini dans DEMO_*_PASSWORD (.env)
-            </p>
-          </div>
         </div>
       </div>
 

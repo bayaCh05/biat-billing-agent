@@ -627,7 +627,7 @@ class TestRequestOtp:
             get_user_by_email_native=AsyncMock(return_value=user),
             generate_otp_native=generate_mock,
         )
-        assert result["skip_otp"] is False
+        assert "message" in result
         generate_mock.assert_called_once()
 
     def test_user_not_found_raises_404(self):

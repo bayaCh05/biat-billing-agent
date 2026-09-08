@@ -54,7 +54,6 @@ export default function ChangerMotDePassePage() {
 
   const [step, setStep]             = useState<Step>('request')
   const [maskedEmail, setMaskedEmail] = useState(() => maskEmail(getEmailFromToken()))
-  const [skipOtp, setSkipOtp]       = useState(false)
 
   // OTP step
   const [otp, setOtp]               = useState(['', '', '', '', '', ''])
@@ -101,19 +100,13 @@ export default function ChangerMotDePassePage() {
     try {
       const res = await requestOtp()
       if (res.masked_email) setMaskedEmail(res.masked_email)
-      if (res.skip_otp) {
-        setSkipOtp(true)
-        setStep('password')
-      } else {
-        setSkipOtp(false)
-        // eslint-disable-next-line react-hooks/purity -- inside an async click handler, never during render
-        sentAt.current = Date.now()
-        setCountdown(600)
-        setResendIn(60)
-        setOtp(['', '', '', '', '', ''])
-        setStep('otp')
-        setTimeout(() => otpRefs[0].current?.focus(), 80)
-      }
+      // eslint-disable-next-line react-hooks/purity -- inside an async click handler, never during render
+      sentAt.current = Date.now()
+      setCountdown(600)
+      setResendIn(60)
+      setOtp(['', '', '', '', '', ''])
+      setStep('otp')
+      setTimeout(() => otpRefs[0].current?.focus(), 80)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur lors de la demande.')
     } finally {
@@ -179,7 +172,7 @@ export default function ChangerMotDePassePage() {
 
     setLoading(true)
     try {
-      await confirmOtp(skipOtp ? null : otpCode, newPw)
+      await confirmOtp(otpCode, newPw)
       const wasFirst = forcePasswordChange
       clearForcePasswordChange()
       setStep('success')
@@ -187,8 +180,7 @@ export default function ChangerMotDePassePage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Code incorrect ou expiré.'
       setError(msg)
-      // Send real users back to re-enter OTP; demo users stay on password step
-      if (!skipOtp && (msg.toLowerCase().includes('code') || msg.includes('expiré'))) {
+      if (msg.toLowerCase().includes('code') || msg.includes('expiré')) {
         setOtp(['', '', '', '', '', ''])
         setStep('otp')
       }
@@ -360,19 +352,11 @@ export default function ChangerMotDePassePage() {
         {/* ── STEP 3: New password ────────────────────────────────────── */}
         {step === 'password' && (
           <form onSubmit={handleConfirm} className="space-y-4">
-            {skipOtp ? (
-              <div className="rounded-lg px-3 py-2.5 text-xs flex items-center gap-2"
-                style={{ background: '#FFF8E7', color: '#92610A', border: '1px solid #F0A500', borderRadius: 8 }}>
-                <span style={{ fontSize: 14 }}>ℹ️</span>
-                Compte de démonstration — la vérification par email est désactivée.
-              </div>
-            ) : (
-              <div className="rounded-lg px-3 py-2 text-xs flex items-center gap-2"
-                style={{ background: '#E8F5F0', color: '#1D9E76' }}>
-                <CheckCircle size={13} />
-                Code vérifié — choisissez votre nouveau mot de passe
-              </div>
-            )}
+            <div className="rounded-lg px-3 py-2 text-xs flex items-center gap-2"
+              style={{ background: '#E8F5F0', color: '#1D9E76' }}>
+              <CheckCircle size={13} />
+              Code vérifié — choisissez votre nouveau mot de passe
+            </div>
 
             <div>
               <label className="block text-xs font-medium mb-1" style={{ color: '#374151' }}>
@@ -460,12 +444,10 @@ export default function ChangerMotDePassePage() {
               {loading ? 'Enregistrement…' : 'Confirmer'}
             </button>
 
-            {!skipOtp && (
-              <button type="button" onClick={() => { setError(''); setOtp(['', '', '', '', '', '']); setStep('otp') }}
-                className="w-full text-xs hover:underline" style={{ color: '#5BA3C9' }}>
-                ← Modifier le code OTP
-              </button>
-            )}
+            <button type="button" onClick={() => { setError(''); setOtp(['', '', '', '', '', '']); setStep('otp') }}
+              className="w-full text-xs hover:underline" style={{ color: '#5BA3C9' }}>
+              ← Modifier le code OTP
+            </button>
           </form>
         )}
 

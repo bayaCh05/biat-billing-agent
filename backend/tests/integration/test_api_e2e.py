@@ -858,7 +858,6 @@ class TestSessionRevocationOnPasswordChange:
 
         r = client.post("/api/auth/change-password/request-otp", headers=_auth(token_a))
         assert r.status_code == 200, r.text
-        assert r.json()["skip_otp"] is False
 
         otp_code = self._get_password_verification_secret(user_id, "OTP")
         r2 = client.post("/api/auth/change-password/confirm", headers=_auth(token_a), json={

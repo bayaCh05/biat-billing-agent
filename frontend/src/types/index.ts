@@ -262,7 +262,6 @@ export interface AdminUser {
   is_first_login: boolean
   is_active: boolean
   created_at: string
-  is_demo?: boolean
 }
 
 export interface NotificationItem {

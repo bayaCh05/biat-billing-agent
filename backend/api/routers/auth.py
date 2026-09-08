@@ -84,7 +84,10 @@ class ChangePasswordRequest(BaseModel):
 
 
 class ConfirmOtpRequest(BaseModel):
-    otp_code: str | None = None   # optional: skipped for demo accounts
+    # Optional at the Pydantic level so confirm_otp() below can distinguish
+    # "not provided" from "provided but wrong" and return a specific 400
+    # instead of a generic validation error — always required at runtime.
+    otp_code: str | None = None
     new_password: str
     current_password: str | None = None
 
@@ -592,7 +595,6 @@ async def request_otp(
             ip_address=_ip(request), user_agent=_ua(request),
         ))
         return {
-            "skip_otp": False,
             "message": "Code de vérification envoyé par email.",
             "masked_email": _mask_email(email),
         }
@@ -629,7 +631,7 @@ async def confirm_otp(
             raise HTTPException(400, "Mot de passe actuel incorrect.")
 
         if not body.otp_code:
-            raise HTTPException(400, "Code OTP requis pour les comptes réels.")
+            raise HTTPException(400, "Code OTP requis.")
 
         valid = await verify_otp_native(str(user.id), body.otp_code)
         if not valid:

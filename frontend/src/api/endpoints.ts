@@ -354,7 +354,7 @@ export const closeRisk = (id: string) =>
 // ── Password verification (OTP + reset link) ─────────────────────────────────
 
 export const requestOtp = () =>
-  apiFetch<{ message: string; masked_email?: string; skip_otp?: boolean }>('/auth/change-password/request-otp', {
+  apiFetch<{ message: string; masked_email?: string }>('/auth/change-password/request-otp', {
     method: 'POST',
     body: JSON.stringify({}),
   })

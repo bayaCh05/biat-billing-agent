@@ -42,7 +42,6 @@ class UserOut(BaseModel):
     is_first_login: bool
     is_active: bool
     created_at: str
-    is_demo: bool = False
 
 
 @router.post(
