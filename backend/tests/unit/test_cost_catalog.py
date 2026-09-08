@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -105,6 +106,58 @@ class TestCatalogLoading:
             pytest.skip("config/cost_catalog.yaml not found")
         cat = CostCatalog.from_yaml(CATALOG_PATH)
         assert len(cat) > 20, "Le catalogue de production doit avoir au moins 20 entrées"
+
+
+# ── Validation tva_rate au chargement ───────────────────────────────────────────
+
+class TestCatalogTvaValidation:
+    """tva_rates_allowed est optionnel — quand fourni, chaque tva_rate du
+    catalogue est comparé (comportement précédent : aucune validation,
+    tva_rate par défaut à 19% en silence si absent du YAML)."""
+
+    def test_no_tva_rates_allowed_skips_validation(self, tmp_path, monkeypatch):
+        """Paramètre omis (comportement par défaut, inchangé) : aucune
+        validation, aucun log, même avec un taux non tunisien."""
+        from src.cost_catalog import catalog as catalog_module
+        mock_warning = MagicMock()
+        monkeypatch.setattr(catalog_module.logger, "warning", mock_warning)
+
+        bad_yaml = _YAML_CONTENT.replace("tva_rate: 19", "tva_rate: 18", 1)
+        yaml_file = tmp_path / "bad.yaml"
+        yaml_file.write_text(bad_yaml, encoding="utf-8")
+
+        cat = CostCatalog.from_yaml(yaml_file)  # tva_rates_allowed omitted
+
+        assert len(cat) == 5
+        mock_warning.assert_not_called()
+
+    def test_valid_rates_no_warning(self, tmp_path, monkeypatch):
+        from src.cost_catalog import catalog as catalog_module
+        mock_warning = MagicMock()
+        monkeypatch.setattr(catalog_module.logger, "warning", mock_warning)
+
+        yaml_file = tmp_path / "valid.yaml"
+        yaml_file.write_text(_YAML_CONTENT, encoding="utf-8")  # all entries at tva_rate: 19
+        CostCatalog.from_yaml(yaml_file, tva_rates_allowed=[0, 7, 13, 19])
+
+        mock_warning.assert_not_called()
+
+    def test_invalid_rate_logs_warning_but_does_not_raise(self, tmp_path, monkeypatch):
+        from src.cost_catalog import catalog as catalog_module
+        mock_warning = MagicMock()
+        monkeypatch.setattr(catalog_module.logger, "warning", mock_warning)
+
+        bad_yaml = _YAML_CONTENT.replace("tva_rate: 19", "tva_rate: 18", 1)
+        yaml_file = tmp_path / "bad.yaml"
+        yaml_file.write_text(bad_yaml, encoding="utf-8")
+
+        cat = CostCatalog.from_yaml(yaml_file, tva_rates_allowed=[0, 7, 13, 19])
+
+        mock_warning.assert_called_once()
+        assert mock_warning.call_args.kwargs["tva_rate"] == 18.0
+        # The suspect rate is kept as-is (not silently coerced to a valid one)
+        # — the entry is still usable, only flagged for a human to review.
+        assert any(e.tva_rate == 18.0 for e in cat.all_entries())
 
 
 # ── Correspondance (match) ────────────────────────────────────────────────────

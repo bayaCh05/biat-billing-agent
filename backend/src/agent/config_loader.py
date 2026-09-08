@@ -93,7 +93,10 @@ def build_ai_components(
     )
 
     classification_rules = load_rules(cfg["classification"]["rules_file"])
-    cost_catalog = CostCatalog.from_yaml(cfg["classification"]["cost_catalog_file"])
+    cost_catalog = CostCatalog.from_yaml(
+        cfg["classification"]["cost_catalog_file"],
+        tva_rates_allowed=cfg.get("validation", {}).get("tva_rates_allowed"),
+    )
     ml_classifier = MLClassifier(
         model_path=cfg["classification"].get("ml_model_path", "data/ml_model.joblib")
     )

@@ -27,6 +27,9 @@ from rapidfuzz import fuzz
 
 from src.classification.matcher import normalise
 from src.models.enums import ChargeFlux, ChargeNature, ChargeType, Recurrence
+from src.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -56,10 +59,31 @@ class CostCatalog:
     # ── Loading ───────────────────────────────────────────────────────────────
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "CostCatalog":
+    def from_yaml(
+        cls, path: str | Path, tva_rates_allowed: list[float] | None = None,
+    ) -> "CostCatalog":
+        """`tva_rates_allowed` (e.g. settings.yaml's validation.tva_rates_allowed,
+        [0, 7, 13, 19] for Tunisia) is optional — when given, each entry's
+        indicative `tva_rate` is checked against it at load time and a
+        warning logged on mismatch, instead of silently accepting a typo'd
+        rate (this used to default to 19% with no validation at all).
+        Never rejects loading — the catalog entry is still usable even with
+        a suspect rate, since `entry_generator.py` never actually reads
+        this field for real journal amounts (only the invoice's own
+        extracted tva_rate does, already validated by CoherenceChecker)."""
         with open(path, encoding="utf-8") as f:
             raw = yaml.safe_load(f)
         entries = [cls._parse_entry(item) for item in raw.get("entries", [])]
+        if tva_rates_allowed is not None:
+            allowed = {float(r) for r in tva_rates_allowed}
+            for entry in entries:
+                if entry.tva_rate not in allowed:
+                    logger.warning(
+                        "cost_catalog_tva_rate_not_allowed",
+                        catalog_id=entry.id,
+                        tva_rate=entry.tva_rate,
+                        allowed=sorted(allowed),
+                    )
         return cls(entries)
 
     @staticmethod
