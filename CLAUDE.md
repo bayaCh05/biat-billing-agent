@@ -144,7 +144,6 @@ models → storage → cost_catalog
        → billing
        → budget
        → capex
-       → suivi
        → ai_agents/          ← InvoiceProcessingOrchestrator + its 4 sync agents
        → api/                ← FastAPI routers
 frontend/                    ← separate React/Vite app, calls api/ over HTTP
@@ -245,26 +244,26 @@ src/
   billing/               # client invoice generation + PDF (fpdf2); client_invoice_store.py's
                           # ClientInvoiceRepository (SQLAlchemy) has zero callers anywhere,
                           # including tests — dead code, superseded by SyncMongoClientInvoiceRepository
-  budget/                # BudgetTracker, CostAnalyzer — both SQLAlchemy, zero live callers,
-                          # kept only for their own tests (same pattern as suivi/ below) —
-                          # superseded by the Mongo KPI/variance helpers in sync_mongo_repository.py
+  budget/                # budget_plan.py — BudgetPlan/BudgetLine/MonthlyVariance/YearVariance,
+                          # loaded by api/routers/budget.py via get_budget_plan(). BudgetTracker/
+                          # CostAnalyzer (SQLAlchemy, zero live callers) deleted 2026-07 —
+                          # superseded by budget_summary_mongo() in service_bridge.py
   capex/                 # DepreciationCalculator (linear/degressive), AssetRepository —
                           # AssetRepository (SQLAlchemy) has zero live callers, kept only for
                           # its own tests — superseded by SyncMongoAssetRepository
-  suivi/                 # aggregator, lifecycle_tracker (orphaned since the daemon/Streamlit
-                          # removal — zero live callers, kept only for its own tests), reconciler
-  notifications/
-    notification_service.py  # NotificationService (SQLAlchemy) — dead code, zero callers
-                              # anywhere including tests. GET /notifications/* is actually served
-                              # by sync_flagged_invoices_mirrored() in service_bridge.py (see
-                              # "MongoDB Migration Status")
+  # suivi/ deleted 2026-07 (aggregator, lifecycle_tracker, reconciler — orphaned since the
+  # daemon/Streamlit removal, zero live callers). The api/routers/suivi.py router still
+  # exists and is Mongo-native — unrelated to this deleted src/suivi/ module.
+  # notifications/ deleted 2026-07 (notification_service.py — SQLAlchemy, zero live callers
+  # anywhere including tests). GET /notifications/* is actually served by
+  # sync_flagged_invoices_mirrored() in service_bridge.py (see "MongoDB Migration Status")
   query/
     nl_query_engine.py   # NLQueryEngine — NL → MongoDB aggregation pipeline (POST /nl-query)
   services/              # risk_service.py (calculate_criticite), ldap_service.py,
                           # email_service.py, audit_service.py (IP/UA helpers only — see
-                          # "MongoDB Migration Status" re: log_action()),
-                          # password_verification_service.py — ldif_parser.py and
-                          # mock_ldap_auth.py deleted (Lot C, 2026-07, zero live callers)
+                          # "MongoDB Migration Status" re: log_action()). ldif_parser.py,
+                          # mock_ldap_auth.py (Lot C, 2026-07) and password_verification_service.py
+                          # (2026-07-15, demo-account removal) all deleted — zero live callers
   utils/
     date_utils.py        # last_day_of_month(), last_day_int()
     logging.py           # structlog setup
@@ -414,11 +413,6 @@ are relative to `backend/`.
 
 ### What's still SQLite-only (do not assume these are in Mongo)
 
-- **`main.py`'s demo-user reseeding** (`seed_demo_users`/`refresh_demo_passwords`,
-  run on every startup) — writes SQLite `users`. Since login is Mongo-native now
-  and the daemon/Streamlit are gone (deleted, see Architecture path note), this
-  looks like dead weight rather than something to preserve — a deletion
-  candidate, not a migration target, still not removed.
 - **`api/routers/audit.py::compute_integrity_summary`**'s one-time HMAC backfill
   (`session.commit()` after backfilling `row_hash` on any pre-HMAC-era SQLite row
   still `NULL`) — as of 2026-07, 0 rows have `NULL` `row_hash` anymore (the
@@ -640,9 +634,10 @@ journal_repo.save(entry)
 
 ### Budget
 ```python
+# BudgetTracker/CostAnalyzer (SQLAlchemy) were removed 2026-07 — the live path is:
 plan = BudgetPlan.from_yaml("config/budget_plan.yaml")
-tracker = BudgetTracker(plan=plan, session=session)
-summary = tracker.summary(year=2026, through_month=6)
+result = await budget_summary_mongo(plan, year=2026, month=6)  # service_bridge.py
+summary, variances = result["summary"], result["variances"]
 # summary keys: total_budget_ytd, total_actual_ytd, variance_pct, lines_over_budget
 ```
 
@@ -684,9 +679,10 @@ the exporters that backed it were also deleted):
 processed invoice — set directly by `InvoiceProcessingOrchestrator`'s accounting step, no
 intermediate `JOURNALING`. `EXPORTED` still appears in code that reads
 historical/legacy data (`ml_classifier.py`'s training-label set,
-`suivi/reconciler.py`, `suivi/aggregator.py`, `scheduler.py`'s retrain job
-all still treat it as "successfully processed" alongside `VALIDATED`/
-`JOURNALED`/`PAID`) but nothing in the live path produces it anymore.
+`scheduler.py`'s retrain job — both still treat it as "successfully processed"
+alongside `VALIDATED`/`JOURNALED`/`PAID`) but nothing in the live path produces
+it anymore. (`suivi/reconciler.py`/`suivi/aggregator.py`, previously cited here
+too, were deleted in the `suivi/` removal — see Project Structure.)
 
 Terminal statuses (pipeline stops): `FLAGGED, ESCALATED, ERROR, REJECTED, EXTRACTION_FAILED`
 
@@ -743,9 +739,9 @@ storage:
 - The SQLAlchemy `InvoiceRepository` (`storage/repository.py`) is imported
   by `api/routers/review.py` (a deliberately-kept, live exception — see
   "MongoDB Migration Status") — its test mock must include
-  `count_by_status` and `count_auto_approved`. It's also imported locally
-  by `notifications/notification_service.py`, but that module itself has
-  zero live callers (see Project Structure) — not a second live call site.
+  `count_by_status` and `count_auto_approved`. (It used to also be imported
+  by `notifications/notification_service.py`, a second dead-code call site —
+  that whole module was deleted 2026-07, see Project Structure.)
 - No `pytest-asyncio`/`pytest-anyio` plugin actually installed despite being a
   listed dependency — drive async code via `asyncio.run(coro)` in plain sync
   test functions, not `async def test_...`.

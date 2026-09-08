@@ -27,12 +27,19 @@ was last synced — do not look for it.
 | Ollama | latest |
 | MongoDB | via `docker compose up -d mongo` (primary DB — see step 3) |
 
-**Two databases are required, not one.** MongoDB is primary for almost
-everything (invoices, journal entries, users, roadmap, budget, audit log,
-...). SQLite (via SQLAlchemy/Alembic) is still required too — several
-routers (`audit.py`, `review.py`, `security.py`, others) have live,
-deliberately-kept SQL-backed code paths that haven't been migrated yet. Skip
-either one and parts of the app will fail or silently show stale/empty data.
+**Two databases are required, not one.** MongoDB (via Motor/Beanie ODM) is
+primary for almost everything (invoices, journal entries, users, roadmap,
+budget, audit log, ...). SQLite (via SQLAlchemy/Alembic) is still required
+too — several routers (`audit.py`, `review.py`, `security.py`, others) have
+live, deliberately-kept SQL-backed code paths that haven't been migrated
+yet. Skip either one and parts of the app will fail or silently show
+stale/empty data.
+
+A third, local-only store, **ChromaDB** (with `sentence-transformers` for
+embeddings), backs the RAG layer — classification Pass C, AnomalyAgent
+semantic duplicate detection, and AuditAgent's narrative incident lookup.
+It needs no separate setup: it's an embedded, file-backed vector store
+(no server/container of its own).
 
 ---
 
@@ -90,6 +97,15 @@ Seed options:
 python scripts/seed_demo.py            # idempotent upsert (default — safe to re-run, does not wipe)
 python scripts/seed_demo.py --append   # kept only for CLI compatibility; no effect (writes are always idempotent now)
 python scripts/seed_demo.py --dry-run  # validate imports only, no writes
+```
+
+Secondary seeders (also Mongo-native, idempotent — run after `seed_demo.py`,
+each targets a distinct domain):
+```bash
+python scripts/seed_budget_actuals.py  # budget line actuals + one journal entry per invoice
+python scripts/seed_projects.py        # charte/phases for the 3 demo projects
+python scripts/seed_risks.py           # risks for the 3 demo projects
+python scripts/seed_roadmap.py         # roadmap items + livrables
 ```
 
 To reset back to a clean demo state (e.g. before a rehearsal/demo, if the
@@ -260,8 +276,9 @@ internship_biat/
 │   │   │   ├── invoice_processing_orchestrator.py  # InvoiceProcessingOrchestrator — the real invoice-processing entry point
 │   │   │   ├── extraction_agent.py, classification_agent.py,
 │   │   │   │   anomaly_agent.py, accounting_agent.py   # the 4 sequential agents
-│   │   │   ├── risk_agent.py, insight_agent.py  # roadmap risk scan, health-summary
-│   │   │   ├── rag/          # PCE vector store for duplicate detection
+│   │   │   ├── risk_agent.py, insight_agent.py, audit_agent.py  # roadmap risk scan,
+│   │   │   │   health-summary, periodic cross-entity audit (AuditSnapshotDocument)
+│   │   │   ├── rag/          # ChromaDB (embedded, PersistentClient) + sentence-transformers
 │   │   │   ├── base_agent.py # BaseAgent abstract class
 │   │   │   ├── ollama_client.py  # OllamaClient singleton
 │   │   │   └── agent_schemas.py  # AgentResult, OrchestratorResult, PipelineStep
@@ -272,7 +289,7 @@ internship_biat/
 │   │   ├── validation/       # field, coherence, duplicate, anomaly checks
 │   │   ├── accounting/       # double-entry journal entry generator
 │   │   ├── billing/          # client invoice generation
-│   │   ├── budget/           # BudgetTracker (planned vs actual)
+│   │   ├── budget/           # BudgetPlan (planned vs actual, Mongo-native comparison)
 │   │   └── capex/            # depreciation (linear/degressive), AssetRepository
 │   └── tests/
 │       ├── unit/             # 52 files, mocked deps
