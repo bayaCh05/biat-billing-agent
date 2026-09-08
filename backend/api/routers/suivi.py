@@ -4,14 +4,23 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from api.auth import require_role
 from api.schemas import InvoiceSummary
 
 router = APIRouter(prefix="/suivi", tags=["analytics"])
 
 _log = logging.getLogger(__name__)
+
+# Mêmes rôles que la page Suivi côté frontend (Sidebar.tsx: roles: ['Comptable',
+# 'Chef de Projet']) — auparavant ce routeur n'avait aucune restriction de rôle
+# côté backend du tout. Direction/Admin ne voient pas ce lien dans la nav —
+# ils ont leur propre vue équivalente via /kpi — donc ne pas les ajouter ici
+# reproduirait l'intention déjà établie côté frontend plutôt que d'en créer une
+# nouvelle incohérence dans l'autre sens.
+_VIEW = Depends(require_role("Comptable", "Chef de Projet"))
 
 
 class AgeingBucketOut(BaseModel):
@@ -77,8 +86,9 @@ def _build_ageing(invoices, today: date) -> AgeingBucketOut:
         "listes détaillées des factures en attente de paiement, de recouvrement et en retard."
     ),
     response_description="Snapshot complet avec buckets d'ageing et listes de factures",
+    responses={403: {"description": "Rôle Comptable ou Chef de Projet requis"}},
 )
-async def get_snapshot():
+async def get_snapshot(_: dict = _VIEW):
     from src.storage.documents.service_bridge import get_suivi_invoices_mongo
 
     today = datetime.now(tz=timezone.utc).date()
